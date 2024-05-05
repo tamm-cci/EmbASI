@@ -9,8 +9,9 @@ class CallbackGenerator():
   # GAB: Generates commonly needed callbacks for a given array
   # and provides an array to dump the relevant property.
 
-  def  __init__(self):
+  def  __init__(self, sl):
 
+    self.sl = sl
     self.data_array=None
     # Get shape of data
     self.shape=None
@@ -25,7 +26,7 @@ class CallbackGenerator():
 
     try:
         if descr:
-            descr = sl.wrap_blacs_desc(descr)
+            descr = self.sl.wrap_blacs_desc(descr)
             if descr.is_distributed:
                 #parprint("distributed case not implemented")
                 return # TODO distributed case not implemented
@@ -47,7 +48,7 @@ class CallbackGenerator():
     try:
         is_distributed=False
         if descr:
-            descr = sl.wrap_blacs_desc(descr)
+            descr = self.sl.wrap_blacs_desc(descr)
             if descr.is_distributed:
                 is_distributed = True
                 is_root = (descr.myrow==0 and descr.mycol==0)
@@ -61,7 +62,7 @@ class CallbackGenerator():
           self.data_array = None
 
         if is_distributed:
-            sl.scatter(self.data_array, descr, data)
+            self.sl.scatter(self.data_array, descr, data)
         else:
             data[:, :] = self.data_array
 

@@ -1,0 +1,13 @@
+dict(charge_mix_param=0.5,
+     collect_eigenvectors=True,
+     density_update_method='density_matrix',
+     mixer='pulay',
+     n_max_pulay=10,
+     occupation_type='gaussian 0.01',
+     postprocess_anyway=True,
+     qm_embedding_calc=2,
+     sc_accuracy_eev=0.001,
+     sc_accuracy_etot=1e-06,
+     sc_accuracy_rho=1e-05,
+     sc_iter_limit=0,
+     xc='pbe')
