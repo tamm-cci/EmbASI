@@ -121,9 +121,9 @@ class AtomsEmbed():
                                         self.atoms,
                                         work_dir=self.outdir)
 
-        self.atoms.calc.asi.keep_hamiltonian = True
+        #self.atoms.calc.asi.keep_hamiltonian = True
         self.atoms.calc.asi.keep_overlap = True
-        self.atoms.calc.asi.keep_density_matrix = True
+        #self.atoms.calc.asi.keep_density_matrix = True
 
         self.atoms.calc.asi.dm_storage = {}
         self.atoms.calc.asi.dm_calc_cnt = {}
@@ -133,14 +133,13 @@ class AtomsEmbed():
         self.atoms.calc.asi.ham_storage = {}
         self.atoms.calc.asi.ham_calc_cnt = {}
         self.atoms.calc.asi.ham_count = 0
-        self.atoms.calc.asi.register_hamiltonian_callback(ham_saving_callback, (self.atoms.calc.asi, self.atoms.calc.asi.ham_storage, self.atoms.calc.asi.ham_calc_cnt, 'Ha,m calc'))
+        self.atoms.calc.asi.register_hamiltonian_callback(ham_saving_callback, (self.atoms.calc.asi, self.atoms.calc.asi.ham_storage, self.atoms.calc.asi.ham_calc_cnt, 'Ham calc'))
 
         if load_dm is not None:
             'TODO: Actual type enforcemenet and error handling'
             self.atoms.calc.asi.init_density_matrix = {(1,1): load_dm}
         if load_ham is not None:
-            raise Exception("Loading of hamiltonian matrix unavailable in ASI")
-            self.atoms.calc.asi.init_ham = load_ham
+            self.atoms.calc.asi.init_hamiltonian = {(1,1): load_ham}
         if load_s is not None:
             raise Exception("Loading of overlap matrix unavailable in ASI.")
             self.atoms.calc.asi.init_s = load_s
@@ -148,4 +147,6 @@ class AtomsEmbed():
         E0 = self.atoms.get_potential_energy()
 
         print(f'E0={E0:.6f}')
+        self.total_energy = E0
+
         self.atoms.calc.asi.close()
