@@ -72,7 +72,7 @@ class AtomsEmbed():
 
     def reorder_atoms_from_embed_mask(self):
         """
-        We must re-order the atoms
+        Re-orders atoms to push those in embedding region 1 to the beginning
         :return:
         """
 
@@ -81,7 +81,6 @@ class AtomsEmbed():
         "Check if embedding mask is in the correct order (e.g., [1,1,1,2,2,2])"
         "Ensure the next value is always ge than the current"
         idx_list = np.argsort(self.embed_mask)
-        print(f"EMBED {self.embed_mask}")
         sort_embed_mask = np.sort(self.embed_mask)
 
         self.embed_mask = sort_embed_mask
@@ -108,12 +107,39 @@ class AtomsEmbed():
             lines = "".join(lines)
             fil.write(lines)
 
-    def run(self, load_dm=None, load_ham=None, load_s=None):
-        """Actually performed a given simulation run for the calcualtor.
+    def extract_results(self):
+        """
+        Extracts results from the DFT code output file that are otherwise unavailable
+        within the ASE framework. This may need a separate module if other calculators are
+        implemented.
+        """
+
+        with open('./'+self.outdir+'/asi.log') as output:
+            
+            lines = output.readlines()
+            for line in lines:
+                outline = line.split()
+
+                if '  | Kinetic energy                :' in line:
+                    self.kinetic_energy = float(outline[6])
+
+                if '  | Electrostatic energy          :' in line:
+                    self.es_energy = float(outline[6])
+
+                if '  | Sum of eigenvalues            :' in line:
+                    self.ev_sum = float(outline[7])
+
+
+
+    def run(self, load_dm=None, load_ham=None, load_s=None, ev_corr_scf=False):
+        """Actually performed a given simulation run for the calculator.
             Must be separated for indidividual system calls."""
         import os
+        import numpy as np
         from mpi4py import MPI
         from asi4py.asecalc import ASI_ASE_calculator
+
+        print(f'Calculation {self.outdir}...')
 
         self.atoms.calc = ASI_ASE_calculator(os.environ['ASI_LIB_PATH'],
                                         self.calc_initializer,
@@ -136,7 +162,7 @@ class AtomsEmbed():
         self.atoms.calc.asi.register_hamiltonian_callback(ham_saving_callback, (self.atoms.calc.asi, self.atoms.calc.asi.ham_storage, self.atoms.calc.asi.ham_calc_cnt, 'Ham calc'))
 
         if load_dm is not None:
-            'TODO: Actual type enforcemenet and error handling'
+            'TODO: Actual type enforcement and error handling'
             self.atoms.calc.asi.init_density_matrix = {(1,1): load_dm}
         if load_ham is not None:
             self.atoms.calc.asi.init_hamiltonian = {(1,1): load_ham}
@@ -146,7 +172,35 @@ class AtomsEmbed():
 
         E0 = self.atoms.get_potential_energy()
 
-        print(f'E0={E0:.6f}')
+        self.n_basis = self.atoms.calc.asi.n_basis
+        self.basis_atoms = self.atoms.calc.asi.basis_atoms
+
         self.total_energy = E0
+        self.extract_results()
+
+        # Within the embedding workflow, we often want to calculate the total energy for a
+        # given density matrix without performing any SCF steps. Often, this includes using
+        # an input electron density constructed from a localised set of MOs for a fragment
+        # of a supermolecule. This density will be far from the ground-state density for the fragment, 
+        # meaning the output eigenvalues significantly deviate from those of a fully converged density.
+        # As the vast majority of DFT codes with the KS-eigenvalues to determine the total
+        # energy, the total energies due to the eigenvalues do not formally reflect the 
+        # density matrix of the initial input for iteration, n=0:
+        #
+        #    \gamma^{n+1} * H^{total}[\gamma^{n}] \= \gamma^{n} * H^{total}[\gamma^{n}], 
+        #
+        # For TE-only calculations, we do not care about the SCF process - we are treating the
+        # DFT code as a pure integrator of the XC and electrostatic energies. As such, we 
+        # 'correct' the eigenvalue portion of the total energy to reflect the interaction
+        # of the input density matrix, as opposed to the first set of KS-eigenvectors resulting
+        # from the DFT code.
+        if ev_corr_scf:
+            tot_idx = self.atoms.calc.asi.ham_count
+            ham = self.atoms.calc.asi.ham_storage.get((tot_idx,1,1))
+            self.ev_corr_energy = 27.211384500 * np.trace(load_dm @ ham)
+
+            self.ev_corr_total_energy = self.total_energy - self.ev_sum + self.ev_corr_energy
+            print(self.ev_sum)
+            print(self.ev_corr_energy)
 
         self.atoms.calc.asi.close()
