@@ -1,36 +1,38 @@
 from asi4py.asecalc import ASI_ASE_calculator
+from ASI_embedding.parallel_utils import root_print
+from mpi4py import MPI
 from ctypes import cdll, CDLL, RTLD_GLOBAL
 from ctypes import POINTER, byref, c_int, c_int64, c_int32, c_bool, c_char_p, c_double, c_void_p, CFUNCTYPE, py_object, cast, byref
 import ctypes
 
-def dm_saving_callback(aux, iK, iS, descr, data):
-    asi, storage_dict, cnt_dict, label = cast(aux, py_object).value
-    asi.dm_count +=1
-    #try:
-    data = asi.scalapack.gather_numpy(descr, data, (asi.n_basis, asi.n_basis))
-    if data is not None:
-        storage_dict[(asi.dm_count, iK, iS)] = data.copy()
-    #    if asi.implementation == "DFTB+":
-    #        ltriang2herm_inplace(storage_dict[(iK, iS)])
-    #        cnt_dict[(iK, iS)] = cnt_dict.get((iK, iS), 0) + 1
-    #except Exception as eee:
-    #    print(f"Something happened in ASI default_saving_callback {label}: {eee}\nAborting...")
-    #    MPI.COMM_WORLD.Abort(1)
+def dm_saving_callback(aux, iK, iS, descr, data):    
+    try:
+        asi, storage_dict, cnt_dict, label = cast(aux, py_object).value
+        data_shape = (asi.n_basis,asi.n_basis) if asi.is_hamiltonian_real else (asi.n_basis,asi.n_basis, 2)
+    
+        data = asi.scalapack.gather_numpy(descr, data, data_shape)
+        asi.dm_count +=1
+        if data is not None:
+            assert len(data.shape) == 2
+            storage_dict[(asi.dm_count, iK, iS)] = data.copy()
+
+    except Exception as eee:
+        print(f"Something happened in ASI default_saving_callback {label}: {eee}\nAborting...")
+        MPI.COMM_WORLD.Abort(1)
 
 def ham_saving_callback(aux, iK, iS, descr, data):
-    asi, storage_dict, cnt_dict, label = cast(aux, py_object).value
-    asi.ham_count +=1
-    #try:
-    data = asi.scalapack.gather_numpy(descr, data, (asi.n_basis, asi.n_basis))
-    if data is not None:
-        storage_dict[(asi.ham_count, iK, iS)] = data.copy()
-    #    if asi.implementation == "DFTB+":
-    #        ltriang2herm_inplace(storage_dict[(iK, iS)])
-    #        cnt_dict[(iK, iS)] = cnt_dict.get((iK, iS), 0) + 1
-    #except Exception as eee:
-    #    print(f"Something happened in ASI default_saving_callback {label}: {eee}\nAborting...")
-    #    MPI.COMM_WORLD.Abort(1)
-
+    try:
+        asi, storage_dict, cnt_dict, label = cast(aux, py_object).value
+        data_shape = (asi.n_basis,asi.n_basis) if asi.is_hamiltonian_real else (asi.n_basis,asi.n_basis, 2)
+        
+        data = asi.scalapack.gather_numpy(descr, data, data_shape)
+        asi.ham_count +=1        
+        if data is not None:
+            assert len(data.shape) == 2
+            storage_dict[(asi.ham_count, iK, iS)] = data.copy()
+    except Exception as eee:
+        print(f"Something happened in ASI default_saving_callback {label}: {eee}\nAborting...")
+        MPI.COMM_WORLD.Abort(1)
 
 class AtomsEmbed():
 
@@ -136,10 +138,9 @@ class AtomsEmbed():
             Must be separated for indidividual system calls."""
         import os
         import numpy as np
-        from mpi4py import MPI
         from asi4py.asecalc import ASI_ASE_calculator
 
-        print(f'Calculation {self.outdir}...')
+        root_print(f'Calculation {self.outdir}...')
 
         self.atoms.calc = ASI_ASE_calculator(os.environ['ASI_LIB_PATH'],
                                         self.calc_initializer,
@@ -172,6 +173,38 @@ class AtomsEmbed():
 
         E0 = self.atoms.get_potential_energy()
 
+        # Temporary cludge to communicate DMs from root to other processes, 
+        # which somehow aren't stored on any rank other than 0.
+        if MPI.COMM_WORLD.Get_rank() == 0:
+            storage_keys = self.atoms.calc.asi.dm_storage.keys()
+            data = np.array(list(storage_keys), dtype=np.int16)
+            data_shape = np.array(data.shape, dtype=np.int16)
+        else:
+            data_shape = np.array([0,0], dtype=np.int16)
+
+        # Broadcast the size of the data
+        MPI.COMM_WORLD.Bcast([data_shape, MPI.INT16_T], root=0)
+
+        if MPI.COMM_WORLD.Get_rank() == 0:
+            data = np.array(list(storage_keys), dtype=np.int16)
+        else:
+            data = np.zeros(tuple(data_shape), dtype=np.int16)
+
+        MPI.COMM_WORLD.Bcast([data, MPI.INT16_T], root=0)
+        data_dict_keys = data
+
+        for data_key in data_dict_keys:
+            if MPI.COMM_WORLD.Get_rank() == 0:
+                data_buf = self.atoms.calc.asi.dm_storage[tuple(data_key)]
+            else:
+                data_buf = np.zeros((self.atoms.calc.asi.n_basis, self.atoms.calc.asi.n_basis), dtype=np.float64)
+
+            MPI.COMM_WORLD.Bcast([data_buf, MPI.DOUBLE], root=0)
+
+            if MPI.COMM_WORLD.Get_rank() != 0:
+                self.atoms.calc.asi.dm_storage[tuple(data_key)] = data_buf.copy()
+
+
         self.n_basis = self.atoms.calc.asi.n_basis
         self.basis_atoms = self.atoms.calc.asi.basis_atoms
 
@@ -197,10 +230,11 @@ class AtomsEmbed():
         if ev_corr_scf:
             tot_idx = self.atoms.calc.asi.ham_count
             ham = self.atoms.calc.asi.ham_storage.get((tot_idx,1,1))
+
             self.ev_corr_energy = 27.211384500 * np.trace(load_dm @ ham)
 
             self.ev_corr_total_energy = self.total_energy - self.ev_sum + self.ev_corr_energy
-            print(self.ev_sum)
-            print(self.ev_corr_energy)
+            root_print(self.ev_sum)
+            root_print(self.ev_corr_energy)
 
         self.atoms.calc.asi.close()

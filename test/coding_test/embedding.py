@@ -154,18 +154,16 @@ def run_single_fragment(hl_calc=calc_hl, ll_calc=calc_ll, hl_xc="pbe", ll_xc="pb
     return data_dict_list
 
 #data_dict_list_b3lypinpbe = run_water_test(hl_calc=calc_hl, ll_calc=calc_ll, hl_xc="scan", ll_xc="pbe")
-data_dict_list_blypinpbe = run_binding_energy_test(hl_calc=calc_hl, ll_calc=calc_ll, hl_xc="PBE0", ll_xc="PBE")
-#data_dict_list_blypinblyp = run_binding_energy_test(hl_calc=calc_hl, ll_calc=calc_ll, hl_xc="B3LYP", ll_xc="B3LYP")
+data_dict_list_blypinpbe = run_binding_energy_test(hl_calc=calc_hl, ll_calc=calc_ll, hl_xc="B3LYP", ll_xc="PBE")
+#data_dict_list_blypinblyp = run_binding_energy_test(hl_calc=calc_hl, ll_calc=calc_ll, hl_xc="PBE0", ll_xc="PBE0")
 #data_dict_list_pbeinpbe = run_binding_energy_test(hl_calc=calc_hl, ll_calc=calc_ll, hl_xc="PBE", ll_xc="PBE")
 #data_dict_list_scaninscan = run_binding_energy_test(hl_calc=calc_hl, ll_calc=calc_ll, hl_xc="scan", ll_xc="scan")
 
-#data_dict_list_mono_blypinpbe = run_single_fragment(hl_calc=calc_hl, ll_calc=calc_ll, hl_xc="PBE0", ll_xc="PBE")
-#data_dict_list_mono_blyp = run_single_fragment(hl_calc=calc_hl, ll_calc=calc_ll, hl_xc="B3LYP", ll_xc="B3LYP")
+data_dict_list_mono_blypinpbe = run_single_fragment(hl_calc=calc_hl, ll_calc=calc_ll, hl_xc="B3LYP", ll_xc="PBE")
+#data_dict_list_mono_blyp = run_single_fragment(hl_calc=calc_hl, ll_calc=calc_ll, hl_xc="PBE0", ll_xc="PBE0")
 #data_dict_list_mono_pbe = run_single_fragment(hl_calc=calc_hl, ll_calc=calc_ll, hl_xc="PBE", ll_xc="PBE")
 #data_dict_list_scaninscan = run_binding_energy_test(hl_calc=calc_hl, ll_calc=calc_ll, hl_xc="scan", ll_xc="scan")
 
-#data_dict_list = data_dict_list_blypinpbe + data_dict_list_blypinblyp + data_dict_list_pbeinpbe + data_dict_list_mono_blyp + data_dict_list_mono_pbe + data_dict_list_mono_blypinpbe
-#data_dict_list = data_dict_list_blypinpbe + data_dict_list_blypinblyp + data_dict_list_pbeinpbe + data_dict_list_mono_blypinpbe + data_dict_list_mono_blyp + data_dict_list_mono_pbe
 data_dict_list = data_dict_list_blypinpbe + data_dict_list_mono_blypinpbe
 
 field_names = ["LL XC", "HL XC", "OH-H Distance", "AB LL Energy", "A HL Energy", 

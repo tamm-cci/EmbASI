@@ -1,5 +1,6 @@
 # ~ Overall Embedding object
 from abc import ABC, abstractmethod
+from ASI_embedding.parallel_utils import root_print
 import numpy as np
 
 class EmbeddingBase(ABC): 
@@ -45,6 +46,7 @@ class EmbeddingBase(ABC):
 class ProjectionEmbedding(EmbeddingBase):
     def __init__(self, atoms, embed_mask, calc_base_ll, calc_base_hl, frag_charge=0, post_scf=None, mu_val=1e+06):
         from copy import copy, deepcopy
+        from mpi4py import MPI
 
         'LL - low-level, HL - high-level'
         self.calc_names = ["AB_LL","A_LL","A_HL","A_HL_PP","AB_LL_PP"]
@@ -75,6 +77,8 @@ class ProjectionEmbedding(EmbeddingBase):
         self.set_layer(atoms, self.calc_names[3], high_level_calculator_2, embed_mask, ghosts=2, no_scf=False)
 
         self.mu_val = mu_val
+        self.rank = MPI.COMM_WORLD.Get_rank()
+        self.ntasks = MPI.COMM_WORLD.Get_size()
 
     @property
     def nlayers(self):
@@ -99,7 +103,7 @@ class ProjectionEmbedding(EmbeddingBase):
     def run(self):
         import numpy as np
 
-        print("Embedding calculation begun...")
+        root_print("Embedding calculation begun...")
 
         self.AB_LL.run()
         core_idx = self.AB_LL.atoms.calc.asi.ham_count - 1
@@ -114,7 +118,7 @@ class ProjectionEmbedding(EmbeddingBase):
         self.AB_Htot = self.AB_LL.atoms.calc.asi.ham_storage.get((tot_idx,1,1))
         self.AB_Hee = self.AB_Htot - self.AB_Hcore
 
-        self.A_LL.run(load_dm = np.asfortranarray(self.A_dm), ev_corr_scf=True)
+        self.A_LL.run(load_dm=np.asfortranarray(self.A_dm))
         A_LL_energy = self.A_LL.total_energy
 
         core_idx = self.A_LL.atoms.calc.asi.ham_count - 1
@@ -143,10 +147,10 @@ class ProjectionEmbedding(EmbeddingBase):
         subsys_A_highlvl_totalen = self.A_HL_PP.ev_corr_total_energy
 
         self.A_HL_pop = np.trace(self.AB_S @ (self.A_HL_dm))
-        print(f" Population of Subystem A^[HL]: {self.A_HL_pop}")
+        root_print(f" Population of Subystem A^[HL]: {self.A_HL_pop}")
         self.A_HL_dm = self.A_HL_dm * (self.A_pop/self.A_HL_pop)
         self.A_HL_pop = np.trace(self.AB_S @ (self.A_HL_dm))
-        print(f" Population of Subystem A^[HL] (post-norm): {np.trace(self.AB_S @ (self.A_HL_dm))}")
+        root_print(f" Population of Subystem A^[HL] (post-norm): {np.trace(self.AB_S @ (self.A_HL_dm))}")
 
         self.AB_LL_PP.run(load_dm=np.asfortranarray(self.A_HL_dm+self.B_dm), ev_corr_scf=True)
         #subsys_AB_lowlvl_totalen = self.AB_LL_PP.total_energy
@@ -158,66 +162,45 @@ class ProjectionEmbedding(EmbeddingBase):
 
         self.PB_corr = (np.trace(self.P_b @ self.A_HL_dm) * 27.211384500)
 
-
-        tot_idx1 = self.AB_LL_PP.atoms.calc.asi.ham_count
-        tot_idx2 = self.A_LL.atoms.calc.asi.ham_count
-
-        rtol=1e-6
-        atol=1e-6
-        print(np.allclose(self.A_dm, self.A_dm.T, rtol=rtol, atol=atol))
-        print(np.allclose(self.B_dm, self.B_dm.T, rtol=rtol, atol=atol))
-        print(np.allclose(self.AB_LL_PP.atoms.calc.asi.ham_storage.get((tot_idx1,1,1)), self.AB_LL_PP.atoms.calc.asi.ham_storage.get((tot_idx1,1,1)).T, rtol=rtol, atol=atol))
-
-
-        #plt.matshow(self.A_HL_dm-self.A_dm)
-        #plt.matshow((self.A_dm+self.B_dm) @ self.AB_LL_PP.atoms.calc.asi.ham_storage.get((tot_idx1,1,1)))
-        #plt.matshow(self.A_HL_dm @ self.A_LL.atoms.calc.asi.ham_storage.get((tot_idx2,1,1)))
-        #plt.matshow(self.A_HL_PP.atoms.calc.asi.ham_storage.get((tot_idx1,1,1)))
-        #plt.matshow(self.A_LL.atoms.calc.asi.ham_storage.get((tot_idx2,1,1)))
-        #plt.matshow(self.A_LL.atoms.calc.asi.ham_storage.get((tot_idx2,1,1)) - self.A_HL_PP.atoms.calc.asi.ham_storage.get((tot_idx1,1,1)))
-
         self.DFT_AinB_total_energy = subsys_A_highlvl_totalen - subsys_A_lowlvl_totalen + subsys_AB_lowlvl_totalen + self.PB_corr
-        print( f" ----------- FINAL         OUTPUTS --------- " )
-        print(f" ")
-        print(f" Population Information:")
-        print(f" Population of Subsystem AB: {self.AB_pop}")
-        print(f" Population of Subsystem A: {self.A_pop}")
-        print(f" Population of Subsystem B: {self.B_pop}")
-        print(f" ")
-        print(f" Intermediate Information:")
-        print(f" WARNING: These are not faithful, ground-state KS total energies - ")
-        print(f" In the case of low-level references, they are calculated using the ")
-        print(f" density components of the high-level energy reference for fragment A. ")
-        print(f" Do not naively use these energies unless you are comfortable with ")
-        print(f" their true definition. ")
-        print(f" Total Energy (A+B Low-Level): {subsys_AB_lowlvl_totalen} eV" )
-        print(f" Total Energy (A Low-Level): {subsys_A_lowlvl_totalen} eV" )
-        print(f" Total Energy (A High-Level): {subsys_A_highlvl_totalen} eV" )
-        print(f" Projection operator energy correction DM^(A_HL) @ Pb: {self.PB_corr} eV" )
-        print(f"  " )
-        print(f" Final Energies Information:")
-        print(f" Final total energy (Uncorrected): {self.DFT_AinB_total_energy - self.PB_corr} eV" )
-        print(f" Final total energy (Projection Corrected): {self.DFT_AinB_total_energy} eV" )
-        print(f" " )
-        print(f" -----------======================--------- " )
-        print(f" " )
+        root_print( f" ----------- FINAL         OUTPUTS --------- " )
+        root_print(f" ")
+        root_print(f" Population Information:")
+        root_print(f" Population of Subsystem AB: {self.AB_pop}")
+        root_print(f" Population of Subsystem A: {self.A_pop}")
+        root_print(f" Population of Subsystem B: {self.B_pop}")
+        root_print(f" ")
+        root_print(f" Intermediate Information:")
+        root_print(f" WARNING: These are not faithful, ground-state KS total energies - ")
+        root_print(f" In the case of low-level references, they are calculated using the ")
+        root_print(f" density components of the high-level energy reference for fragment A. ")
+        root_print(f" Do not naively use these energies unless you are comfortable with ")
+        root_print(f" their true definition. ")
+        root_print(f" Total Energy (A+B Low-Level): {subsys_AB_lowlvl_totalen} eV" )
+        root_print(f" Total Energy (A Low-Level): {subsys_A_lowlvl_totalen} eV" )
+        root_print(f" Total Energy (A High-Level): {subsys_A_highlvl_totalen} eV" )
+        root_print(f" Projection operator energy correction DM^(A_HL) @ Pb: {self.PB_corr} eV" )
+        root_print(f"  " )
+        root_print(f" Final Energies Information:")
+        root_print(f" Final total energy (Uncorrected): {self.DFT_AinB_total_energy - self.PB_corr} eV" )
+        root_print(f" Final total energy (Projection Corrected): {self.DFT_AinB_total_energy} eV" )
+        root_print(f" " )
+        root_print(f" -----------======================--------- " )
+        root_print(f" " )
 
     def run_absloc(self):
         import numpy as np
 
-        print("I am running!")
+        root_print("I am running!")
 
         self.AB_LL.run()
         core_idx = self.AB_LL.atoms.calc.asi.ham_count - 1
         tot_idx = self.AB_LL.atoms.calc.asi.ham_count
 
-        print(self.AB_LL.n_basis)
-        print(self.AB_LL.basis_atoms)
+        root_print(self.AB_LL.n_basis)
+        root_print(self.AB_LL.basis_atoms)
 
         max_basis = np.argwhere(self.AB_LL.basis_atoms==2)[-1][0] + 1
-
-        self.A_dm = self.AB_LL.atoms.calc.asi.dm_storage.get((1,1,1))
-        self.B_dm = self.AB_LL.atoms.calc.asi.dm_storage.get((2,1,1))
 
         self.AB_S = self.AB_LL.atoms.calc.asi.overlap_storage[1,1]
 
@@ -261,8 +244,8 @@ class ProjectionEmbedding(EmbeddingBase):
         self.PB_corr = (np.trace((self.emb_raw @ (self.A_HL_dm - self.A_dm[:max_basis, :max_basis]))) * 27.2114079527)
 
         #print( np.trace((self.mu_val * self.P_b) @ self.A_HL_dm) * 27.2114079527 )
-        print( np.trace((self.P_b[:max_basis, :max_basis]) @ self.A_HL_dm) * 27.2114079527 )
-        print( np.einsum('ij,ij', self.emb_raw, (self.A_HL_dm - self.A_dm[:max_basis, :max_basis])) * 27.2114079527)
+        root_print( np.trace((self.P_b[:max_basis, :max_basis]) @ self.A_HL_dm) * 27.2114079527 )
+        root_print( np.einsum('ij,ij', self.emb_raw, (self.A_HL_dm - self.A_dm[:max_basis, :max_basis])) * 27.2114079527)
 
 
 
