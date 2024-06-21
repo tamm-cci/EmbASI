@@ -44,11 +44,30 @@ class EmbeddingBase(ABC):
         pass
 
 class ProjectionEmbedding(EmbeddingBase):
-    def __init__(self, atoms, embed_mask, calc_base_ll, calc_base_hl, frag_charge=0, post_scf=None, mu_val=1e+06):
+    def __init__(self, atoms, embed_mask, calc_base_ll, calc_base_hl, frag_charge=0, post_scf=None, mu_val=1e+06, truncate_basis=False):
+        """_summary_
+        Intended to 
+
+
+        Args:
+            atoms (ASE Atoms Object): Input ASE Atoms object used to pass structural information
+            embed_mask (int OR list): _description_
+            calc_base_ll (ASE Calculator): _description_
+            calc_base_hl (ASE Calculator): _description_
+            frag_charge (int, optional): _description_. Defaults to 0.
+            post_scf (_type_, optional): _description_. Defaults to None.
+            mu_val (_type_, optional): _description_. Defaults to 1e+06 Ha.
+            truncate_basis (bool, optional): _description_. Defaults to 1e+06 Ha.
+        """
+        
+        
         from copy import copy, deepcopy
         from mpi4py import MPI
 
-        'LL - low-level, HL - high-level'
+        # Low-level, lref, lowref, highref, 
+        # lo-lev hi-lev, system_AB_
+        # 
+
         self.calc_names = ["AB_LL","A_LL","A_HL","A_HL_PP","AB_LL_PP"]
 
         super(ProjectionEmbedding, self).__init__(atoms, embed_mask, calc_base_ll, calc_base_hl)
@@ -79,6 +98,7 @@ class ProjectionEmbedding(EmbeddingBase):
         self.mu_val = mu_val
         self.rank = MPI.COMM_WORLD.Get_rank()
         self.ntasks = MPI.COMM_WORLD.Get_size()
+        self.truncate_basis = truncate_basis
 
     @property
     def nlayers(self):
@@ -93,76 +113,192 @@ class ProjectionEmbedding(EmbeddingBase):
 
     def calculate_levelshift_projector(self):
 
-        self.P_b = self.mu_val * (self.AB_S @ self.B_dm @ self.AB_S.T)
+        self.P_b = self.mu_val * (self.AB_LL.overlap @ self.AB_LL.density_matrices_out[1] @ self.AB_LL.overlap)
 
     def calculate_huzinaga_projector(self):
 
         self.P_b = self.AB_S @ self.B_dm @ self.AB_Htot.T
         self.P_b = -0.5*(self.P_b + (self.AB_Htot.T @ self.B_dm @ self.AB_S.T))
 
+    def select_atoms_basis_truncation(self, thresh):
+        """_summary_
+        Returns a list of corresponding atoms for which the total contribution of an atoms constituent basis functions to the total charge of subsystem A, q^{A}:
+               q^{A}_{/mu, /nu} = /gamma^{A}_{/mu, /nu} S_{/mu, /nu}
+        exceeds the threshold, thresh:
+                      thresh < q_{/mu, /nu} 
+        This is unfortunately just Mulliken analysis again.
+        Args:
+            thresh (float): _description_
+        Returns: 
+            active_mask (list): True/False mask for 
+        """
+
+        basis_charge = np.diag(self.AB_LL.density_matrices_out[0] @ self.AB_LL.overlap)
+        atomic_charge = np.zeros(len(self.AB_LL.atoms))
+
+        for idx, charge in enumerate(basis_charge):
+            atomic_charge[self.AB_LL.basis_atoms[idx]] += abs(charge)
+
+        truncated_atom_list = [ charge > thresh for charge in atomic_charge ]
+
+        return truncated_atom_list
+
+    def set_truncation_defaults(self, truncated_atom_list):
+        """_summary_
+        Necessary to maintain consistency in values needed for matrix truncation
+        /expansion between the AtomsEmbed objects (eg., self.basis_atoms, 
+        self.n_atoms). Failure to do so leads to unexpected behaviour.
+        which 
+        Args:
+            truncated_atom_list (_type_): _description_
+        """
+        from ASI_embedding.basis_info import Basis_info
+
+        # Establish mapping corresponding to each new atom from the 
+        # truncated matrix
+        active_atoms = np.array([ idx for idx, maskval in enumerate(truncated_atom_list) if maskval ])
+
+        # Remove non-active atoms from basis_atoms to form a truncated
+        # analogue
+        trunc_basis_atoms = np.array([atom for atom in self.AB_LL.basis_atoms if atom in active_atoms])
+
+        # Count number of basis functions included in truncation calculations
+        new_nbasis = 0
+        for atom in self.AB_LL.basis_atoms:
+            if truncated_atom_list[atom]:
+                new_nbasis +=1
+
+        BasisInfo = Basis_info()
+        BasisInfo.full_natoms = len(truncated_atom_list)
+        BasisInfo.trunc_natoms = len(active_atoms)
+        BasisInfo.active_atoms = active_atoms
+        BasisInfo.full_basis_atoms = self.AB_LL.basis_atoms
+        BasisInfo.trunc_basis_atoms = trunc_basis_atoms
+        BasisInfo.full_nbasis = self.AB_LL.n_basis
+        BasisInfo.trunc_nbasis = new_nbasis
+        BasisInfo.set_basis_atom_indexes()
+
+        self.AB_LL.truncate = False
+        self.AB_LL.basis_info = BasisInfo
+
+        self.A_LL.truncate = True
+        self.A_LL.basis_info = BasisInfo
+
+        self.A_HL.truncate = True
+        self.A_HL.basis_info = BasisInfo
+
+        self.A_HL_PP.truncate = True
+        self.A_HL_PP.basis_info = BasisInfo
+
+        self.AB_LL_PP.truncate = False
+        self.AB_LL_PP.basis_info = BasisInfo
+
+    def calc_subsys_pop(self, overlap_matrix, density_matrix):
+        """ Summary
+            Calculates the overall electron population of a given subsystem
+            through the following relation:
+                    P_{pop} = tr[S^{AB}/gamma]
+            where S^{AB} is the overlap matrix for the supermolecular system
+            and /gamma is the density matrix of a given subsystem.
+
+        Args:
+            overlap_matrix (np.ndarray): Supersystem overlap matrix in AO basis.
+            density_matrix (np.ndarray): Subsystem density matrix in AO basis,
+        Returns:
+            population (int): Overall electronic population of subsystem
+        """
+
+        population = np.trace(overlap_matrix @ (density_matrix))
+
+        return population
+
     def run(self):
+        """ Summary
+        The primary driver routine for performing QM-in-QM with a Projection-based embedding scheme. This scheme draws upon the work of Manby et al. [1, 2]. 
+
+        The workflow within the current implementation operates as follows:
+        1) Calculate the KS-DFT energy of the combined subsystems A+B. 
+        ...
+
+        (1) Manby, F. R.; Stella, M.; Goodpaster, J. D.; Miller, T. F. I. A Simple, Exact Density-Functional-Theory Embedding Scheme. J. Chem. Theory Comput. 2012, 8 (8), 2564–2568.
+        (2) Lee, S. J. R.; Welborn, M.; Manby, F. R.; Miller, T. F. Projection-Based Wavefunction-in-DFT Embedding. Acc. Chem. Res. 2019, 52 (5), 1359–1368.
+        """
         import numpy as np
 
         root_print("Embedding calculation begun...")
 
+        ''' 
+        Performs a single-point energy evaluation for a system composed of A
+        and B. Returns localised density matrices for subsystems A and B, and the two-electron components of the hamiltonian (combined with nuclear-electron potential).
+        '''
         self.AB_LL.run()
-        core_idx = self.AB_LL.atoms.calc.asi.ham_count - 1
-        tot_idx = self.AB_LL.atoms.calc.asi.ham_count
 
-        self.A_dm = self.AB_LL.atoms.calc.asi.dm_storage.get((1,1,1))
-        self.B_dm = self.AB_LL.atoms.calc.asi.dm_storage.get((2,1,1))
+        ''' 
+        Initialises the density matrix for subsystem A, and calculated the hamiltonian components for subsystem A at the low-level reference.
+        '''
+        if self.truncate_basis:
+            basis_mask = self.select_atoms_basis_truncation(0.5)
+            self.set_truncation_defaults(basis_mask)
 
-        self.AB_S = self.AB_LL.atoms.calc.asi.overlap_storage[1,1]
+        self.A_LL.density_matrix_in = self.AB_LL.density_matrices_out[0]
+        self.A_LL.run()
 
-        self.AB_Hcore = self.AB_LL.atoms.calc.asi.ham_storage.get((core_idx,1,1))
-        self.AB_Htot = self.AB_LL.atoms.calc.asi.ham_storage.get((tot_idx,1,1))
-        self.AB_Hee = self.AB_Htot - self.AB_Hcore
-
-        self.A_LL.run(load_dm=np.asfortranarray(self.A_dm))
-        A_LL_energy = self.A_LL.total_energy
-
-        core_idx = self.A_LL.atoms.calc.asi.ham_count - 1
-        tot_idx = self.A_LL.atoms.calc.asi.ham_count
-
-        self.A_Hcore = self.A_LL.atoms.calc.asi.ham_storage.get((core_idx,1,1))
-        self.A_Htot = self.A_LL.atoms.calc.asi.ham_storage.get((tot_idx,1,1))
-        self.A_Hee = self.A_Htot - self.A_Hcore
-
-        self.AB_pop = np.trace(self.AB_S @ (self.A_dm+self.B_dm))
-        self.A_pop = np.trace(self.AB_S @ (self.A_dm))
-        self.B_pop = np.trace(self.AB_S @ (self.B_dm))
-
-        #self.calculate_huzinaga_projector()
+        ''' 
+        Calculates the electron count for the combined (A+B) and separated subsystems (A and B). 
+        '''
+        self.AB_pop = self.calc_subsys_pop(self.AB_LL.overlap, 
+                            (self.AB_LL.density_matrices_out[0]
+                            +self.AB_LL.density_matrices_out[1]))
+        
+        self.A_pop = self.calc_subsys_pop(self.AB_LL.overlap, 
+                            self.A_LL.density_matrices_out[0])
+        
+        self.B_pop = self.calc_subsys_pop(self.AB_LL.overlap, 
+                            self.AB_LL.density_matrices_out[1])
+        
+        ''' 
+        Initialises the density matrix for subsystem A, and calculated the hamiltonian components for subsystem A at the low-level reference.
+        '''
         self.calculate_levelshift_projector()
 
-        self.emb_mat = np.asfortranarray(self.AB_Hee - self.A_Hee + (self.P_b) )
-        self.emb_raw = self.AB_Hee - self.A_Hee
+        # Calculate density matrix for A high-level with embedded Fock
+        # matrix. 
+        self.A_HL.density_matrix_in = \
+                self.AB_LL.density_matrices_out[0]
+        self.A_HL.fock_embedding_matrix = \
+                self.AB_LL.hamiltonian_electrostatic - \
+                    self.A_LL.hamiltonian_electrostatic + self.P_b
+        self.A_HL.run()
 
-        self.A_HL.run(load_ham=self.emb_mat, load_dm=np.asfortranarray(self.A_dm))
-        self.A_HL_dm = self.A_HL.atoms.calc.asi.dm_storage.get((1,1,1)) 
-
-        self.A_HL_PP.run(load_dm=np.asfortranarray(self.A_HL_dm), ev_corr_scf=True)
-        #self.A_HL_PP.run(load_dm=np.asfortranarray(self.A_LL_dm), ev_corr_scf=True)
-        #subsys_A_highlvl_totalen = self.A_HL_PP.total_energy
+        # Calculate high-level post-processed reference energy
+        self.A_HL_PP.density_matrix_in = self.A_HL.density_matrices_out[0]
+        self.A_HL_PP.run(ev_corr_scf=True)
         subsys_A_highlvl_totalen = self.A_HL_PP.ev_corr_total_energy
 
-        self.A_HL_pop = np.trace(self.AB_S @ (self.A_HL_dm))
+        # Re-normalising charge for differing atomic solvers (bad cludge)
+        root_print(f" Normalizing density matrix from high-level reference...")
+        self.A_HL_pop = self.calc_subsys_pop(self.AB_LL.overlap, self.A_HL.density_matrices_out[0])
         root_print(f" Population of Subystem A^[HL]: {self.A_HL_pop}")
-        self.A_HL_dm = self.A_HL_dm * (self.A_pop/self.A_HL_pop)
-        self.A_HL_pop = np.trace(self.AB_S @ (self.A_HL_dm))
-        root_print(f" Population of Subystem A^[HL] (post-norm): {np.trace(self.AB_S @ (self.A_HL_dm))}")
+        self.charge_renorm = (self.A_pop/self.A_HL_pop)
+        root_print(f" Population of Subystem A^[HL] (post-norm): {self.calc_subsys_pop(self.AB_LL.overlap, self.charge_renorm*self.A_HL.
+        density_matrices_out[0])}")
 
-        self.AB_LL_PP.run(load_dm=np.asfortranarray(self.A_HL_dm+self.B_dm), ev_corr_scf=True)
-        #subsys_AB_lowlvl_totalen = self.AB_LL_PP.total_energy
-        subsys_AB_lowlvl_totalen = self.AB_LL_PP.ev_corr_total_energy
-
-        self.A_LL.run(load_dm = np.asfortranarray(self.A_HL_dm), ev_corr_scf=True)
-        #subsys_A_lowlvl_totalen = self.A_LL.total_energy
+        # Calculate A low-level reference energy
+        self.A_LL.density_matrix_in = self.charge_renorm * self.A_HL.density_matrices_out[0]
+        self.A_LL.run(ev_corr_scf=True)
         subsys_A_lowlvl_totalen = self.A_LL.ev_corr_total_energy
 
-        self.PB_corr = (np.trace(self.P_b @ self.A_HL_dm) * 27.211384500)
+        # Calculate AB low-level reference energy
+        self.AB_LL_PP.density_matrix_in = (self.charge_renorm * self.A_HL.density_matrices_out[0]) + self.AB_LL.density_matrices_out[1]
 
-        self.DFT_AinB_total_energy = subsys_A_highlvl_totalen - subsys_A_lowlvl_totalen + subsys_AB_lowlvl_totalen + self.PB_corr
+        self.AB_LL_PP.run(ev_corr_scf=True)
+        subsys_AB_lowlvl_totalen = self.AB_LL_PP.ev_corr_total_energy
+
+        # Calculate projected density correction to total energy
+        self.PB_corr = (np.trace(self.P_b @ self.A_HL.density_matrices_out[0]) * 27.211384500)
+
+        self.DFT_AinB_total_energy = subsys_A_highlvl_totalen - \
+            subsys_A_lowlvl_totalen + subsys_AB_lowlvl_totalen + self.PB_corr
         root_print( f" ----------- FINAL         OUTPUTS --------- " )
         root_print(f" ")
         root_print(f" Population Information:")
@@ -187,67 +323,6 @@ class ProjectionEmbedding(EmbeddingBase):
         root_print(f" " )
         root_print(f" -----------======================--------- " )
         root_print(f" " )
-
-    def run_absloc(self):
-        import numpy as np
-
-        root_print("I am running!")
-
-        self.AB_LL.run()
-        core_idx = self.AB_LL.atoms.calc.asi.ham_count - 1
-        tot_idx = self.AB_LL.atoms.calc.asi.ham_count
-
-        root_print(self.AB_LL.n_basis)
-        root_print(self.AB_LL.basis_atoms)
-
-        max_basis = np.argwhere(self.AB_LL.basis_atoms==2)[-1][0] + 1
-
-        self.AB_S = self.AB_LL.atoms.calc.asi.overlap_storage[1,1]
-
-        self.AB_Hcore = self.AB_LL.atoms.calc.asi.ham_storage.get((core_idx,1,1))
-        self.AB_Htot = self.AB_LL.atoms.calc.asi.ham_storage.get((tot_idx,1,1))
-        self.AB_Hee = self.AB_Htot - self.AB_Hcore
-
-        self.A_LL.run(load_dm = np.asfortranarray(self.A_dm[:max_basis, :max_basis]))
-        core_idx = self.A_LL.atoms.calc.asi.ham_count - 1
-        tot_idx = self.A_LL.atoms.calc.asi.ham_count
-
-        self.A_Hcore = self.A_LL.atoms.calc.asi.ham_storage.get((core_idx,1,1))
-        self.A_Htot = self.A_LL.atoms.calc.asi.ham_storage.get((tot_idx,1,1))
-        self.A_Hee = self.A_Htot - self.A_Hcore
-
-        self.AB_pop = np.trace(self.AB_S @ (self.A_dm+self.B_dm))
-        self.A_pop = np.trace(self.AB_S @ (self.A_dm))
-        self.B_pop = np.trace(self.AB_S @ (self.B_dm))
-
-        #self.calculate_huzinaga_projector()
-        self.calculate_levelshift_projector()
-
-        #self.emb_mat = np.asfortranarray(self.AB_Hee - self.A_Hee + (self.AB_Hcore - self.A_Hcore) + (self.mu_val * self.P_b) )
-        self.emb_mat = np.asfortranarray(self.AB_Hee[:max_basis, :max_basis] - self.A_Hee + (self.AB_Hcore[:max_basis, :max_basis] - self.A_Hcore) + (self.P_b[:max_basis, :max_basis]) )
-#        self.emb_mat = np.asfortranarray(self.AB_Hee[:max_basis, :max_basis] - self.A_Hee + self.AB_Hcore[:max_basis, :max_basis] + (self.mu_val * self.P_b[:max_basis, :max_basis]) )
-        self.emb_raw = self.AB_Hee[:max_basis, :max_basis] - self.A_Hee
-
-        self.A_HL.run(load_ham=self.emb_mat, load_dm=np.asfortranarray(self.A_dm[:max_basis, :max_basis]))
-        self.A_HL_dm = self.A_HL.atoms.calc.asi.dm_storage.get((1,1,1))
-
-        self.A_HL_PP.run(load_dm=np.asfortranarray(self.A_HL_dm))
-        core_idx = self.A_HL_PP.atoms.calc.asi.ham_count - 1
-        tot_idx = self.A_HL_PP.atoms.calc.asi.ham_count
-        self.A_HL_Hcore = self.A_HL_PP.atoms.calc.asi.ham_storage.get((core_idx,1,1))
-        self.A_HL_Htot = self.A_HL_PP.atoms.calc.asi.ham_storage.get((tot_idx,1,1))
-        self.A_HL_Hee = self.A_HL_Htot - self.A_HL_Hcore
-
-        self.A_LL.run(load_ham=self.emb_mat, load_dm=np.asfortranarray(self.A_dm[:max_basis, :max_basis]))
-        
-        self.EE_corr = (np.trace((self.mu_val * self.P_b[:max_basis, :max_basis]) @ self.A_HL_dm) * 27.2114079527)
-        self.PB_corr = (np.trace((self.emb_raw @ (self.A_HL_dm - self.A_dm[:max_basis, :max_basis]))) * 27.2114079527)
-
-        #print( np.trace((self.mu_val * self.P_b) @ self.A_HL_dm) * 27.2114079527 )
-        root_print( np.trace((self.P_b[:max_basis, :max_basis]) @ self.A_HL_dm) * 27.2114079527 )
-        root_print( np.einsum('ij,ij', self.emb_raw, (self.A_HL_dm - self.A_dm[:max_basis, :max_basis])) * 27.2114079527)
-
-
 
 
 

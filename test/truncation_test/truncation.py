@@ -50,27 +50,16 @@ calc_hl = Aims(xc='SCAN',
 #    compute_forces=True,
     postprocess_anyway = True,
     density_update_method='density_matrix', # for DM export
-    output=["eigenvectors", "hamiltonian_matrix","matrices_elsi","onsite_integrands","json_log"],
+    output=["eigenvectors", "hamiltonian_matrix","matrices_elsi","json_log"],
     compensate_multipole_errors=True,
     atomic_solver_xc="PBE",
     compute_kinetic=True,
     energy_density="harris_foulkes",
   )
 
-def flex_dict_append(inp_dict, dict_element, append_value):
-
-    if dict_element not in inp_dict:
-        inp_dict[dict_element] = [append_value]
-    elif isinstance(inp_dict[dict_element], list):
-        inp_dict[dict_element].append(append_value)
-    else: 
-        raise Exception("Current element not an appendable list")
-
-    print(inp_dict)
-    
-    return inp_dict
-
 def run_binding_energy_test(hl_calc=calc_hl, ll_calc=calc_ll, hl_xc="pbe", ll_xc="pbe"):
+
+    import time
 
     s22_atom = s26[22]
 
@@ -89,15 +78,14 @@ def run_binding_energy_test(hl_calc=calc_hl, ll_calc=calc_ll, hl_xc="pbe", ll_xc
 
         dimer_list.append(H2O)
 
-        dist = np.linalg.norm(H_bond_vec) 
-        #+ dist_offset
+        dist = np.linalg.norm(H_bond_vec) + dist_offset
 
-        Projection = ProjectionEmbedding(H2O, embed_mask=[2,1,2,2,2,1,2,1,2,2,2,1],
-                                    calc_base_ll=ll_calc, calc_base_hl=hl_calc, frag_charge=-2, mu_val=1.e+6)
-        #Projection = ProjectionEmbedding(H2O[:6], embed_mask=[2,1,2,2,2,1],
-        #                        calc_base_ll=ll_calc, calc_base_hl=hl_calc, frag_charge=-1, mu_val=1.e+6)
+        Projection = ProjectionEmbedding(H2O, embed_mask=[2,1,2,2,2,1,2,1,2,2,2,1],calc_base_ll=ll_calc, calc_base_hl=hl_calc, frag_charge=-2, mu_val=1.e+6)
+        #, truncate_basis=True)
+        start = time.time()
         Projection.run()
-
+        end = time.time()
+        
         data_dict = {}
 
         data_dict["LL XC"] = calc_ll.parameters["xc"]
@@ -111,12 +99,15 @@ def run_binding_energy_test(hl_calc=calc_hl, ll_calc=calc_ll, hl_xc="pbe", ll_xc
         #data_dict["A LL Energy"] = Projection.A_LL.total_energy
         data_dict["PB Correction"] = Projection.PB_corr
         data_dict["Total DFT Energy (A-in-B)"] = Projection.DFT_AinB_total_energy
+        data_dict["Time"] = end - start
 
         data_dict_list.append(data_dict)
 
     return data_dict_list
 
-def run_single_fragment(hl_calc=calc_hl, ll_calc=calc_ll, hl_xc="pbe", ll_xc="pbe"):
+def run_single_fragment(hl_calc=calc_hl, ll_calc=calc_ll, hl_xc="pbe",ll_xc="pbe"):
+
+    import time
 
     s22_atom = s26[22]
 
@@ -134,7 +125,10 @@ def run_single_fragment(hl_calc=calc_hl, ll_calc=calc_ll, hl_xc="pbe", ll_xc="pb
 
     Projection = ProjectionEmbedding(H2O[:6], embed_mask=[2,1,2,2,2,1],
                             calc_base_ll=ll_calc, calc_base_hl=hl_calc, frag_charge=-1, mu_val=1.e+6)
+                            #, truncate_basis=True)
+    start = time.time()
     Projection.run()
+    end = time.time()
 
     data_dict = {}
     data_dict["LL XC"] = calc_ll.parameters["xc"]
@@ -149,33 +143,20 @@ def run_single_fragment(hl_calc=calc_hl, ll_calc=calc_ll, hl_xc="pbe", ll_xc="pb
     data_dict["PB Correction"] = Projection.PB_corr
     data_dict["Total DFT Energy (A-in-B)"] = Projection.DFT_AinB_total_energy
     data_dict_list.append(data_dict)
+    data_dict["Time"] = end - start
+
 
     #Projection.garbage_collect()
 
     return data_dict_list
 
 data_dict_list = []
-#data_dict_list += run_binding_energy_test(hl_calc=calc_hl, ll_calc=calc_ll,hl_xc="pbe", ll_xc="pbe")
-#data_dict_list += run_single_fragment(hl_calc=calc_hl, ll_calc=calc_ll, hl_xc="pbe", ll_xc="pbe")
-data_dict_list += run_binding_energy_test(hl_calc=calc_hl, ll_calc=calc_ll,hl_xc="b3lyp", ll_xc="B3LYP")
-data_dict_list += run_single_fragment(hl_calc=calc_hl, ll_calc=calc_ll, hl_xc="b3lyp", ll_xc="B3LYP")
+data_dict_list += run_binding_energy_test(hl_calc=calc_hl, ll_calc=calc_ll,hl_xc="PBE0", ll_xc="PBE")
+data_dict_list += run_single_fragment(hl_calc=calc_hl, ll_calc=calc_ll, hl_xc="PBE0", ll_xc="PBE")
 
-field_names = ["LL XC", "HL XC", "OH-H Distance", "AB LL Energy", "A HL Energy", "A LL Energy", "PB Correction", "Total DFT Energy (A-in-B)"]
+field_names = ["LL XC", "HL XC", "OH-H Distance", "AB LL Energy", "A HL Energy", "A LL Energy", "PB Correction", "Total DFT Energy (A-in-B)", "Time"]
 
 with open('Values.csv', 'w') as csvfile:
     writer = csv.DictWriter(csvfile, fieldnames = field_names) 
     writer.writeheader() 
     writer.writerows(data_dict_list) 
-
-#formide = create_s22_system(s22[-1])
-#view(formide)
-
-
-#Projection = ProjectionEmbedding(ethanol, embed_mask=[2,2,1,1,2,2,2,2,2], calc_base_ll=calc_ll, calc_base_hl=calc_hl, mu_val=1.e+6)
-#Projection.run()
-
-
-
-
-
-#Projection.run()
