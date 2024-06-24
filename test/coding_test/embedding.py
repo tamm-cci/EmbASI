@@ -157,8 +157,8 @@ def run_single_fragment(hl_calc=calc_hl, ll_calc=calc_ll, hl_xc="pbe", ll_xc="pb
 data_dict_list = []
 #data_dict_list += run_binding_energy_test(hl_calc=calc_hl, ll_calc=calc_ll,hl_xc="pbe", ll_xc="pbe")
 #data_dict_list += run_single_fragment(hl_calc=calc_hl, ll_calc=calc_ll, hl_xc="pbe", ll_xc="pbe")
-data_dict_list += run_binding_energy_test(hl_calc=calc_hl, ll_calc=calc_ll,hl_xc="b3lyp", ll_xc="B3LYP")
-data_dict_list += run_single_fragment(hl_calc=calc_hl, ll_calc=calc_ll, hl_xc="b3lyp", ll_xc="B3LYP")
+#data_dict_list += run_binding_energy_test(hl_calc=calc_hl, ll_calc=calc_ll,hl_xc="PBE", ll_xc="PBE")
+data_dict_list += run_single_fragment(hl_calc=calc_hl, ll_calc=calc_ll, hl_xc="PBE", ll_xc="PBE")
 
 field_names = ["LL XC", "HL XC", "OH-H Distance", "AB LL Energy", "A HL Energy", "A LL Energy", "PB Correction", "Total DFT Energy (A-in-B)"]
 

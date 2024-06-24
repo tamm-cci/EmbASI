@@ -46,7 +46,16 @@ class EmbeddingBase(ABC):
 class ProjectionEmbedding(EmbeddingBase):
     def __init__(self, atoms, embed_mask, calc_base_ll, calc_base_hl, frag_charge=0, post_scf=None, mu_val=1e+06, truncate_basis=False):
         """_summary_
-        Intended to 
+
+        A class controlling the interaction between two subsystems calculated at
+        two levels of theory (low-level and high-level) with the
+        Projection-Based Embedding (PbE) scheme of Manby et al.[1].
+
+
+        [1] Manby, F. R.; Stella, M.; Goodpaster, J. D.; Miller, T. F. I. A Simple, Exact Density-Functional-Theory Embedding Scheme. J. Chem. Theory Comput. 2012, 8 (8), 2564–2568.
+
+        Methods
+        _______
 
 
         Args:
@@ -64,10 +73,6 @@ class ProjectionEmbedding(EmbeddingBase):
         from copy import copy, deepcopy
         from mpi4py import MPI
 
-        # Low-level, lref, lowref, highref, 
-        # lo-lev hi-lev, system_AB_
-        # 
-
         self.calc_names = ["AB_LL","A_LL","A_HL","A_HL_PP","AB_LL_PP"]
 
         super(ProjectionEmbedding, self).__init__(atoms, embed_mask, calc_base_ll, calc_base_hl)
@@ -80,16 +85,20 @@ class ProjectionEmbedding(EmbeddingBase):
 
         low_level_calculator_1.set(qm_embedding_calc = 1)
         self.set_layer(atoms, self.calc_names[0], low_level_calculator_1, embed_mask, ghosts=0, no_scf=False)
+
+        low_level_calculator_3.set(qm_embedding_calc = 2)
+        low_level_calculator_3.set(charge_mix_param = 0.)
+        self.set_layer(atoms, self.calc_names[4], low_level_calculator_3, embed_mask, ghosts=0, no_scf=False)
+        
         low_level_calculator_2.set(qm_embedding_calc = 2)
         low_level_calculator_2.set(charge_mix_param = 0.)
         low_level_calculator_2.set(charge = frag_charge)
         self.set_layer(atoms, self.calc_names[1], low_level_calculator_2, embed_mask, ghosts=2, no_scf=False)
-        low_level_calculator_3.set(qm_embedding_calc = 2)
-        low_level_calculator_3.set(charge_mix_param = 0.)
-        self.set_layer(atoms, self.calc_names[4], low_level_calculator_3, embed_mask, ghosts=0, no_scf=False)
+        
         high_level_calculator_1.set(qm_embedding_calc = 3)
         high_level_calculator_1.set(charge = frag_charge)
         self.set_layer(atoms, self.calc_names[2], high_level_calculator_1, embed_mask, ghosts=2, no_scf=False)
+        
         high_level_calculator_2.set(qm_embedding_calc = 2)
         high_level_calculator_2.set(charge_mix_param = 0.)
         high_level_calculator_2.set(charge = frag_charge)
@@ -112,13 +121,23 @@ class ProjectionEmbedding(EmbeddingBase):
         return self._nlayers
 
     def calculate_levelshift_projector(self):
+        """_summary_
+        
+        Calculate the level-shift based projection operator from 
+        Manby et al.[1]:
+                    P^{B} = /mu S^{AB} D^{B} S^{AB}
+        where S^{AB} is the overlap matrix for the supermolecular system, and
+        the density matrix for subsystem B.
+
+        [1] Manby, F. R.; Stella, M.; Goodpaster, J. D.; Miller, T. F. I. A Simple, Exact Density-Functional-Theory Embedding Scheme. J. Chem. Theory Comput. 2012, 8 (8), 2564–2568.
+        """
 
         self.P_b = self.mu_val * (self.AB_LL.overlap @ self.AB_LL.density_matrices_out[1] @ self.AB_LL.overlap)
 
     def calculate_huzinaga_projector(self):
 
-        self.P_b = self.AB_S @ self.B_dm @ self.AB_Htot.T
-        self.P_b = -0.5*(self.P_b + (self.AB_Htot.T @ self.B_dm @ self.AB_S.T))
+        self.P_b = self.AB_LL.hamiltonian_total @ self.AB_LL.density_matrices_out[1] @ self.AB_LL.overlap
+        self.P_b = -0.5*(self.P_b + self.AB_LL.overlap @ self.AB_LL.density_matrices_out[1] @ self.AB_LL.hamiltonian_total)
 
     def select_atoms_basis_truncation(self, thresh):
         """_summary_
@@ -126,7 +145,7 @@ class ProjectionEmbedding(EmbeddingBase):
                q^{A}_{/mu, /nu} = /gamma^{A}_{/mu, /nu} S_{/mu, /nu}
         exceeds the threshold, thresh:
                       thresh < q_{/mu, /nu} 
-        This is unfortunately just Mulliken analysis again.
+        This is unfortunately just Mulliken analysis.
         Args:
             thresh (float): _description_
         Returns: 
@@ -150,7 +169,7 @@ class ProjectionEmbedding(EmbeddingBase):
         self.n_atoms). Failure to do so leads to unexpected behaviour.
         which 
         Args:
-            truncated_atom_list (_type_): _description_
+            truncated_atom_list (list): A boolean mask asserting which atoms 
         """
         from ASI_embedding.basis_info import Basis_info
 
@@ -167,6 +186,18 @@ class ProjectionEmbedding(EmbeddingBase):
         for atom in self.AB_LL.basis_atoms:
             if truncated_atom_list[atom]:
                 new_nbasis +=1
+        
+        root_print(f" " )
+        root_print( f" ----------- Performing Truncation --------- " )
+        root_print(f" ")
+        root_print(f" Number of atoms before truncation: {len(truncated_atom_list)}")
+        root_print(f" Number of atoms after truncation: {len(active_atoms)}")
+        root_print(f" ")
+        root_print(f" Number of basis functions before truncation: {len(self.AB_LL.basis_atoms)}")
+        root_print(f" Number of basis functions after truncation: {new_nbasis}")
+        root_print(f" " )
+        root_print( f" ------------------------------------------- " )
+        root_print(f" " )
 
         BasisInfo = Basis_info()
         BasisInfo.full_natoms = len(truncated_atom_list)
@@ -214,14 +245,42 @@ class ProjectionEmbedding(EmbeddingBase):
 
     def run(self):
         """ Summary
-        The primary driver routine for performing QM-in-QM with a Projection-based embedding scheme. This scheme draws upon the work of Manby et al. [1, 2]. 
+        The primary driver routine for performing QM-in-QM with a Projection-based embedding scheme. This scheme draws upon the work of Manby et al. [1, 2].
 
-        The workflow within the current implementation operates as follows:
-        1) Calculate the KS-DFT energy of the combined subsystems A+B. 
+        The embedding scheme uses the following total energy expression...
+
+        Importing and exporting of density matrices and hamiltonians is 
+        performed with the ASI package [3].
+
+        The workflow operates as follows:
+        1) Calculate the KS-DFT energy of the combined subsystems A+B. Localised
+           density matrices, /gamma^{A} and /gamma^{B} 
+        2a) Extract the localised density matrices 
+        2b) (Optional) Select atoms in subsystem B that contribute
+            significantly to subsystem A (threshold 0.5 |e|) via 
+            Mulliken analysis: 
+                q^{A}_{/mu, /nu} = /gamma^{A}_{/mu, /nu} S_{/mu, /nu}
+            Basis functions of said atoms within calculations of the 
+            embedded subsystem will be included as ghost atoms. Other
+            basis functions will be removed (i.e., associated atomic centers
+            not included in the QM calculation, and associated rows and 
+            columns in intermediate hamiltonians and density matrices
+            deleted).
+        2) Calculate the total energy for subsystem A with the density 
+           matrix, /gamma^{A}
+        3) 
+
+        (For users of LaTeX, I am aware that a forward slash is used
+        in place of the traditional backward slash for mathematical symbols - 
+        unfortunately using backslashes in these comment blocks produces ugly
+        warnings within the comment blocks.)
+
+        
         ...
 
         (1) Manby, F. R.; Stella, M.; Goodpaster, J. D.; Miller, T. F. I. A Simple, Exact Density-Functional-Theory Embedding Scheme. J. Chem. Theory Comput. 2012, 8 (8), 2564–2568.
         (2) Lee, S. J. R.; Welborn, M.; Manby, F. R.; Miller, T. F. Projection-Based Wavefunction-in-DFT Embedding. Acc. Chem. Res. 2019, 52 (5), 1359–1368.
+        (3) TODO: REF
         """
         import numpy as np
 
@@ -234,11 +293,13 @@ class ProjectionEmbedding(EmbeddingBase):
         self.AB_LL.run()
 
         ''' 
-        Initialises the density matrix for subsystem A, and calculated the hamiltonian components for subsystem A at the low-level reference.
+        Initialises the density matrix for subsystem A, and calculates the hamiltonian components for subsystem A at the low-level reference.
         '''
         if self.truncate_basis:
-            basis_mask = self.select_atoms_basis_truncation(0.5)
+            basis_mask = self.select_atoms_basis_truncation(0.0001)
             self.set_truncation_defaults(basis_mask)
+        #else:
+        #    self.set_basis_info()
 
         self.A_LL.density_matrix_in = self.AB_LL.density_matrices_out[0]
         self.A_LL.run()
@@ -251,30 +312,58 @@ class ProjectionEmbedding(EmbeddingBase):
                             +self.AB_LL.density_matrices_out[1]))
         
         self.A_pop = self.calc_subsys_pop(self.AB_LL.overlap, 
-                            self.A_LL.density_matrices_out[0])
+                            self.AB_LL.density_matrices_out[0])
         
         self.B_pop = self.calc_subsys_pop(self.AB_LL.overlap, 
                             self.AB_LL.density_matrices_out[1])
+
+        root_print(f" Population of Subsystem AB: {self.AB_pop}")
+        root_print(f" Population of Subsystem A: {self.A_pop}")
+        root_print(f" Population of Subsystem B: {self.B_pop}")
         
         ''' 
         Initialises the density matrix for subsystem A, and calculated the hamiltonian components for subsystem A at the low-level reference.
         '''
-        self.calculate_levelshift_projector()
+        #self.calculate_levelshift_projector()
+        self.calculate_huzinaga_projector()
 
-        # Calculate density matrix for A high-level with embedded Fock
-        # matrix. 
+        '''
+        Calculate density matrix for subsystem A at the higher level of 
+        theory. Two terms are added to the hamiltonian matrix of the embedded
+        subsystem to form the full embedded Fock-matrix, F^{A}:
+          F^{A} = h^{core} + g^{high-level}[A] + v_{emb}^[A, B] + /mu P^{B}
+        1) v_{emb}^[A, B], the embedding potential, which introduces the 
+           Hartree and exchange-correlation potentials of the environment
+           (in the case of FHI-aims, this includes the full electrostatic
+           potential, i.e., the Hartree and nuclear-electron potentials of 
+           subsystem B acting on subsystem A).
+        2) The level-shift operator, /mu P^{B}, which orthogonalises the basis
+           functions associated with the environment (subsystem B) from the 
+           embedded subsystem by adding a large energy penalty to hamiltonian
+           components associated with subsystem B.
+        
+        Registered callbacks in ASI add the above components to the Fock-matrix
+        at every SCF iteration.
+        '''
         self.A_HL.density_matrix_in = \
                 self.AB_LL.density_matrices_out[0]
         self.A_HL.fock_embedding_matrix = \
                 self.AB_LL.hamiltonian_electrostatic - \
                     self.A_LL.hamiltonian_electrostatic + self.P_b
+                
         self.A_HL.run()
 
-        # Calculate high-level post-processed reference energy
+        '''
+        Calculate the total energy of the embedded subsystem A at the high
+        level of theory without the associated embedding potential.
+        '''        
         self.A_HL_PP.density_matrix_in = self.A_HL.density_matrices_out[0]
         self.A_HL_PP.run(ev_corr_scf=True)
         subsys_A_highlvl_totalen = self.A_HL_PP.ev_corr_total_energy
 
+        '''
+        A terrible cludge which requires improvement.
+        '''        
         # Re-normalising charge for differing atomic solvers (bad cludge)
         root_print(f" Normalizing density matrix from high-level reference...")
         self.A_HL_pop = self.calc_subsys_pop(self.AB_LL.overlap, self.A_HL.density_matrices_out[0])
@@ -282,6 +371,7 @@ class ProjectionEmbedding(EmbeddingBase):
         self.charge_renorm = (self.A_pop/self.A_HL_pop)
         root_print(f" Population of Subystem A^[HL] (post-norm): {self.calc_subsys_pop(self.AB_LL.overlap, self.charge_renorm*self.A_HL.
         density_matrices_out[0])}")
+        self.charge_renorm = 1.0
 
         # Calculate A low-level reference energy
         self.A_LL.density_matrix_in = self.charge_renorm * self.A_HL.density_matrices_out[0]
@@ -299,6 +389,7 @@ class ProjectionEmbedding(EmbeddingBase):
 
         self.DFT_AinB_total_energy = subsys_A_highlvl_totalen - \
             subsys_A_lowlvl_totalen + subsys_AB_lowlvl_totalen + self.PB_corr
+
         root_print( f" ----------- FINAL         OUTPUTS --------- " )
         root_print(f" ")
         root_print(f" Population Information:")
@@ -324,5 +415,25 @@ class ProjectionEmbedding(EmbeddingBase):
         root_print(f" -----------======================--------- " )
         root_print(f" " )
 
-
-
+#    def test_spade(self):
+#
+#        import copy
+#
+#        total_c_mat = (np.loadtxt('./AB_LL/KS_region_1_1.dat') + np.loadtxt('./#AB_LL/KS_region_2_1.dat'))[:,:23]
+#
+#        a_c_mat = copy.deepcopy(total_c_mat)
+#        #a_c_mat = np.sqrt(self.AB_LL.overlap) @ a_c_mat
+#
+#        active_atoms = [ idx for idx, maskval in enumerate(self.AB_LL.#embed_mask) if maskval==1 ]
+#
+#        mask = [ bas_at in active_atoms for bas_at in self.AB_LL.basis_atoms ]
+#
+#        for i in range(total_c_mat.shape[1]):
+#            a_c_mat[:,i] = np.where( mask, a_c_mat[:,i], np.zeros(self.AB_LL.#n_basis) )
+#
+#        u, s, v = np.linalg.svd(a_c_mat)
+#
+#        import matplotlib.pyplot as plt
+#        plt.matshow(a_c_mat)
+#        plt.matshow(total_c_mat @ v.T)
+#        plt.show()
