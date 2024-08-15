@@ -10,7 +10,7 @@ def dm_saving_callback(aux, iK, iS, descr, data, matrix_descr_pointer):
     try:
         asi, storage_dict, cnt_dict, label = cast(aux, py_object).value
         data_shape = (asi.n_basis,asi.n_basis) if asi.is_hamiltonian_real else (asi.n_basis,asi.n_basis, 2)
-    
+
         data = asi.scalapack.gather_numpy(descr, data, data_shape)
         asi.dm_count +=1
         if data is not None:
@@ -25,9 +25,9 @@ def ham_saving_callback(aux, iK, iS, descr, data, matrix_descr_pointer):
     try:
         asi, storage_dict, cnt_dict, label = cast(aux, py_object).value
         data_shape = (asi.n_basis,asi.n_basis) if asi.is_hamiltonian_real else (asi.n_basis,asi.n_basis, 2)
-        
+
         data = asi.scalapack.gather_numpy(descr, data, data_shape)
-        asi.ham_count +=1        
+        asi.ham_count +=1
         if data is not None:
             assert len(data.shape) == 2
             storage_dict[(asi.ham_count, iK, iS)] = data.copy()
@@ -148,7 +148,7 @@ class AtomsEmbed():
 
     def truncated_mat_to_full(self, trunc_mat):
         """_summary_
-        Expand a truncated matrix (dim: nbasis_active*nbasis_active) to 
+        Expand a truncated matrix (dim: nbasis_active*nbasis_active) to
         the full supermolecular basis (dim: nbasis*nbasis).
         """
         import copy
@@ -166,17 +166,13 @@ class AtomsEmbed():
         full_mat = np.zeros(shape=(self.basis_info.full_nbasis, self.basis_info.full_nbasis))
 
         for atom1 in active_atoms:
-            
-            # Skip atoms belonging to region A (or 1) as they are 
-            # 
-            #if self.embed_mask[atom1] == 1:
-            #    continue
+
+            # Skip atoms belonging to region A (or 1) as their basis
+            # functions are already included
 
             for atom2 in active_atoms:
-                # Skip core active atom blocks - they are already 
+                # Skip core active atom blocks - they are already
                 # correctly placed.
-                #if self.embed_mask[atom2] == 1:
-                #    continue
 
                 atom2_trunc = np.min(np.where(active_atoms==atom2))
                 atom1_trunc = np.min(np.where(active_atoms==atom1))
@@ -203,7 +199,7 @@ class AtomsEmbed():
         """
 
         with open('./'+self.outdir+'/asi.log') as output:
-            
+
             lines = output.readlines()
             for line in lines:
                 outline = line.split()
@@ -257,7 +253,7 @@ class AtomsEmbed():
 
         E0 = self.atoms.get_potential_energy()
 
-        # Temporary cludge to communicate DMs from root to other processes, 
+        # Temporary cludge to communicate DMs from root to other processes,
         # which somehow aren't stored on any rank other than 0.
         if MPI.COMM_WORLD.Get_rank() == 0:
             storage_keys = self.atoms.calc.asi.dm_storage.keys()
@@ -292,22 +288,22 @@ class AtomsEmbed():
 
         self.basis_atoms = self.atoms.calc.asi.basis_atoms
         self.n_basis = self.atoms.calc.asi.n_basis
-        
+
         self.extract_results()
 
         # Within the embedding workflow, we often want to calculate the total energy for a
         # given density matrix without performing any SCF steps. Often, this includes using
         # an input electron density constructed from a localised set of MOs for a fragment
-        # of a supermolecule. This density will be far from the ground-state density for the fragment, 
+        # of a supermolecule. This density will be far from the ground-state density for the fragment,
         # meaning the output eigenvalues significantly deviate from those of a fully converged density.
         # As the vast majority of DFT codes with the KS-eigenvalues to determine the total
-        # energy, the total energies due to the eigenvalues do not formally reflect the 
+        # energy, the total energies due to the eigenvalues do not formally reflect the
         # density matrix of the initial input for iteration, n=0:
         #
-        #    \gamma^{n+1} * H^{total}[\gamma^{n}] \= \gamma^{n} * H^{total}[\gamma^{n}], 
+        #    \gamma^{n+1} * H^{total}[\gamma^{n}] \= \gamma^{n} * H^{total}[\gamma^{n}],
         #
         # For TE-only calculations, we do not care about the SCF process - we are treating the
-        # DFT code as a pure integrator of the XC and electrostatic energies. As such, we 
+        # DFT code as a pure integrator of the XC and electrostatic energies. As such, we
         # 'correct' the eigenvalue portion of the total energy to reflect the interaction
         # of the input density matrix, as opposed to the first set of KS-eigenvectors resulting
         # from the DFT code.
@@ -350,35 +346,35 @@ class AtomsEmbed():
         """_summary_
         Represents the Fock embedding matrix used to level-shift/orthogonalise
         the subsystem orbitals of the environment from the active system:
-            (1) F^{A-in-B} = h^{core} + g^{hilev}[\gamma^{A}] 
+            (1) F^{A-in-B} = h^{core} + g^{hilev}[\gamma^{A}]
                                 + v_{emb}[\gamma^{A}, \gamma^{B}] + P_{B}[1]
-        where \gamma^{A} is the density matrix for the subystem, A},g[\gamma] 
-        are the two-electron interaction terms, is the embedding potential matrix, 
+        where \gamma^{A} is the density matrix for the subystem, A},g[\gamma]
+        are the two-electron interaction terms, is the embedding potential matrix,
             (2) v_{emb} = g^{low}[\gamma^{A} + \gamma^{B}] - g^{low}[\gamma^{A}]
         and h_core are the one-electron components of the hamiltonian (kinetic
         energy and nuclear-electron interactions).
 
-        NOTE: For FHI-aims, (1) is not formally constructed fully on the 
+        NOTE: For FHI-aims, (1) is not formally constructed fully on the
         wrapper level. Numerical stability in FHI-aims requires that the
         onsite potential per atom exactly cancel, precluding the clean
         separation of the nuclear-electron interactions from the total
         electrostatic matrix. As such, v_{emb} is constructed
         from all potential components.
 
-        Formally, this is exactly the same when the embedded Fock matrix is finally 
-        constructed in FHI-aims  for the high-level calculation - components of 
+        Formally, this is exactly the same when the embedded Fock matrix is finally
+        constructed in FHI-aims  for the high-level calculation - components of
         F^{A-in-B} are calculated in this function are added to the Hamiltonian
-        of FHI-aims before its entry into the eigensolver. As such, removing components of 
+        of FHI-aims before its entry into the eigensolver. As such, removing components of
         the nuclear-potential between atoms of A (included in g^{low}[\gamma^{A}])
-        makes perfect sense, as they are are calculated natively within FHI-aims. 
+        makes perfect sense, as they are are calculated natively within FHI-aims.
         For similar reasons, the kinetic energy componnts of h^{core} may be ignored.
 
         The final term calculated in the wrapper is then:
             (2) F_{wrapper}^{A-in-B} = H_{emb}^{Tot, lolev}[\gamma^{A} + \gamma^{B}]
-             - H_{emb}^{Tot, lolev}[\gamma^{A}] - t_k(\gamma^{A} + \gamma^{B}} 
+             - H_{emb}^{Tot, lolev}[\gamma^{A}] - t_k(\gamma^{A} + \gamma^{B}}
                                   - t_k(\gamma^{A}) + P_{B}
-        Where t_k is the kinetic energy contribution to the Hamiltonian and 
-        H_{emb}^{Tot, lolev}[\gamma] is the total hamiltonian derived from the 
+        Where t_k is the kinetic energy contribution to the Hamiltonian and
+        H_{emb}^{Tot, lolev}[\gamma] is the total hamiltonian derived from the
         density matrix, gamma at the low-level reference level of thoery.
 
 
@@ -397,7 +393,7 @@ class AtomsEmbed():
 
     @fock_embedding_matrix.setter
     def fock_embedding_matrix(self, inp_fock_embedding_mat):
-        
+
         if (not isinstance(inp_fock_embedding_mat, (np.ndarray)) and (inp_fock_embedding_mat is not None)):
             raise TypeError("Input vemb needs to be np.ndarray of dimensions nbasis*nbasis.")
 
@@ -429,7 +425,7 @@ class AtomsEmbed():
 
         if self.truncate:
             densmat = self.full_mat_to_truncated(densmat)
-        
+
         self._density_matrix_in = densmat
 
     @property

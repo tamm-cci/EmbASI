@@ -67,7 +67,7 @@ class Basis_info:
 
     def set_basis_atom_indexes(self):
         """_summary_
-        Sets the start and end index of the matrices with nbasis*nbasis or 
+        Sets the start and end index of the matrices with nbasis*nbasis or
         trunc_nbasis*trunc_nbasis dimensions for each atom block.
         """
         import numpy as np
