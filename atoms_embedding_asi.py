@@ -6,7 +6,7 @@ from ctypes import cdll, CDLL, RTLD_GLOBAL
 from ctypes import POINTER, byref, c_int, c_int64, c_int32, c_bool, c_char_p, c_double, c_void_p, CFUNCTYPE, py_object, cast, byref
 import ctypes
 
-def dm_saving_callback(aux, iK, iS, descr, data):    
+def dm_saving_callback(aux, iK, iS, descr, data, matrix_descr_pointer):
     try:
         asi, storage_dict, cnt_dict, label = cast(aux, py_object).value
         data_shape = (asi.n_basis,asi.n_basis) if asi.is_hamiltonian_real else (asi.n_basis,asi.n_basis, 2)
@@ -21,7 +21,7 @@ def dm_saving_callback(aux, iK, iS, descr, data):
         print(f"Something happened in ASI default_saving_callback {label}: {eee}\nAborting...")
         MPI.COMM_WORLD.Abort(1)
 
-def ham_saving_callback(aux, iK, iS, descr, data):
+def ham_saving_callback(aux, iK, iS, descr, data, matrix_descr_pointer):
     try:
         asi, storage_dict, cnt_dict, label = cast(aux, py_object).value
         data_shape = (asi.n_basis,asi.n_basis) if asi.is_hamiltonian_real else (asi.n_basis,asi.n_basis, 2)

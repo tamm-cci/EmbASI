@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 from ASI_embedding.parallel_utils import root_print
 import numpy as np
 
-class EmbeddingBase(ABC): 
+class EmbeddingBase(ABC):
 
     def __init__(self, atoms, embed_mask, calc_base_ll=None, calc_base_hl=None):
         import os
@@ -26,9 +26,9 @@ class EmbeddingBase(ABC):
         elif isinstance(self.embed_mask, list):
             assert len(val) == len(set(self.embed_mask)), \
                 "Invalid number of methods for given n_layers."
-            
+
         self._scf_methods = []
-        
+
         for scf in val:
             self._scf_methods.append(scf)
 
@@ -52,7 +52,9 @@ class ProjectionEmbedding(EmbeddingBase):
         Projection-Based Embedding (PbE) scheme of Manby et al.[1].
 
 
-        [1] Manby, F. R.; Stella, M.; Goodpaster, J. D.; Miller, T. F. I. A Simple, Exact Density-Functional-Theory Embedding Scheme. J. Chem. Theory Comput. 2012, 8 (8), 2564–2568.
+        [1] Manby, F. R.; Stella, M.; Goodpaster, J. D.; Miller, T. F. I.
+        A Simple, Exact Density-Functional-Theory Embedding Scheme. J. Chem.
+        Theory Comput. 2012, 8 (8), 2564–2568.
 
         Methods
         _______
@@ -98,7 +100,7 @@ class ProjectionEmbedding(EmbeddingBase):
         high_level_calculator_1.set(qm_embedding_calc = 3)
         high_level_calculator_1.set(charge = frag_charge)
         self.set_layer(atoms, self.calc_names[2], high_level_calculator_1, embed_mask, ghosts=2, no_scf=False)
-        
+
         high_level_calculator_2.set(qm_embedding_calc = 2)
         high_level_calculator_2.set(charge_mix_param = 0.)
         high_level_calculator_2.set(charge = frag_charge)
@@ -115,14 +117,14 @@ class ProjectionEmbedding(EmbeddingBase):
 
     @nlayers.setter
     def nlayers(self, val):
-        
+
         assert val == 2, \
                 "Only two layers currently valid for projection embedding."
         return self._nlayers
 
     def calculate_levelshift_projector(self):
         """_summary_
-        
+
         Calculate the level-shift based projection operator from 
         Manby et al.[1]:
                     P^{B} = /mu S^{AB} D^{B} S^{AB}
@@ -324,8 +326,8 @@ class ProjectionEmbedding(EmbeddingBase):
         ''' 
         Initialises the density matrix for subsystem A, and calculated the hamiltonian components for subsystem A at the low-level reference.
         '''
-        #self.calculate_levelshift_projector()
-        self.calculate_huzinaga_projector()
+        self.calculate_levelshift_projector()
+        #self.calculate_huzinaga_projector()
 
         '''
         Calculate density matrix for subsystem A at the higher level of 
