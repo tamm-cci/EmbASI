@@ -431,8 +431,9 @@ class AtomsEmbed():
     @property
     def density_matrices_out(self):
         """_summary_
-            Returns a list of all density matrices within the dictionary, self.atoms.calc.asi.dm_storage,
-            which stores all the matrices return from the calculation via ASI Callbacks.
+            Returns a list of all density matrices within the dictionary,
+            self.atoms.calc.asi.dm_storage, which stores all the matrices
+            return from the calculation via ASI Callbacks.
         Returns:
             list of np.ndarray: with dimensions (nbasis,nbasis)
         """
@@ -442,7 +443,8 @@ class AtomsEmbed():
         except:
             raise NameError("dm_count = 0: No density matrices stored!")
 
-        out_mats = [ self.atoms.calc.asi.dm_storage.get((dm_num+1,1,1)) for dm_num in range(num_densmat) ]
+        out_mats = [ self.atoms.calc.asi.dm_storage.get((dm_num+1,1,1)) \
+                     for dm_num in range(num_densmat) ]
 
         if self.truncate:
             for idx, trunc_mat in enumerate(out_mats):

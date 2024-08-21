@@ -1,6 +1,7 @@
 # ~ Overall Embedding object
 from abc import ABC, abstractmethod
 from ASI_embedding.parallel_utils import root_print
+import time
 import numpy as np
 
 class EmbeddingBase(ABC):
@@ -39,78 +40,6 @@ class EmbeddingBase(ABC):
         layer = AtomsEmbed(atoms, calc, embed_mask, outdir=layer_name, ghosts=ghosts, no_scf=no_scf)
         setattr(self, layer_name, layer)
 
-    @abstractmethod
-    def run(self):
-        pass
-
-class ProjectionEmbedding(EmbeddingBase):
-    def __init__(self, atoms, embed_mask, calc_base_ll, calc_base_hl, frag_charge=0, post_scf=None, mu_val=1e+06, truncate_basis=False):
-        """_summary_
-
-        A class controlling the interaction between two subsystems calculated at
-        two levels of theory (low-level and high-level) with the
-        Projection-Based Embedding (PbE) scheme of Manby et al.[1].
-
-
-        [1] Manby, F. R.; Stella, M.; Goodpaster, J. D.; Miller, T. F. I.
-        A Simple, Exact Density-Functional-Theory Embedding Scheme. J. Chem.
-        Theory Comput. 2012, 8 (8), 2564–2568.
-
-        Methods
-        _______
-
-
-        Args:
-            atoms (ASE Atoms Object): Input ASE Atoms object used to pass structural information
-            embed_mask (int OR list): _description_
-            calc_base_ll (ASE Calculator): _description_
-            calc_base_hl (ASE Calculator): _description_
-            frag_charge (int, optional): _description_. Defaults to 0.
-            post_scf (_type_, optional): _description_. Defaults to None.
-            mu_val (_type_, optional): _description_. Defaults to 1e+06 Ha.
-            truncate_basis (bool, optional): _description_. Defaults to 1e+06 Ha.
-        """
-        
-        
-        from copy import copy, deepcopy
-        from mpi4py import MPI
-
-        self.calc_names = ["AB_LL","A_LL","A_HL","A_HL_PP","AB_LL_PP"]
-
-        super(ProjectionEmbedding, self).__init__(atoms, embed_mask, calc_base_ll, calc_base_hl)
-        low_level_calculator_1 = deepcopy(self.calculator_ll)
-        low_level_calculator_2 = deepcopy(self.calculator_ll)
-        low_level_calculator_3 = deepcopy(self.calculator_ll)
-
-        high_level_calculator_1 = deepcopy(self.calculator_hl)
-        high_level_calculator_2 = deepcopy(self.calculator_hl)
-
-        low_level_calculator_1.set(qm_embedding_calc = 1)
-        self.set_layer(atoms, self.calc_names[0], low_level_calculator_1, embed_mask, ghosts=0, no_scf=False)
-
-        low_level_calculator_3.set(qm_embedding_calc = 2)
-        low_level_calculator_3.set(charge_mix_param = 0.)
-        self.set_layer(atoms, self.calc_names[4], low_level_calculator_3, embed_mask, ghosts=0, no_scf=False)
-        
-        low_level_calculator_2.set(qm_embedding_calc = 2)
-        low_level_calculator_2.set(charge_mix_param = 0.)
-        low_level_calculator_2.set(charge = frag_charge)
-        self.set_layer(atoms, self.calc_names[1], low_level_calculator_2, embed_mask, ghosts=2, no_scf=False)
-        
-        high_level_calculator_1.set(qm_embedding_calc = 3)
-        high_level_calculator_1.set(charge = frag_charge)
-        self.set_layer(atoms, self.calc_names[2], high_level_calculator_1, embed_mask, ghosts=2, no_scf=False)
-
-        high_level_calculator_2.set(qm_embedding_calc = 2)
-        high_level_calculator_2.set(charge_mix_param = 0.)
-        high_level_calculator_2.set(charge = frag_charge)
-        self.set_layer(atoms, self.calc_names[3], high_level_calculator_2, embed_mask, ghosts=2, no_scf=False)
-
-        self.mu_val = mu_val
-        self.rank = MPI.COMM_WORLD.Get_rank()
-        self.ntasks = MPI.COMM_WORLD.Get_size()
-        self.truncate_basis = truncate_basis
-
     @property
     def nlayers(self):
         return self._nlayers
@@ -121,25 +50,6 @@ class ProjectionEmbedding(EmbeddingBase):
         assert val == 2, \
                 "Only two layers currently valid for projection embedding."
         return self._nlayers
-
-    def calculate_levelshift_projector(self):
-        """_summary_
-
-        Calculate the level-shift based projection operator from 
-        Manby et al.[1]:
-                    P^{B} = /mu S^{AB} D^{B} S^{AB}
-        where S^{AB} is the overlap matrix for the supermolecular system, and
-        the density matrix for subsystem B.
-
-        [1] Manby, F. R.; Stella, M.; Goodpaster, J. D.; Miller, T. F. I. A Simple, Exact Density-Functional-Theory Embedding Scheme. J. Chem. Theory Comput. 2012, 8 (8), 2564–2568.
-        """
-
-        self.P_b = self.mu_val * (self.AB_LL.overlap @ self.AB_LL.density_matrices_out[1] @ self.AB_LL.overlap)
-
-    def calculate_huzinaga_projector(self):
-
-        self.P_b = self.AB_LL.hamiltonian_total @ self.AB_LL.density_matrices_out[1] @ self.AB_LL.overlap
-        self.P_b = -0.5*(self.P_b + self.AB_LL.overlap @ self.AB_LL.density_matrices_out[1] @ self.AB_LL.hamiltonian_total)
 
     def select_atoms_basis_truncation(self, thresh):
         """_summary_
@@ -245,9 +155,103 @@ class ProjectionEmbedding(EmbeddingBase):
 
         return population
 
+    @abstractmethod
+    def run(self):
+        pass
+
+class ProjectionEmbedding(EmbeddingBase):
+    def __init__(self, atoms, embed_mask, calc_base_ll, calc_base_hl, frag_charge=0, post_scf=None, mu_val=1e+06, truncate_basis=False):
+        """_summary_
+
+        A class controlling the interaction between two subsystems calculated at
+        two levels of theory (low-level and high-level) with the
+        Projection-Based Embedding (PbE) scheme of Manby et al.[1].
+
+
+        [1] Manby, F. R.; Stella, M.; Goodpaster, J. D.; Miller, T. F. I.
+        A Simple, Exact Density-Functional-Theory Embedding Scheme. J. Chem.
+        Theory Comput. 2012, 8 (8), 2564–2568.
+
+        Methods
+        _______
+
+
+        Args:
+            atoms (ASE Atoms Object): Input ASE Atoms object used to pass structural information
+            embed_mask (int OR list): _description_
+            calc_base_ll (ASE Calculator): _description_
+            calc_base_hl (ASE Calculator): _description_
+            frag_charge (int, optional): _description_. Defaults to 0.
+            post_scf (_type_, optional): _description_. Defaults to None.
+            mu_val (_type_, optional): _description_. Defaults to 1e+06 Ha.
+            truncate_basis (bool, optional): _description_. Defaults to 1e+06 Ha.
+        """
+        from copy import copy, deepcopy
+        from mpi4py import MPI
+
+        self.calc_names = ["AB_LL","A_LL","A_HL","A_HL_PP","AB_LL_PP"]
+
+        super(ProjectionEmbedding, self).__init__(atoms, embed_mask, calc_base_ll, calc_base_hl)
+        low_level_calculator_1 = deepcopy(self.calculator_ll)
+        low_level_calculator_2 = deepcopy(self.calculator_ll)
+        low_level_calculator_3 = deepcopy(self.calculator_ll)
+
+        high_level_calculator_1 = deepcopy(self.calculator_hl)
+        high_level_calculator_2 = deepcopy(self.calculator_hl)
+
+        low_level_calculator_1.set(qm_embedding_calc = 1)
+        self.set_layer(atoms, self.calc_names[0], low_level_calculator_1, embed_mask, ghosts=0, no_scf=False)
+
+        low_level_calculator_3.set(qm_embedding_calc = 2)
+        low_level_calculator_3.set(charge_mix_param = 0.)
+        self.set_layer(atoms, self.calc_names[4], low_level_calculator_3, embed_mask, ghosts=0, no_scf=False)
+
+        low_level_calculator_2.set(qm_embedding_calc = 2)
+        low_level_calculator_2.set(charge_mix_param = 0.)
+        low_level_calculator_2.set(charge = frag_charge)
+        self.set_layer(atoms, self.calc_names[1], low_level_calculator_2, embed_mask, ghosts=2, no_scf=False)
+
+        high_level_calculator_1.set(qm_embedding_calc = 3)
+        high_level_calculator_1.set(charge = frag_charge)
+        self.set_layer(atoms, self.calc_names[2], high_level_calculator_1, embed_mask, ghosts=2, no_scf=False)
+
+        high_level_calculator_2.set(qm_embedding_calc = 2)
+        high_level_calculator_2.set(charge_mix_param = 0.)
+        high_level_calculator_2.set(charge = frag_charge)
+        self.set_layer(atoms, self.calc_names[3], high_level_calculator_2, embed_mask, ghosts=2, no_scf=False)
+
+        self.mu_val = mu_val
+        self.rank = MPI.COMM_WORLD.Get_rank()
+        self.ntasks = MPI.COMM_WORLD.Get_size()
+        self.truncate_basis = truncate_basis
+
+    def calculate_levelshift_projector(self):
+        """_summary_
+
+        Calculate the level-shift based projection operator from 
+        Manby et al.[1]:
+                    P^{B} = /mu S^{AB} D^{B} S^{AB}
+        where S^{AB} is the overlap matrix for the supermolecular system, and
+        the density matrix for subsystem B.
+
+        [1] Manby, F. R.; Stella, M.; Goodpaster, J. D.; Miller, T. F. I.
+        A Simple, Exact Density-Functional-Theory Embedding Scheme.
+        J. Chem. Theory Comput. 2012, 8 (8), 2564–2568.
+        """
+
+        self.P_b = self.mu_val * (self.AB_LL.overlap @ self.AB_LL.density_matrices_out[1] @ self.AB_LL.overlap)
+
+    def calculate_huzinaga_projector(self):
+
+        self.P_b = self.AB_LL.hamiltonian_total @ self.AB_LL.density_matrices_out[1] @ self.AB_LL.overlap
+        self.P_b = -0.5*(self.P_b + self.AB_LL.overlap @ self.AB_LL.density_matrices_out[1] @ self.AB_LL.hamiltonian_total)
+
+
     def run(self):
         """ Summary
-        The primary driver routine for performing QM-in-QM with a Projection-based embedding scheme. This scheme draws upon the work of Manby et al. [1, 2].
+        The primary driver routine for performing QM-in-QM with a
+        Projection-based embedding scheme. This scheme draws upon
+        the work of Manby et al. [1, 2].
 
         The embedding scheme uses the following total energy expression...
 
@@ -288,13 +292,16 @@ class ProjectionEmbedding(EmbeddingBase):
 
         root_print("Embedding calculation begun...")
 
-        ''' 
+        '''
         Performs a single-point energy evaluation for a system composed of A
         and B. Returns localised density matrices for subsystems A and B, and the two-electron components of the hamiltonian (combined with nuclear-electron potential).
         '''
+        start = time.time()
         self.AB_LL.run()
+        end = time.time()
+        self.time_ab_lowlevel = end - start
 
-        ''' 
+        '''
         Initialises the density matrix for subsystem A, and calculates the hamiltonian components for subsystem A at the low-level reference.
         '''
         if self.truncate_basis:
@@ -304,26 +311,29 @@ class ProjectionEmbedding(EmbeddingBase):
         #    self.set_basis_info()
 
         self.A_LL.density_matrix_in = self.AB_LL.density_matrices_out[0]
+        start = time.time()
         self.A_LL.run()
+        end = time.time()
+        self.time_a_lowlevel = end - start
 
-        ''' 
-        Calculates the electron count for the combined (A+B) and separated subsystems (A and B). 
+        '''
+        Calculates the electron count for the combined (A+B) and separated subsystems (A and B).
         '''
         self.AB_pop = self.calc_subsys_pop(self.AB_LL.overlap, 
                             (self.AB_LL.density_matrices_out[0]
                             +self.AB_LL.density_matrices_out[1]))
-        
+
         self.A_pop = self.calc_subsys_pop(self.AB_LL.overlap, 
                             self.AB_LL.density_matrices_out[0])
-        
+
         self.B_pop = self.calc_subsys_pop(self.AB_LL.overlap, 
                             self.AB_LL.density_matrices_out[1])
 
         root_print(f" Population of Subsystem AB: {self.AB_pop}")
         root_print(f" Population of Subsystem A: {self.A_pop}")
         root_print(f" Population of Subsystem B: {self.B_pop}")
-        
-        ''' 
+
+        '''
         Initialises the density matrix for subsystem A, and calculated the hamiltonian components for subsystem A at the low-level reference.
         '''
         self.calculate_levelshift_projector()
@@ -343,7 +353,7 @@ class ProjectionEmbedding(EmbeddingBase):
            functions associated with the environment (subsystem B) from the 
            embedded subsystem by adding a large energy penalty to hamiltonian
            components associated with subsystem B.
-        
+
         Registered callbacks in ASI add the above components to the Fock-matrix
         at every SCF iteration.
         '''
@@ -352,16 +362,24 @@ class ProjectionEmbedding(EmbeddingBase):
         self.A_HL.fock_embedding_matrix = \
                 self.AB_LL.hamiltonian_electrostatic - \
                     self.A_LL.hamiltonian_electrostatic + self.P_b
-                
+
+        start = time.time()
         self.A_HL.run()
+        end = time.time()
+        self.time_a_highlevel = end - start
+
 
         '''
         Calculate the total energy of the embedded subsystem A at the high
         level of theory without the associated embedding potential.
-        '''        
+        '''
         self.A_HL_PP.density_matrix_in = self.A_HL.density_matrices_out[0]
+        start = time.time()
         self.A_HL_PP.run(ev_corr_scf=True)
         subsys_A_highlvl_totalen = self.A_HL_PP.ev_corr_total_energy
+        end = time.time()
+        self.time_a_highlevel_pp = end - start
+
 
         '''
         A terrible cludge which requires improvement.
@@ -378,13 +396,19 @@ class ProjectionEmbedding(EmbeddingBase):
         # Calculate A low-level reference energy
         self.A_LL.density_matrix_in = self.charge_renorm * self.A_HL.density_matrices_out[0]
         self.A_LL.run(ev_corr_scf=True)
+        start = time.time()
         subsys_A_lowlvl_totalen = self.A_LL.ev_corr_total_energy
+        end = time.time()
+        self.time_a_lowlevel_pp = end - start
 
         # Calculate AB low-level reference energy
         self.AB_LL_PP.density_matrix_in = (self.charge_renorm * self.A_HL.density_matrices_out[0]) + self.AB_LL.density_matrices_out[1]
 
+        start = time.time()
         self.AB_LL_PP.run(ev_corr_scf=True)
         subsys_AB_lowlvl_totalen = self.AB_LL_PP.ev_corr_total_energy
+        end = time.time()
+        self.time_ab_lowlevel_pp = end - start
 
         # Calculate projected density correction to total energy
         self.PB_corr = (np.trace(self.P_b @ self.A_HL.density_matrices_out[0]) * 27.211384500)
