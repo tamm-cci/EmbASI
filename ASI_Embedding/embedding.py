@@ -1,6 +1,6 @@
 # ~ Overall Embedding object
 from abc import ABC, abstractmethod
-from ASI_embedding.parallel_utils import root_print
+from ASI_Embedding.parallel_utils import root_print
 import time
 import numpy as np
 
@@ -83,7 +83,7 @@ class EmbeddingBase(ABC):
         Args:
             truncated_atom_list (list): A boolean mask asserting which atoms 
         """
-        from ASI_embedding.basis_info import Basis_info
+        from ASI_Embedding.basis_info import Basis_info
 
         # Establish mapping corresponding to each new atom from the 
         # truncated matrix

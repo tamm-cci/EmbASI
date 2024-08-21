@@ -1,5 +1,5 @@
 from asi4py.asecalc import ASI_ASE_calculator
-from ASI_embedding.parallel_utils import root_print
+from ASI_Embedding.parallel_utils import root_print
 import numpy as np
 from mpi4py import MPI
 from ctypes import cdll, CDLL, RTLD_GLOBAL
