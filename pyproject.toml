@@ -1,0 +1,18 @@
+[project]
+name = "ASI_EMBEDDING"
+version = "0.0.1"
+authors = [
+        {name="Gabriel Bramley", email="BramleyG@cardiff.ac.uk"},
+]
+description = "A generalised workflow for QM/QM Embedding"
+readme = "README.md"
+requires-python = ">=3.8"
+classifiers = [
+            "Programming Language :: Python :: 3",
+            "License :: OSI Approved :: MIT License",
+            "Operatoring System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://github.com/GabrielBram/ASI_embedding"
+Issues = "https://github.com/GabrielBram/ASI_embedding/issues"
