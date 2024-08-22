@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ASI_Embedding.atoms_embedding_asi &mdash; ASI_Embedding 00.00.01 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=80d5e7a1" />
+      <link rel="stylesheet" type="text/css" href="../../_static/css/theme.css?v=19f00094" />
+
+  
+  <!--[if lt IE 9]>
+    <script src="../../_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+        <script src="../../_static/jquery.js?v=5d32c60e"></script>
+        <script src="../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+        <script src="../../_static/documentation_options.js?v=d7bb8d4d"></script>
+        <script src="../../_static/doctools.js?v=9a2dae69"></script>
+        <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../index.html" class="icon icon-home">
+            ASI_Embedding
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../explainer.html">How It Works</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../codeintegration.html">QM Drivers</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../modules.html">ASI Embedding Modules</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../index.html">ASI_Embedding</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">ASI_Embedding.atoms_embedding_asi</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for ASI_Embedding.atoms_embedding_asi</h1><div class="highlight"><pre>
+<span></span><span class="kn">from</span> <span class="nn">asi4py.asecalc</span> <span class="kn">import</span> <span class="n">ASI_ASE_calculator</span>
+<span class="kn">from</span> <span class="nn">ASI_Embedding.parallel_utils</span> <span class="kn">import</span> <span class="n">root_print</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="kn">from</span> <span class="nn">mpi4py</span> <span class="kn">import</span> <span class="n">MPI</span>
+<span class="kn">from</span> <span class="nn">ctypes</span> <span class="kn">import</span> <span class="n">cdll</span><span class="p">,</span> <span class="n">CDLL</span><span class="p">,</span> <span class="n">RTLD_GLOBAL</span>
+<span class="kn">from</span> <span class="nn">ctypes</span> <span class="kn">import</span> <span class="n">POINTER</span><span class="p">,</span> <span class="n">byref</span><span class="p">,</span> <span class="n">c_int</span><span class="p">,</span> <span class="n">c_int64</span><span class="p">,</span> <span class="n">c_int32</span><span class="p">,</span> <span class="n">c_bool</span><span class="p">,</span> <span class="n">c_char_p</span><span class="p">,</span> <span class="n">c_double</span><span class="p">,</span> <span class="n">c_void_p</span><span class="p">,</span> <span class="n">CFUNCTYPE</span><span class="p">,</span> <span class="n">py_object</span><span class="p">,</span> <span class="n">cast</span><span class="p">,</span> <span class="n">byref</span>
+<span class="kn">import</span> <span class="nn">ctypes</span>
+
+<div class="viewcode-block" id="dm_saving_callback">
+<a class="viewcode-back" href="../../ASI_Embedding.html#ASI_Embedding.atoms_embedding_asi.dm_saving_callback">[docs]</a>
+<span class="k">def</span> <span class="nf">dm_saving_callback</span><span class="p">(</span><span class="n">aux</span><span class="p">,</span> <span class="n">iK</span><span class="p">,</span> <span class="n">iS</span><span class="p">,</span> <span class="n">descr</span><span class="p">,</span> <span class="n">data</span><span class="p">,</span> <span class="n">matrix_descr_pointer</span><span class="p">):</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">asi</span><span class="p">,</span> <span class="n">storage_dict</span><span class="p">,</span> <span class="n">cnt_dict</span><span class="p">,</span> <span class="n">label</span> <span class="o">=</span> <span class="n">cast</span><span class="p">(</span><span class="n">aux</span><span class="p">,</span> <span class="n">py_object</span><span class="p">)</span><span class="o">.</span><span class="n">value</span>
+        <span class="n">data_shape</span> <span class="o">=</span> <span class="p">(</span><span class="n">asi</span><span class="o">.</span><span class="n">n_basis</span><span class="p">,</span><span class="n">asi</span><span class="o">.</span><span class="n">n_basis</span><span class="p">)</span> <span class="k">if</span> <span class="n">asi</span><span class="o">.</span><span class="n">is_hamiltonian_real</span> <span class="k">else</span> <span class="p">(</span><span class="n">asi</span><span class="o">.</span><span class="n">n_basis</span><span class="p">,</span><span class="n">asi</span><span class="o">.</span><span class="n">n_basis</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+
+        <span class="n">data</span> <span class="o">=</span> <span class="n">asi</span><span class="o">.</span><span class="n">scalapack</span><span class="o">.</span><span class="n">gather_numpy</span><span class="p">(</span><span class="n">descr</span><span class="p">,</span> <span class="n">data</span><span class="p">,</span> <span class="n">data_shape</span><span class="p">)</span>
+        <span class="n">asi</span><span class="o">.</span><span class="n">dm_count</span> <span class="o">+=</span><span class="mi">1</span>
+        <span class="k">if</span> <span class="n">data</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">data</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span> <span class="o">==</span> <span class="mi">2</span>
+            <span class="n">storage_dict</span><span class="p">[(</span><span class="n">asi</span><span class="o">.</span><span class="n">dm_count</span><span class="p">,</span> <span class="n">iK</span><span class="p">,</span> <span class="n">iS</span><span class="p">)]</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">eee</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Something happened in ASI default_saving_callback </span><span class="si">{</span><span class="n">label</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">eee</span><span class="si">}</span><span class="se">\n</span><span class="s2">Aborting...&quot;</span><span class="p">)</span>
+        <span class="n">MPI</span><span class="o">.</span><span class="n">COMM_WORLD</span><span class="o">.</span><span class="n">Abort</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="ham_saving_callback">
+<a class="viewcode-back" href="../../ASI_Embedding.html#ASI_Embedding.atoms_embedding_asi.ham_saving_callback">[docs]</a>
+<span class="k">def</span> <span class="nf">ham_saving_callback</span><span class="p">(</span><span class="n">aux</span><span class="p">,</span> <span class="n">iK</span><span class="p">,</span> <span class="n">iS</span><span class="p">,</span> <span class="n">descr</span><span class="p">,</span> <span class="n">data</span><span class="p">,</span> <span class="n">matrix_descr_pointer</span><span class="p">):</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">asi</span><span class="p">,</span> <span class="n">storage_dict</span><span class="p">,</span> <span class="n">cnt_dict</span><span class="p">,</span> <span class="n">label</span> <span class="o">=</span> <span class="n">cast</span><span class="p">(</span><span class="n">aux</span><span class="p">,</span> <span class="n">py_object</span><span class="p">)</span><span class="o">.</span><span class="n">value</span>
+        <span class="n">data_shape</span> <span class="o">=</span> <span class="p">(</span><span class="n">asi</span><span class="o">.</span><span class="n">n_basis</span><span class="p">,</span><span class="n">asi</span><span class="o">.</span><span class="n">n_basis</span><span class="p">)</span> <span class="k">if</span> <span class="n">asi</span><span class="o">.</span><span class="n">is_hamiltonian_real</span> <span class="k">else</span> <span class="p">(</span><span class="n">asi</span><span class="o">.</span><span class="n">n_basis</span><span class="p">,</span><span class="n">asi</span><span class="o">.</span><span class="n">n_basis</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+
+        <span class="n">data</span> <span class="o">=</span> <span class="n">asi</span><span class="o">.</span><span class="n">scalapack</span><span class="o">.</span><span class="n">gather_numpy</span><span class="p">(</span><span class="n">descr</span><span class="p">,</span> <span class="n">data</span><span class="p">,</span> <span class="n">data_shape</span><span class="p">)</span>
+        <span class="n">asi</span><span class="o">.</span><span class="n">ham_count</span> <span class="o">+=</span><span class="mi">1</span>
+        <span class="k">if</span> <span class="n">data</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">data</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span> <span class="o">==</span> <span class="mi">2</span>
+            <span class="n">storage_dict</span><span class="p">[(</span><span class="n">asi</span><span class="o">.</span><span class="n">ham_count</span><span class="p">,</span> <span class="n">iK</span><span class="p">,</span> <span class="n">iS</span><span class="p">)]</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">eee</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Something happened in ASI default_saving_callback </span><span class="si">{</span><span class="n">label</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">eee</span><span class="si">}</span><span class="se">\n</span><span class="s2">Aborting...&quot;</span><span class="p">)</span>
+        <span class="n">MPI</span><span class="o">.</span><span class="n">COMM_WORLD</span><span class="o">.</span><span class="n">Abort</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="AtomsEmbed">
+<a class="viewcode-back" href="../../ASI_Embedding.html#ASI_Embedding.atoms_embedding_asi.AtomsEmbed">[docs]</a>
+<span class="k">class</span> <span class="nc">AtomsEmbed</span><span class="p">():</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">atoms</span><span class="p">,</span> <span class="n">initial_calc</span><span class="p">,</span> <span class="n">embed_mask</span><span class="p">,</span> <span class="n">no_scf</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">ghosts</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">outdir</span><span class="o">=</span><span class="s1">&#39;asi.calc&#39;</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">atoms</span> <span class="o">=</span> <span class="n">atoms</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">initial_embed_mask</span> <span class="o">=</span> <span class="n">embed_mask</span>
+        <span class="s2">&quot;Sets which layer/layers are set to be ghost atoms&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">outdir</span> <span class="o">=</span> <span class="n">outdir</span>
+
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">embed_mask</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
+            <span class="s2">&quot;We hope the user knows what they are doing and&quot;</span> \
+            <span class="s2">&quot;their atoms object is ordered accordingly&quot;</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">embed_mask</span> <span class="o">=</span> <span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">*</span><span class="n">embed_mask</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">embed_mask</span> <span class="o">+=</span> <span class="p">[</span><span class="mi">2</span><span class="p">]</span><span class="o">*</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">atoms</span><span class="p">)</span><span class="o">-</span><span class="n">embed_mask</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">embed_mask</span><span class="p">,</span> <span class="nb">list</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">embed_mask</span> <span class="o">=</span> <span class="n">embed_mask</span>
+            <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">atoms</span><span class="p">)</span><span class="o">==</span><span class="nb">len</span><span class="p">(</span><span class="n">embed_mask</span><span class="p">),</span> \
+                <span class="s2">&quot;Length of embedding mask does not match number of atoms&quot;</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">initial_calc</span> <span class="o">=</span> <span class="n">initial_calc</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">reorder_atoms_from_embed_mask</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="o">.</span><span class="n">info</span><span class="p">[</span><span class="s1">&#39;embedding_mask&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">embed_mask</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">truncate</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">density_matrix_in</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">fock_embedding_matrix</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">no_scf</span> <span class="o">=</span> <span class="n">no_scf</span>
+
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">ghosts</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
+            <span class="n">ghosts</span> <span class="o">=</span> <span class="p">[</span><span class="n">ghosts</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">ghost_list</span> <span class="o">=</span> <span class="p">[(</span><span class="n">at</span> <span class="ow">in</span> <span class="p">[</span><span class="n">ghosts</span><span class="p">])</span> <span class="k">for</span> <span class="n">at</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">embed_mask</span><span class="p">]</span>
+
+<div class="viewcode-block" id="AtomsEmbed.calc_initializer">
+<a class="viewcode-back" href="../../ASI_Embedding.html#ASI_Embedding.atoms_embedding_asi.AtomsEmbed.calc_initializer">[docs]</a>
+    <span class="k">def</span> <span class="nf">calc_initializer</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">asi</span><span class="p">):</span>
+
+        <span class="n">calc</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">initial_calc</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">no_scf</span><span class="p">:</span>
+            <span class="n">calc</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="n">sc_iter_limit</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">truncate</span><span class="p">:</span>
+            <span class="n">ghost_list</span> <span class="o">=</span> <span class="p">[</span> <span class="n">ghst</span> <span class="k">for</span> <span class="p">(</span><span class="n">idx</span><span class="p">,</span> <span class="n">ghst</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">ghost_list</span><span class="p">)</span> <span class="k">if</span> <span class="n">idx</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">basis_info</span><span class="o">.</span><span class="n">active_atoms</span> <span class="p">]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">ghost_list</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">ghost_list</span>
+
+        <span class="n">calc</span><span class="o">.</span><span class="n">write_input</span><span class="p">(</span><span class="n">asi</span><span class="o">.</span><span class="n">atoms</span><span class="p">,</span> <span class="n">ghosts</span><span class="o">=</span><span class="n">ghost_list</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_insert_embedding_region_aims</span><span class="p">()</span></div>
+
+
+<div class="viewcode-block" id="AtomsEmbed.reorder_atoms_from_embed_mask">
+<a class="viewcode-back" href="../../ASI_Embedding.html#ASI_Embedding.atoms_embedding_asi.AtomsEmbed.reorder_atoms_from_embed_mask">[docs]</a>
+    <span class="k">def</span> <span class="nf">reorder_atoms_from_embed_mask</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Re-orders atoms to push those in embedding region 1 to the beginning</span>
+<span class="sd">        :return:</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+
+        <span class="s2">&quot;Check if embedding mask is in the correct order (e.g., [1,1,1,2,2,2])&quot;</span>
+        <span class="s2">&quot;Ensure the next value is always ge than the current&quot;</span>
+        <span class="n">idx_list</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">argsort</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">embed_mask</span><span class="p">)</span>
+        <span class="n">sort_embed_mask</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sort</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">embed_mask</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">embed_mask</span> <span class="o">=</span> <span class="n">sort_embed_mask</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">atoms</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="p">[</span><span class="n">idx_list</span><span class="p">]</span></div>
+
+
+    <span class="k">def</span> <span class="nf">_insert_embedding_region_aims</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Lazy way of placing embedding regions in input file&quot;&quot;&quot;</span>
+        <span class="kn">import</span> <span class="nn">os</span>
+
+        <span class="n">cwd</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">getcwd</span><span class="p">()</span>
+        <span class="n">geometry_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">cwd</span><span class="p">,</span> <span class="s2">&quot;geometry.in&quot;</span><span class="p">)</span>
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">geometry_path</span><span class="p">,</span> <span class="s1">&#39;r&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fil</span><span class="p">:</span>
+            <span class="n">lines</span> <span class="o">=</span> <span class="n">fil</span><span class="o">.</span><span class="n">readlines</span><span class="p">()</span>
+            <span class="n">mask</span> <span class="o">=</span> <span class="p">[</span><span class="nb">any</span><span class="p">(</span><span class="n">s</span> <span class="ow">in</span> <span class="nb">str</span><span class="p">(</span><span class="n">line</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="p">(</span><span class="s1">&#39;atom&#39;</span><span class="p">,</span> <span class="s1">&#39;empty&#39;</span><span class="p">))</span> <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">lines</span><span class="p">]</span>
+
+        <span class="n">shift</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">for</span> <span class="n">idx</span><span class="p">,</span> <span class="n">maskval</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">mask</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">maskval</span><span class="p">:</span>
+                <span class="n">embedding</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="o">.</span><span class="n">info</span><span class="p">[</span><span class="s1">&#39;embedding_mask&#39;</span><span class="p">][</span><span class="n">shift</span><span class="p">]</span>
+                <span class="n">shift</span> <span class="o">+=</span> <span class="mi">1</span>
+                <span class="n">lines</span><span class="o">.</span><span class="n">insert</span><span class="p">(</span><span class="n">idx</span> <span class="o">+</span> <span class="n">shift</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;qm_embedding_region </span><span class="si">{</span><span class="n">embedding</span><span class="si">}</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">)</span>
+
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">geometry_path</span><span class="p">,</span> <span class="s1">&#39;w&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fil</span><span class="p">:</span>
+            <span class="n">lines</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">lines</span><span class="p">)</span>
+            <span class="n">fil</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">lines</span><span class="p">)</span>
+
+<div class="viewcode-block" id="AtomsEmbed.full_mat_to_truncated">
+<a class="viewcode-back" href="../../ASI_Embedding.html#ASI_Embedding.atoms_embedding_asi.AtomsEmbed.full_mat_to_truncated">[docs]</a>
+    <span class="k">def</span> <span class="nf">full_mat_to_truncated</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">full_mat</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;_summary_</span>
+<span class="sd">        Truncate a given matrix with atomic orbitals basis (n_basis x n_basis) dimensions (e.g., hamiltonian, overlap matrix, density matrices) to only atoms specified in atom_mask. Atoms specified in the active region by  self.embed_mask are always honoured.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="kn">import</span> <span class="nn">copy</span>
+
+        <span class="c1"># TODO: Set-up for upper-triangular matrices.</span>
+        <span class="n">full_basis_atoms</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">basis_info</span><span class="o">.</span><span class="n">full_basis_atoms</span>
+        <span class="n">full_nbasis</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">basis_info</span><span class="o">.</span><span class="n">full_nbasis</span>
+        <span class="n">active_atoms</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">basis_info</span><span class="o">.</span><span class="n">active_atoms</span>
+
+        <span class="n">basis_mask</span> <span class="o">=</span> <span class="p">[</span><span class="kc">True</span><span class="p">]</span><span class="o">*</span><span class="n">full_nbasis</span>
+
+        <span class="k">for</span> <span class="n">bas_idx</span><span class="p">,</span> <span class="n">atom</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">full_basis_atoms</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">atom</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">active_atoms</span><span class="p">:</span>
+                <span class="n">basis_mask</span><span class="p">[</span><span class="n">bas_idx</span><span class="p">]</span> <span class="o">=</span> <span class="kc">False</span>
+
+        <span class="n">trunc_mat</span> <span class="o">=</span> <span class="n">copy</span><span class="o">.</span><span class="n">deepcopy</span><span class="p">(</span><span class="n">full_mat</span><span class="p">)</span>
+
+        <span class="c1"># Delete Rows and Cols corresponding to inactive atoms </span>
+        <span class="c1"># (ie., inactive atom AOs).</span>
+        <span class="n">trunc_mat</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">compress</span><span class="p">(</span> <span class="n">basis_mask</span><span class="p">,</span> <span class="n">trunc_mat</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span> <span class="p">)</span>
+        <span class="n">trunc_mat</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">compress</span><span class="p">(</span> <span class="n">basis_mask</span><span class="p">,</span> <span class="n">trunc_mat</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span> <span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">trunc_mat</span></div>
+
+
+<div class="viewcode-block" id="AtomsEmbed.truncated_mat_to_full">
+<a class="viewcode-back" href="../../ASI_Embedding.html#ASI_Embedding.atoms_embedding_asi.AtomsEmbed.truncated_mat_to_full">[docs]</a>
+    <span class="k">def</span> <span class="nf">truncated_mat_to_full</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">trunc_mat</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;_summary_</span>
+<span class="sd">        Expand a truncated matrix (dim: nbasis_active*nbasis_active) to</span>
+<span class="sd">        the full supermolecular basis (dim: nbasis*nbasis).</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="kn">import</span> <span class="nn">copy</span>
+
+        <span class="c1"># Set to local variables to improve readability</span>
+        <span class="n">active_atoms</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">basis_info</span><span class="o">.</span><span class="n">active_atoms</span>
+
+        <span class="c1"># TODO: Set-up for upper-triangular matrices.</span>
+        <span class="n">trunc_basis_min_idx</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">basis_info</span><span class="o">.</span><span class="n">trunc_basis_min_idx</span>
+        <span class="n">trunc_basis_max_idx</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">basis_info</span><span class="o">.</span><span class="n">trunc_basis_max_idx</span>
+        <span class="n">full_basis_min_idx</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">basis_info</span><span class="o">.</span><span class="n">full_basis_min_idx</span>
+        <span class="n">full_basis_max_idx</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">basis_info</span><span class="o">.</span><span class="n">full_basis_max_idx</span>
+
+        <span class="c1"># Set-up empty matrix to read into</span>
+        <span class="n">full_mat</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">shape</span><span class="o">=</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">basis_info</span><span class="o">.</span><span class="n">full_nbasis</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">basis_info</span><span class="o">.</span><span class="n">full_nbasis</span><span class="p">))</span>
+
+        <span class="k">for</span> <span class="n">atom1</span> <span class="ow">in</span> <span class="n">active_atoms</span><span class="p">:</span>
+
+            <span class="c1"># Skip atoms belonging to region A (or 1) as their basis</span>
+            <span class="c1"># functions are already included</span>
+
+            <span class="k">for</span> <span class="n">atom2</span> <span class="ow">in</span> <span class="n">active_atoms</span><span class="p">:</span>
+                <span class="c1"># Skip core active atom blocks - they are already</span>
+                <span class="c1"># correctly placed.</span>
+
+                <span class="n">atom2_trunc</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">min</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">active_atoms</span><span class="o">==</span><span class="n">atom2</span><span class="p">))</span>
+                <span class="n">atom1_trunc</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">min</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">active_atoms</span><span class="o">==</span><span class="n">atom1</span><span class="p">))</span>
+
+                <span class="n">trunc_row_min</span> <span class="o">=</span> <span class="n">trunc_basis_min_idx</span><span class="p">[</span><span class="n">atom2_trunc</span><span class="p">]</span>
+                <span class="n">trunc_row_max</span> <span class="o">=</span> <span class="n">trunc_basis_max_idx</span><span class="p">[</span><span class="n">atom2_trunc</span><span class="p">]</span>
+                <span class="n">trunc_col_min</span> <span class="o">=</span> <span class="n">trunc_basis_min_idx</span><span class="p">[</span><span class="n">atom1_trunc</span><span class="p">]</span>
+                <span class="n">trunc_col_max</span> <span class="o">=</span> <span class="n">trunc_basis_max_idx</span><span class="p">[</span><span class="n">atom1_trunc</span><span class="p">]</span>
+
+                <span class="n">full_row_min</span> <span class="o">=</span> <span class="n">full_basis_min_idx</span><span class="p">[</span><span class="n">atom2</span><span class="p">]</span>
+                <span class="n">full_row_max</span> <span class="o">=</span> <span class="n">full_basis_max_idx</span><span class="p">[</span><span class="n">atom2</span><span class="p">]</span>
+                <span class="n">full_col_min</span> <span class="o">=</span> <span class="n">full_basis_min_idx</span><span class="p">[</span><span class="n">atom1</span><span class="p">]</span>
+                <span class="n">full_col_max</span> <span class="o">=</span> <span class="n">full_basis_max_idx</span><span class="p">[</span><span class="n">atom1</span><span class="p">]</span>
+
+                <span class="n">full_mat</span><span class="p">[</span><span class="n">full_row_min</span><span class="p">:</span><span class="n">full_row_max</span><span class="p">,</span> <span class="n">full_col_min</span><span class="p">:</span><span class="n">full_col_max</span><span class="p">]</span> <span class="o">=</span> <span class="n">trunc_mat</span><span class="p">[</span><span class="n">trunc_row_min</span><span class="p">:</span><span class="n">trunc_row_max</span><span class="p">,</span> <span class="n">trunc_col_min</span><span class="p">:</span><span class="n">trunc_col_max</span><span class="p">]</span>
+
+        <span class="k">return</span> <span class="n">full_mat</span></div>
+
+
+<div class="viewcode-block" id="AtomsEmbed.extract_results">
+<a class="viewcode-back" href="../../ASI_Embedding.html#ASI_Embedding.atoms_embedding_asi.AtomsEmbed.extract_results">[docs]</a>
+    <span class="k">def</span> <span class="nf">extract_results</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Extracts results from the DFT code output file that are otherwise unavailable</span>
+<span class="sd">        within the ASE framework. This may need a separate module if other calculators are</span>
+<span class="sd">        implemented.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="s1">&#39;./&#39;</span><span class="o">+</span><span class="bp">self</span><span class="o">.</span><span class="n">outdir</span><span class="o">+</span><span class="s1">&#39;/asi.log&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">output</span><span class="p">:</span>
+
+            <span class="n">lines</span> <span class="o">=</span> <span class="n">output</span><span class="o">.</span><span class="n">readlines</span><span class="p">()</span>
+            <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">lines</span><span class="p">:</span>
+                <span class="n">outline</span> <span class="o">=</span> <span class="n">line</span><span class="o">.</span><span class="n">split</span><span class="p">()</span>
+
+                <span class="k">if</span> <span class="s1">&#39;  | Kinetic energy                :&#39;</span> <span class="ow">in</span> <span class="n">line</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">kinetic_energy</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">outline</span><span class="p">[</span><span class="mi">6</span><span class="p">])</span>
+
+                <span class="k">if</span> <span class="s1">&#39;  | Electrostatic energy          :&#39;</span> <span class="ow">in</span> <span class="n">line</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">es_energy</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">outline</span><span class="p">[</span><span class="mi">6</span><span class="p">])</span>
+
+                <span class="k">if</span> <span class="s1">&#39;  | Sum of eigenvalues            :&#39;</span> <span class="ow">in</span> <span class="n">line</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">ev_sum</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">outline</span><span class="p">[</span><span class="mi">7</span><span class="p">])</span></div>
+
+
+<div class="viewcode-block" id="AtomsEmbed.run">
+<a class="viewcode-back" href="../../ASI_Embedding.html#ASI_Embedding.atoms_embedding_asi.AtomsEmbed.run">[docs]</a>
+    <span class="k">def</span> <span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">ev_corr_scf</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Actually performed a given simulation run for the calculator.</span>
+<span class="sd">            Must be separated for indidividual system calls.&quot;&quot;&quot;</span>
+        <span class="kn">import</span> <span class="nn">os</span>
+        <span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+        <span class="kn">from</span> <span class="nn">asi4py.asecalc</span> <span class="kn">import</span> <span class="n">ASI_ASE_calculator</span>
+
+        <span class="n">root_print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Calculation </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">outdir</span><span class="si">}</span><span class="s1">...&#39;</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">truncate</span> <span class="ow">and</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="p">)</span> <span class="o">!=</span> <span class="bp">self</span><span class="o">.</span><span class="n">basis_info</span><span class="o">.</span><span class="n">trunc_natoms</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">atoms</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">basis_info</span><span class="o">.</span><span class="n">active_atoms</span><span class="p">]</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="o">.</span><span class="n">calc</span> <span class="o">=</span> <span class="n">ASI_ASE_calculator</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s1">&#39;ASI_LIB_PATH&#39;</span><span class="p">],</span>
+                                        <span class="bp">self</span><span class="o">.</span><span class="n">calc_initializer</span><span class="p">,</span>
+                                        <span class="n">MPI</span><span class="o">.</span><span class="n">COMM_WORLD</span><span class="p">,</span>
+                                        <span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="p">,</span>
+                                        <span class="n">work_dir</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">outdir</span><span class="p">)</span>
+
+        <span class="c1">#self.atoms.calc.asi.keep_hamiltonian = True</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="o">.</span><span class="n">calc</span><span class="o">.</span><span class="n">asi</span><span class="o">.</span><span class="n">keep_overlap</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="c1">#self.atoms.calc.asi.keep_density_matrix = True</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="o">.</span><span class="n">calc</span><span class="o">.</span><span class="n">asi</span><span class="o">.</span><span class="n">dm_storage</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="o">.</span><span class="n">calc</span><span class="o">.</span><span class="n">asi</span><span class="o">.</span><span class="n">dm_calc_cnt</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="o">.</span><span class="n">calc</span><span class="o">.</span><span class="n">asi</span><span class="o">.</span><span class="n">dm_count</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="o">.</span><span class="n">calc</span><span class="o">.</span><span class="n">asi</span><span class="o">.</span><span class="n">register_dm_callback</span><span class="p">(</span><span class="n">dm_saving_callback</span><span class="p">,</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="o">.</span><span class="n">calc</span><span class="o">.</span><span class="n">asi</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="o">.</span><span class="n">calc</span><span class="o">.</span><span class="n">asi</span><span class="o">.</span><span class="n">dm_storage</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="o">.</span><span class="n">calc</span><span class="o">.</span><span class="n">asi</span><span class="o">.</span><span class="n">dm_calc_cnt</span><span class="p">,</span> <span class="s1">&#39;DM calc&#39;</span><span class="p">))</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="o">.</span><span class="n">calc</span><span class="o">.</span><span class="n">asi</span><span class="o">.</span><span class="n">ham_storage</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="o">.</span><span class="n">calc</span><span class="o">.</span><span class="n">asi</span><span class="o">.</span><span class="n">ham_calc_cnt</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="o">.</span><span class="n">calc</span><span class="o">.</span><span class="n">asi</span><span class="o">.</span><span class="n">ham_count</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="o">.</span><span class="n">calc</span><span class="o">.</span><span class="n">asi</span><span class="o">.</span><span class="n">register_hamiltonian_callback</span><span class="p">(</span><span class="n">ham_saving_callback</span><span class="p">,</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="o">.</span><span class="n">calc</span><span class="o">.</span><span class="n">asi</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="o">.</span><span class="n">calc</span><span class="o">.</span><span class="n">asi</span><span class="o">.</span><span class="n">ham_storage</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="o">.</span><span class="n">calc</span><span class="o">.</span><span class="n">asi</span><span class="o">.</span><span class="n">ham_calc_cnt</span><span class="p">,</span> <span class="s1">&#39;Ham calc&#39;</span><span class="p">))</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">density_matrix_in</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="s1">&#39;TODO: Actual type enforcement and error handling&#39;</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="o">.</span><span class="n">calc</span><span class="o">.</span><span class="n">asi</span><span class="o">.</span><span class="n">init_density_matrix</span> <span class="o">=</span> <span class="p">{(</span><span class="mi">1</span><span class="p">,</span><span class="mi">1</span><span class="p">):</span> <span class="n">np</span><span class="o">.</span><span class="n">asfortranarray</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">density_matrix_in</span><span class="p">)}</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">fock_embedding_matrix</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="o">.</span><span class="n">calc</span><span class="o">.</span><span class="n">asi</span><span class="o">.</span><span class="n">init_hamiltonian</span> <span class="o">=</span> <span class="p">{(</span><span class="mi">1</span><span class="p">,</span><span class="mi">1</span><span class="p">):</span> <span class="n">np</span><span class="o">.</span><span class="n">asfortranarray</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">fock_embedding_matrix</span><span class="p">)}</span>
+
+        <span class="n">E0</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="o">.</span><span class="n">get_potential_energy</span><span class="p">()</span>
+
+        <span class="c1"># Temporary cludge to communicate DMs from root to other processes,</span>
+        <span class="c1"># which somehow aren&#39;t stored on any rank other than 0.</span>
+        <span class="k">if</span> <span class="n">MPI</span><span class="o">.</span><span class="n">COMM_WORLD</span><span class="o">.</span><span class="n">Get_rank</span><span class="p">()</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">storage_keys</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="o">.</span><span class="n">calc</span><span class="o">.</span><span class="n">asi</span><span class="o">.</span><span class="n">dm_storage</span><span class="o">.</span><span class="n">keys</span><span class="p">()</span>
+            <span class="n">data</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">storage_keys</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int16</span><span class="p">)</span>
+            <span class="n">data_shape</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">data</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int16</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">data_shape</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mi">0</span><span class="p">,</span><span class="mi">0</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int16</span><span class="p">)</span>
+
+        <span class="c1"># Broadcast the size of the data</span>
+        <span class="n">MPI</span><span class="o">.</span><span class="n">COMM_WORLD</span><span class="o">.</span><span class="n">Bcast</span><span class="p">([</span><span class="n">data_shape</span><span class="p">,</span> <span class="n">MPI</span><span class="o">.</span><span class="n">INT16_T</span><span class="p">],</span> <span class="n">root</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">MPI</span><span class="o">.</span><span class="n">COMM_WORLD</span><span class="o">.</span><span class="n">Get_rank</span><span class="p">()</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">data</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">storage_keys</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int16</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">data</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="nb">tuple</span><span class="p">(</span><span class="n">data_shape</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">int16</span><span class="p">)</span>
+
+        <span class="n">MPI</span><span class="o">.</span><span class="n">COMM_WORLD</span><span class="o">.</span><span class="n">Bcast</span><span class="p">([</span><span class="n">data</span><span class="p">,</span> <span class="n">MPI</span><span class="o">.</span><span class="n">INT16_T</span><span class="p">],</span> <span class="n">root</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+        <span class="n">data_dict_keys</span> <span class="o">=</span> <span class="n">data</span>
+
+        <span class="k">for</span> <span class="n">data_key</span> <span class="ow">in</span> <span class="n">data_dict_keys</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">MPI</span><span class="o">.</span><span class="n">COMM_WORLD</span><span class="o">.</span><span class="n">Get_rank</span><span class="p">()</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">data_buf</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="o">.</span><span class="n">calc</span><span class="o">.</span><span class="n">asi</span><span class="o">.</span><span class="n">dm_storage</span><span class="p">[</span><span class="nb">tuple</span><span class="p">(</span><span class="n">data_key</span><span class="p">)]</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">data_buf</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="o">.</span><span class="n">calc</span><span class="o">.</span><span class="n">asi</span><span class="o">.</span><span class="n">n_basis</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="o">.</span><span class="n">calc</span><span class="o">.</span><span class="n">asi</span><span class="o">.</span><span class="n">n_basis</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">)</span>
+
+            <span class="n">MPI</span><span class="o">.</span><span class="n">COMM_WORLD</span><span class="o">.</span><span class="n">Bcast</span><span class="p">([</span><span class="n">data_buf</span><span class="p">,</span> <span class="n">MPI</span><span class="o">.</span><span class="n">DOUBLE</span><span class="p">],</span> <span class="n">root</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="n">MPI</span><span class="o">.</span><span class="n">COMM_WORLD</span><span class="o">.</span><span class="n">Get_rank</span><span class="p">()</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="o">.</span><span class="n">calc</span><span class="o">.</span><span class="n">asi</span><span class="o">.</span><span class="n">dm_storage</span><span class="p">[</span><span class="nb">tuple</span><span class="p">(</span><span class="n">data_key</span><span class="p">)]</span> <span class="o">=</span> <span class="n">data_buf</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">total_energy</span> <span class="o">=</span> <span class="n">E0</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">basis_atoms</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="o">.</span><span class="n">calc</span><span class="o">.</span><span class="n">asi</span><span class="o">.</span><span class="n">basis_atoms</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">n_basis</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="o">.</span><span class="n">calc</span><span class="o">.</span><span class="n">asi</span><span class="o">.</span><span class="n">n_basis</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">extract_results</span><span class="p">()</span>
+
+        <span class="c1"># Within the embedding workflow, we often want to calculate the total energy for a</span>
+        <span class="c1"># given density matrix without performing any SCF steps. Often, this includes using</span>
+        <span class="c1"># an input electron density constructed from a localised set of MOs for a fragment</span>
+        <span class="c1"># of a supermolecule. This density will be far from the ground-state density for the fragment,</span>
+        <span class="c1"># meaning the output eigenvalues significantly deviate from those of a fully converged density.</span>
+        <span class="c1"># As the vast majority of DFT codes with the KS-eigenvalues to determine the total</span>
+        <span class="c1"># energy, the total energies due to the eigenvalues do not formally reflect the</span>
+        <span class="c1"># density matrix of the initial input for iteration, n=0:</span>
+        <span class="c1">#</span>
+        <span class="c1">#    \gamma^{n+1} * H^{total}[\gamma^{n}] \= \gamma^{n} * H^{total}[\gamma^{n}],</span>
+        <span class="c1">#</span>
+        <span class="c1"># For TE-only calculations, we do not care about the SCF process - we are treating the</span>
+        <span class="c1"># DFT code as a pure integrator of the XC and electrostatic energies. As such, we</span>
+        <span class="c1"># &#39;correct&#39; the eigenvalue portion of the total energy to reflect the interaction</span>
+        <span class="c1"># of the input density matrix, as opposed to the first set of KS-eigenvectors resulting</span>
+        <span class="c1"># from the DFT code.</span>
+        <span class="k">if</span> <span class="n">ev_corr_scf</span><span class="p">:</span>
+
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">truncate</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">ev_corr_energy</span> <span class="o">=</span> <span class="mf">27.211384500</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">trace</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">density_matrix_in</span> <span class="o">@</span> <span class="bp">self</span><span class="o">.</span><span class="n">full_mat_to_truncated</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">hamiltonian_total</span><span class="p">))</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">ev_corr_energy</span> <span class="o">=</span> <span class="mf">27.211384500</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">trace</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">density_matrix_in</span> <span class="o">@</span> <span class="bp">self</span><span class="o">.</span><span class="n">hamiltonian_total</span><span class="p">)</span>
+
+            <span class="bp">self</span><span class="o">.</span><span class="n">ev_corr_total_energy</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">total_energy</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">ev_sum</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">ev_corr_energy</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="o">.</span><span class="n">calc</span><span class="o">.</span><span class="n">asi</span><span class="o">.</span><span class="n">close</span><span class="p">()</span></div>
+
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">hamiltonian_kinetic</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">core_idx</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="o">.</span><span class="n">calc</span><span class="o">.</span><span class="n">asi</span><span class="o">.</span><span class="n">ham_count</span> <span class="o">-</span> <span class="mi">1</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">truncate</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">truncated_mat_to_full</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="o">.</span><span class="n">calc</span><span class="o">.</span><span class="n">asi</span><span class="o">.</span><span class="n">ham_storage</span><span class="o">.</span><span class="n">get</span><span class="p">((</span><span class="n">core_idx</span><span class="p">,</span><span class="mi">1</span><span class="p">,</span><span class="mi">1</span><span class="p">)))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="o">.</span><span class="n">calc</span><span class="o">.</span><span class="n">asi</span><span class="o">.</span><span class="n">ham_storage</span><span class="o">.</span><span class="n">get</span><span class="p">((</span><span class="n">core_idx</span><span class="p">,</span><span class="mi">1</span><span class="p">,</span><span class="mi">1</span><span class="p">))</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">hamiltonian_total</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">tot_idx</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="o">.</span><span class="n">calc</span><span class="o">.</span><span class="n">asi</span><span class="o">.</span><span class="n">ham_count</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">truncate</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">truncated_mat_to_full</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="o">.</span><span class="n">calc</span><span class="o">.</span><span class="n">asi</span><span class="o">.</span><span class="n">ham_storage</span><span class="o">.</span><span class="n">get</span><span class="p">((</span><span class="n">tot_idx</span><span class="p">,</span><span class="mi">1</span><span class="p">,</span><span class="mi">1</span><span class="p">)))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="o">.</span><span class="n">calc</span><span class="o">.</span><span class="n">asi</span><span class="o">.</span><span class="n">ham_storage</span><span class="o">.</span><span class="n">get</span><span class="p">((</span><span class="n">tot_idx</span><span class="p">,</span><span class="mi">1</span><span class="p">,</span><span class="mi">1</span><span class="p">))</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">hamiltonian_electrostatic</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;_summary_</span>
+<span class="sd">        Generates</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">hamiltonian_total</span> <span class="o">-</span> <span class="bp">self</span><span class="o">.</span><span class="n">hamiltonian_kinetic</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">fock_embedding_matrix</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;_summary_</span>
+<span class="sd">        Represents the Fock embedding matrix used to level-shift/orthogonalise</span>
+<span class="sd">        the subsystem orbitals of the environment from the active system:</span>
+<span class="sd">            (1) F^{A-in-B} = h^{core} + g^{hilev}[\gamma^{A}]</span>
+<span class="sd">                                + v_{emb}[\gamma^{A}, \gamma^{B}] + P_{B}[1]</span>
+<span class="sd">        where \gamma^{A} is the density matrix for the subystem, A},g[\gamma]</span>
+<span class="sd">        are the two-electron interaction terms, is the embedding potential matrix,</span>
+<span class="sd">            (2) v_{emb} = g^{low}[\gamma^{A} + \gamma^{B}] - g^{low}[\gamma^{A}]</span>
+<span class="sd">        and h_core are the one-electron components of the hamiltonian (kinetic</span>
+<span class="sd">        energy and nuclear-electron interactions).</span>
+
+<span class="sd">        NOTE: For FHI-aims, (1) is not formally constructed fully on the</span>
+<span class="sd">        wrapper level. Numerical stability in FHI-aims requires that the</span>
+<span class="sd">        onsite potential per atom exactly cancel, precluding the clean</span>
+<span class="sd">        separation of the nuclear-electron interactions from the total</span>
+<span class="sd">        electrostatic matrix. As such, v_{emb} is constructed</span>
+<span class="sd">        from all potential components.</span>
+
+<span class="sd">        Formally, this is exactly the same when the embedded Fock matrix is finally</span>
+<span class="sd">        constructed in FHI-aims  for the high-level calculation - components of</span>
+<span class="sd">        F^{A-in-B} are calculated in this function are added to the Hamiltonian</span>
+<span class="sd">        of FHI-aims before its entry into the eigensolver. As such, removing components of</span>
+<span class="sd">        the nuclear-potential between atoms of A (included in g^{low}[\gamma^{A}])</span>
+<span class="sd">        makes perfect sense, as they are are calculated natively within FHI-aims.</span>
+<span class="sd">        For similar reasons, the kinetic energy componnts of h^{core} may be ignored.</span>
+
+<span class="sd">        The final term calculated in the wrapper is then:</span>
+<span class="sd">            (2) F_{wrapper}^{A-in-B} = H_{emb}^{Tot, lolev}[\gamma^{A} + \gamma^{B}]</span>
+<span class="sd">             - H_{emb}^{Tot, lolev}[\gamma^{A}] - t_k(\gamma^{A} + \gamma^{B}}</span>
+<span class="sd">                                  - t_k(\gamma^{A}) + P_{B}</span>
+<span class="sd">        Where t_k is the kinetic energy contribution to the Hamiltonian and</span>
+<span class="sd">        H_{emb}^{Tot, lolev}[\gamma] is the total hamiltonian derived from the</span>
+<span class="sd">        density matrix, gamma at the low-level reference level of thoery.</span>
+
+
+<span class="sd">            [1] Lee, S. et al., Acc. Chem. Res. 2019, 52 (5), 1359–1368.</span>
+<span class="sd">    Input:</span>
+<span class="sd">        vemb, np.ndarray: Embedding potential of environment at calculation at</span>
+<span class="sd">                            low level of theory (ie., first four terms of </span>
+<span class="sd">                            equation (2)). (nbasis,nbasis):</span>
+<span class="sd">        projection_matrix, np.ndarray: Projection matrix to level shift P_B</span>
+<span class="sd">                            components of the environment upwards relative to</span>
+<span class="sd">                            the active subsystem (nbasis,nbasis)</span>
+<span class="sd">    Returns:</span>
+<span class="sd">        fock_embedding_matrix, np.ndarray: fock_embedding_matrix(nbasis,nbasis)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_fock_embedding_matrix</span>
+
+    <span class="nd">@fock_embedding_matrix</span><span class="o">.</span><span class="n">setter</span>
+    <span class="k">def</span> <span class="nf">fock_embedding_matrix</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">inp_fock_embedding_mat</span><span class="p">):</span>
+
+        <span class="k">if</span> <span class="p">(</span><span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">inp_fock_embedding_mat</span><span class="p">,</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">))</span> <span class="ow">and</span> <span class="p">(</span><span class="n">inp_fock_embedding_mat</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">)):</span>
+            <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span><span class="s2">&quot;Input vemb needs to be np.ndarray of dimensions nbasis*nbasis.&quot;</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="p">((</span><span class="n">inp_fock_embedding_mat</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">)):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_fock_embedding_matrix</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">truncate</span><span class="p">:</span>
+            <span class="n">inp_fock_embedding_mat</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">full_mat_to_truncated</span><span class="p">(</span><span class="n">inp_fock_embedding_mat</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_fock_embedding_matrix</span> <span class="o">=</span> <span class="n">inp_fock_embedding_mat</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">density_matrix_in</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;_summary_</span>
+<span class="sd">            Defines the density matrix used as an input to construct the density</span>
+<span class="sd">            upon the initialisation of a given calulation</span>
+<span class="sd">        Returns:</span>
+<span class="sd">            np.ndarray: with dimensions (nbasis,nbasis)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_density_matrix_in</span>
+
+    <span class="nd">@density_matrix_in</span><span class="o">.</span><span class="n">setter</span>
+    <span class="k">def</span> <span class="nf">density_matrix_in</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">densmat</span><span class="p">):</span>
+
+        <span class="k">if</span> <span class="p">(</span><span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">densmat</span><span class="p">,</span> <span class="p">(</span><span class="nb">list</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)))</span> <span class="ow">and</span> <span class="p">(</span><span class="ow">not</span> <span class="p">(</span><span class="n">densmat</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">)):</span>
+            <span class="k">raise</span> <span class="ne">TypeError</span><span class="p">(</span><span class="s2">&quot;Input needs to be np.ndarray of dimensions nbasis*nbasis.&quot;</span><span class="p">)</span>
+
+        <span class="c1"># TODO: DIMENSION CHECKING</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">truncate</span><span class="p">:</span>
+            <span class="n">densmat</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">full_mat_to_truncated</span><span class="p">(</span><span class="n">densmat</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_density_matrix_in</span> <span class="o">=</span> <span class="n">densmat</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">density_matrices_out</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;_summary_</span>
+<span class="sd">            Returns a list of all density matrices within the dictionary,</span>
+<span class="sd">            self.atoms.calc.asi.dm_storage, which stores all the matrices</span>
+<span class="sd">            return from the calculation via ASI Callbacks.</span>
+<span class="sd">        Returns:</span>
+<span class="sd">            list of np.ndarray: with dimensions (nbasis,nbasis)</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">num_densmat</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="o">.</span><span class="n">calc</span><span class="o">.</span><span class="n">asi</span><span class="o">.</span><span class="n">dm_count</span>
+        <span class="k">except</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">NameError</span><span class="p">(</span><span class="s2">&quot;dm_count = 0: No density matrices stored!&quot;</span><span class="p">)</span>
+
+        <span class="n">out_mats</span> <span class="o">=</span> <span class="p">[</span> <span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="o">.</span><span class="n">calc</span><span class="o">.</span><span class="n">asi</span><span class="o">.</span><span class="n">dm_storage</span><span class="o">.</span><span class="n">get</span><span class="p">((</span><span class="n">dm_num</span><span class="o">+</span><span class="mi">1</span><span class="p">,</span><span class="mi">1</span><span class="p">,</span><span class="mi">1</span><span class="p">))</span> \
+                     <span class="k">for</span> <span class="n">dm_num</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_densmat</span><span class="p">)</span> <span class="p">]</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">truncate</span><span class="p">:</span>
+            <span class="k">for</span> <span class="n">idx</span><span class="p">,</span> <span class="n">trunc_mat</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">out_mats</span><span class="p">):</span>
+                <span class="n">out_mats</span><span class="p">[</span><span class="n">idx</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">truncated_mat_to_full</span><span class="p">(</span><span class="n">trunc_mat</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">out_mats</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">overlap</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">atoms</span><span class="o">.</span><span class="n">calc</span><span class="o">.</span><span class="n">asi</span><span class="o">.</span><span class="n">overlap_storage</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span><span class="mi">1</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">basis_atoms</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_basis_atoms</span>
+
+    <span class="nd">@basis_atoms</span><span class="o">.</span><span class="n">setter</span>
+    <span class="k">def</span> <span class="nf">basis_atoms</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">val</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_basis_atoms</span> <span class="o">=</span> <span class="n">val</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">n_basis</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_n_basis</span>
+
+    <span class="nd">@n_basis</span><span class="o">.</span><span class="n">setter</span>
+    <span class="k">def</span> <span class="nf">n_basis</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">val</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_n_basis</span> <span class="o">=</span> <span class="n">val</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">truncate</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_truncate</span>
+
+    <span class="nd">@truncate</span><span class="o">.</span><span class="n">setter</span>
+    <span class="k">def</span> <span class="nf">truncate</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">val</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_truncate</span> <span class="o">=</span> <span class="n">val</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">basis_info</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_basis_info</span>
+
+    <span class="nd">@basis_info</span><span class="o">.</span><span class="n">setter</span>
+    <span class="k">def</span> <span class="nf">basis_info</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">val</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_basis_info</span> <span class="o">=</span> <span class="n">val</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024, Gabriel A. Bramley.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

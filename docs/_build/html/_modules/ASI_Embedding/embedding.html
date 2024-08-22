@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ASI_Embedding.embedding &mdash; ASI_Embedding 00.00.01 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=80d5e7a1" />
+      <link rel="stylesheet" type="text/css" href="../../_static/css/theme.css?v=19f00094" />
+
+  
+  <!--[if lt IE 9]>
+    <script src="../../_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+        <script src="../../_static/jquery.js?v=5d32c60e"></script>
+        <script src="../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+        <script src="../../_static/documentation_options.js?v=d7bb8d4d"></script>
+        <script src="../../_static/doctools.js?v=9a2dae69"></script>
+        <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../index.html" class="icon icon-home">
+            ASI_Embedding
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../explainer.html">How It Works</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../codeintegration.html">QM Drivers</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../modules.html">ASI Embedding Modules</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../index.html">ASI_Embedding</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">ASI_Embedding.embedding</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for ASI_Embedding.embedding</h1><div class="highlight"><pre>
+<span></span><span class="c1"># ~ Overall Embedding object</span>
+<span class="kn">from</span> <span class="nn">abc</span> <span class="kn">import</span> <span class="n">ABC</span><span class="p">,</span> <span class="n">abstractmethod</span>
+<span class="kn">from</span> <span class="nn">ASI_Embedding.parallel_utils</span> <span class="kn">import</span> <span class="n">root_print</span>
+<span class="kn">import</span> <span class="nn">time</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+
+<div class="viewcode-block" id="EmbeddingBase">
+<a class="viewcode-back" href="../../ASI_Embedding.html#ASI_Embedding.embedding.EmbeddingBase">[docs]</a>
+<span class="k">class</span> <span class="nc">EmbeddingBase</span><span class="p">(</span><span class="n">ABC</span><span class="p">):</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">atoms</span><span class="p">,</span> <span class="n">embed_mask</span><span class="p">,</span> <span class="n">calc_base_ll</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">calc_base_hl</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+        <span class="kn">import</span> <span class="nn">os</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">asi_lib_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s1">&#39;ASI_LIB_PATH&#39;</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">embed_mask</span> <span class="o">=</span> <span class="n">embed_mask</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">calculator_ll</span> <span class="o">=</span> <span class="n">calc_base_ll</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">calculator_hl</span> <span class="o">=</span> <span class="n">calc_base_hl</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">scf_methods</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_scf_methods</span>
+
+    <span class="nd">@scf_methods</span><span class="o">.</span><span class="n">setter</span>
+    <span class="k">def</span> <span class="nf">scf_methods</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">val</span><span class="p">):</span>
+
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">embed_mask</span><span class="p">,</span> <span class="nb">int</span><span class="p">):</span>
+            <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">val</span><span class="p">)</span> <span class="o">==</span> <span class="mi">2</span><span class="p">,</span> \
+                <span class="s2">&quot;Invalid number of methods for given n_layers.&quot;</span>
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">embed_mask</span><span class="p">,</span> <span class="nb">list</span><span class="p">):</span>
+            <span class="k">assert</span> <span class="nb">len</span><span class="p">(</span><span class="n">val</span><span class="p">)</span> <span class="o">==</span> <span class="nb">len</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">embed_mask</span><span class="p">)),</span> \
+                <span class="s2">&quot;Invalid number of methods for given n_layers.&quot;</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_scf_methods</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="k">for</span> <span class="n">scf</span> <span class="ow">in</span> <span class="n">val</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_scf_methods</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">scf</span><span class="p">)</span>
+
+<div class="viewcode-block" id="EmbeddingBase.set_layer">
+<a class="viewcode-back" href="../../ASI_Embedding.html#ASI_Embedding.embedding.EmbeddingBase.set_layer">[docs]</a>
+    <span class="k">def</span> <span class="nf">set_layer</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">atoms</span><span class="p">,</span> <span class="n">layer_name</span><span class="p">,</span> <span class="n">calc</span><span class="p">,</span> <span class="n">embed_mask</span><span class="p">,</span> <span class="n">ghosts</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">no_scf</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+        <span class="s2">&quot;Initialises the AtomsEmbed methods for a given method&quot;</span>
+        <span class="kn">from</span> <span class="nn">.atoms_embedding_asi</span> <span class="kn">import</span> <span class="n">AtomsEmbed</span>
+
+        <span class="n">layer</span> <span class="o">=</span> <span class="n">AtomsEmbed</span><span class="p">(</span><span class="n">atoms</span><span class="p">,</span> <span class="n">calc</span><span class="p">,</span> <span class="n">embed_mask</span><span class="p">,</span> <span class="n">outdir</span><span class="o">=</span><span class="n">layer_name</span><span class="p">,</span> <span class="n">ghosts</span><span class="o">=</span><span class="n">ghosts</span><span class="p">,</span> <span class="n">no_scf</span><span class="o">=</span><span class="n">no_scf</span><span class="p">)</span>
+        <span class="nb">setattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">layer_name</span><span class="p">,</span> <span class="n">layer</span><span class="p">)</span></div>
+
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">nlayers</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_nlayers</span>
+
+    <span class="nd">@nlayers</span><span class="o">.</span><span class="n">setter</span>
+    <span class="k">def</span> <span class="nf">nlayers</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">val</span><span class="p">):</span>
+
+        <span class="k">assert</span> <span class="n">val</span> <span class="o">==</span> <span class="mi">2</span><span class="p">,</span> \
+                <span class="s2">&quot;Only two layers currently valid for projection embedding.&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_nlayers</span>
+
+<div class="viewcode-block" id="EmbeddingBase.select_atoms_basis_truncation">
+<a class="viewcode-back" href="../../ASI_Embedding.html#ASI_Embedding.embedding.EmbeddingBase.select_atoms_basis_truncation">[docs]</a>
+    <span class="k">def</span> <span class="nf">select_atoms_basis_truncation</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">thresh</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;_summary_</span>
+<span class="sd">        Returns a list of corresponding atoms for which the total contribution of an atoms constituent basis functions to the total charge of subsystem A, q^{A}:</span>
+<span class="sd">               q^{A}_{/mu, /nu} = /gamma^{A}_{/mu, /nu} S_{/mu, /nu}</span>
+<span class="sd">        exceeds the threshold, thresh:</span>
+<span class="sd">                      thresh &lt; q_{/mu, /nu} </span>
+<span class="sd">        This is unfortunately just Mulliken analysis.</span>
+<span class="sd">        Args:</span>
+<span class="sd">            thresh (float): _description_</span>
+<span class="sd">        Returns: </span>
+<span class="sd">            active_mask (list): True/False mask for </span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="n">basis_charge</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">diag</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">AB_LL</span><span class="o">.</span><span class="n">density_matrices_out</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">@</span> <span class="bp">self</span><span class="o">.</span><span class="n">AB_LL</span><span class="o">.</span><span class="n">overlap</span><span class="p">)</span>
+        <span class="n">atomic_charge</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">AB_LL</span><span class="o">.</span><span class="n">atoms</span><span class="p">))</span>
+
+        <span class="k">for</span> <span class="n">idx</span><span class="p">,</span> <span class="n">charge</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">basis_charge</span><span class="p">):</span>
+            <span class="n">atomic_charge</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">AB_LL</span><span class="o">.</span><span class="n">basis_atoms</span><span class="p">[</span><span class="n">idx</span><span class="p">]]</span> <span class="o">+=</span> <span class="nb">abs</span><span class="p">(</span><span class="n">charge</span><span class="p">)</span>
+
+        <span class="n">truncated_atom_list</span> <span class="o">=</span> <span class="p">[</span> <span class="n">charge</span> <span class="o">&gt;</span> <span class="n">thresh</span> <span class="k">for</span> <span class="n">charge</span> <span class="ow">in</span> <span class="n">atomic_charge</span> <span class="p">]</span>
+
+        <span class="k">return</span> <span class="n">truncated_atom_list</span></div>
+
+
+<div class="viewcode-block" id="EmbeddingBase.set_truncation_defaults">
+<a class="viewcode-back" href="../../ASI_Embedding.html#ASI_Embedding.embedding.EmbeddingBase.set_truncation_defaults">[docs]</a>
+    <span class="k">def</span> <span class="nf">set_truncation_defaults</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">truncated_atom_list</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;_summary_</span>
+<span class="sd">        Necessary to maintain consistency in values needed for matrix truncation</span>
+<span class="sd">        /expansion between the AtomsEmbed objects (eg., self.basis_atoms, </span>
+<span class="sd">        self.n_atoms). Failure to do so leads to unexpected behaviour.</span>
+<span class="sd">        which </span>
+<span class="sd">        Args:</span>
+<span class="sd">            truncated_atom_list (list): A boolean mask asserting which atoms </span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="kn">from</span> <span class="nn">ASI_Embedding.basis_info</span> <span class="kn">import</span> <span class="n">Basis_info</span>
+
+        <span class="c1"># Establish mapping corresponding to each new atom from the </span>
+        <span class="c1"># truncated matrix</span>
+        <span class="n">active_atoms</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span> <span class="n">idx</span> <span class="k">for</span> <span class="n">idx</span><span class="p">,</span> <span class="n">maskval</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">truncated_atom_list</span><span class="p">)</span> <span class="k">if</span> <span class="n">maskval</span> <span class="p">])</span>
+
+        <span class="c1"># Remove non-active atoms from basis_atoms to form a truncated</span>
+        <span class="c1"># analogue</span>
+        <span class="n">trunc_basis_atoms</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="n">atom</span> <span class="k">for</span> <span class="n">atom</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">AB_LL</span><span class="o">.</span><span class="n">basis_atoms</span> <span class="k">if</span> <span class="n">atom</span> <span class="ow">in</span> <span class="n">active_atoms</span><span class="p">])</span>
+
+        <span class="c1"># Count number of basis functions included in truncation calculations</span>
+        <span class="n">new_nbasis</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">for</span> <span class="n">atom</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">AB_LL</span><span class="o">.</span><span class="n">basis_atoms</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">truncated_atom_list</span><span class="p">[</span><span class="n">atom</span><span class="p">]:</span>
+                <span class="n">new_nbasis</span> <span class="o">+=</span><span class="mi">1</span>
+        
+        <span class="n">root_print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot; &quot;</span> <span class="p">)</span>
+        <span class="n">root_print</span><span class="p">(</span> <span class="sa">f</span><span class="s2">&quot; ----------- Performing Truncation --------- &quot;</span> <span class="p">)</span>
+        <span class="n">root_print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot; &quot;</span><span class="p">)</span>
+        <span class="n">root_print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot; Number of atoms before truncation: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">truncated_atom_list</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">root_print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot; Number of atoms after truncation: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">active_atoms</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">root_print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot; &quot;</span><span class="p">)</span>
+        <span class="n">root_print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot; Number of basis functions before truncation: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">AB_LL</span><span class="o">.</span><span class="n">basis_atoms</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">root_print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot; Number of basis functions after truncation: </span><span class="si">{</span><span class="n">new_nbasis</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">root_print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot; &quot;</span> <span class="p">)</span>
+        <span class="n">root_print</span><span class="p">(</span> <span class="sa">f</span><span class="s2">&quot; ------------------------------------------- &quot;</span> <span class="p">)</span>
+        <span class="n">root_print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot; &quot;</span> <span class="p">)</span>
+
+        <span class="n">BasisInfo</span> <span class="o">=</span> <span class="n">Basis_info</span><span class="p">()</span>
+        <span class="n">BasisInfo</span><span class="o">.</span><span class="n">full_natoms</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">truncated_atom_list</span><span class="p">)</span>
+        <span class="n">BasisInfo</span><span class="o">.</span><span class="n">trunc_natoms</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">active_atoms</span><span class="p">)</span>
+        <span class="n">BasisInfo</span><span class="o">.</span><span class="n">active_atoms</span> <span class="o">=</span> <span class="n">active_atoms</span>
+        <span class="n">BasisInfo</span><span class="o">.</span><span class="n">full_basis_atoms</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">AB_LL</span><span class="o">.</span><span class="n">basis_atoms</span>
+        <span class="n">BasisInfo</span><span class="o">.</span><span class="n">trunc_basis_atoms</span> <span class="o">=</span> <span class="n">trunc_basis_atoms</span>
+        <span class="n">BasisInfo</span><span class="o">.</span><span class="n">full_nbasis</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">AB_LL</span><span class="o">.</span><span class="n">n_basis</span>
+        <span class="n">BasisInfo</span><span class="o">.</span><span class="n">trunc_nbasis</span> <span class="o">=</span> <span class="n">new_nbasis</span>
+        <span class="n">BasisInfo</span><span class="o">.</span><span class="n">set_basis_atom_indexes</span><span class="p">()</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">AB_LL</span><span class="o">.</span><span class="n">truncate</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">AB_LL</span><span class="o">.</span><span class="n">basis_info</span> <span class="o">=</span> <span class="n">BasisInfo</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">A_LL</span><span class="o">.</span><span class="n">truncate</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">A_LL</span><span class="o">.</span><span class="n">basis_info</span> <span class="o">=</span> <span class="n">BasisInfo</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">A_HL</span><span class="o">.</span><span class="n">truncate</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">A_HL</span><span class="o">.</span><span class="n">basis_info</span> <span class="o">=</span> <span class="n">BasisInfo</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">A_HL_PP</span><span class="o">.</span><span class="n">truncate</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">A_HL_PP</span><span class="o">.</span><span class="n">basis_info</span> <span class="o">=</span> <span class="n">BasisInfo</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">AB_LL_PP</span><span class="o">.</span><span class="n">truncate</span> <span class="o">=</span> <span class="kc">False</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">AB_LL_PP</span><span class="o">.</span><span class="n">basis_info</span> <span class="o">=</span> <span class="n">BasisInfo</span></div>
+
+
+<div class="viewcode-block" id="EmbeddingBase.calc_subsys_pop">
+<a class="viewcode-back" href="../../ASI_Embedding.html#ASI_Embedding.embedding.EmbeddingBase.calc_subsys_pop">[docs]</a>
+    <span class="k">def</span> <span class="nf">calc_subsys_pop</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">overlap_matrix</span><span class="p">,</span> <span class="n">density_matrix</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot; Summary</span>
+<span class="sd">            Calculates the overall electron population of a given subsystem</span>
+<span class="sd">            through the following relation:</span>
+<span class="sd">                    P_{pop} = tr[S^{AB}/gamma]</span>
+<span class="sd">            where S^{AB} is the overlap matrix for the supermolecular system</span>
+<span class="sd">            and /gamma is the density matrix of a given subsystem.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            overlap_matrix (np.ndarray): Supersystem overlap matrix in AO basis.</span>
+<span class="sd">            density_matrix (np.ndarray): Subsystem density matrix in AO basis,</span>
+<span class="sd">        Returns:</span>
+<span class="sd">            population (int): Overall electronic population of subsystem</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="n">population</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">trace</span><span class="p">(</span><span class="n">overlap_matrix</span> <span class="o">@</span> <span class="p">(</span><span class="n">density_matrix</span><span class="p">))</span>
+
+        <span class="k">return</span> <span class="n">population</span></div>
+
+
+<div class="viewcode-block" id="EmbeddingBase.run">
+<a class="viewcode-back" href="../../ASI_Embedding.html#ASI_Embedding.embedding.EmbeddingBase.run">[docs]</a>
+    <span class="nd">@abstractmethod</span>
+    <span class="k">def</span> <span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">pass</span></div>
+</div>
+
+
+<div class="viewcode-block" id="ProjectionEmbedding">
+<a class="viewcode-back" href="../../ASI_Embedding.html#ASI_Embedding.embedding.ProjectionEmbedding">[docs]</a>
+<span class="k">class</span> <span class="nc">ProjectionEmbedding</span><span class="p">(</span><span class="n">EmbeddingBase</span><span class="p">):</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">atoms</span><span class="p">,</span> <span class="n">embed_mask</span><span class="p">,</span> <span class="n">calc_base_ll</span><span class="p">,</span> <span class="n">calc_base_hl</span><span class="p">,</span> <span class="n">frag_charge</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">post_scf</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">mu_val</span><span class="o">=</span><span class="mf">1e+06</span><span class="p">,</span> <span class="n">truncate_basis</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;_summary_</span>
+
+<span class="sd">        A class controlling the interaction between two subsystems calculated at</span>
+<span class="sd">        two levels of theory (low-level and high-level) with the</span>
+<span class="sd">        Projection-Based Embedding (PbE) scheme of Manby et al.[1].</span>
+
+
+<span class="sd">        [1] Manby, F. R.; Stella, M.; Goodpaster, J. D.; Miller, T. F. I.</span>
+<span class="sd">        A Simple, Exact Density-Functional-Theory Embedding Scheme. J. Chem.</span>
+<span class="sd">        Theory Comput. 2012, 8 (8), 2564–2568.</span>
+
+<span class="sd">        Methods</span>
+<span class="sd">        _______</span>
+
+
+<span class="sd">        Args:</span>
+<span class="sd">            atoms (ASE Atoms Object): Input ASE Atoms object used to pass structural information</span>
+<span class="sd">            embed_mask (int OR list): _description_</span>
+<span class="sd">            calc_base_ll (ASE Calculator): _description_</span>
+<span class="sd">            calc_base_hl (ASE Calculator): _description_</span>
+<span class="sd">            frag_charge (int, optional): _description_. Defaults to 0.</span>
+<span class="sd">            post_scf (_type_, optional): _description_. Defaults to None.</span>
+<span class="sd">            mu_val (_type_, optional): _description_. Defaults to 1e+06 Ha.</span>
+<span class="sd">            truncate_basis (bool, optional): _description_. Defaults to 1e+06 Ha.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="kn">from</span> <span class="nn">copy</span> <span class="kn">import</span> <span class="n">copy</span><span class="p">,</span> <span class="n">deepcopy</span>
+        <span class="kn">from</span> <span class="nn">mpi4py</span> <span class="kn">import</span> <span class="n">MPI</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">calc_names</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;AB_LL&quot;</span><span class="p">,</span><span class="s2">&quot;A_LL&quot;</span><span class="p">,</span><span class="s2">&quot;A_HL&quot;</span><span class="p">,</span><span class="s2">&quot;A_HL_PP&quot;</span><span class="p">,</span><span class="s2">&quot;AB_LL_PP&quot;</span><span class="p">]</span>
+
+        <span class="nb">super</span><span class="p">(</span><span class="n">ProjectionEmbedding</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">atoms</span><span class="p">,</span> <span class="n">embed_mask</span><span class="p">,</span> <span class="n">calc_base_ll</span><span class="p">,</span> <span class="n">calc_base_hl</span><span class="p">)</span>
+        <span class="n">low_level_calculator_1</span> <span class="o">=</span> <span class="n">deepcopy</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">calculator_ll</span><span class="p">)</span>
+        <span class="n">low_level_calculator_2</span> <span class="o">=</span> <span class="n">deepcopy</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">calculator_ll</span><span class="p">)</span>
+        <span class="n">low_level_calculator_3</span> <span class="o">=</span> <span class="n">deepcopy</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">calculator_ll</span><span class="p">)</span>
+
+        <span class="n">high_level_calculator_1</span> <span class="o">=</span> <span class="n">deepcopy</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">calculator_hl</span><span class="p">)</span>
+        <span class="n">high_level_calculator_2</span> <span class="o">=</span> <span class="n">deepcopy</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">calculator_hl</span><span class="p">)</span>
+
+        <span class="n">low_level_calculator_1</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="n">qm_embedding_calc</span> <span class="o">=</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">set_layer</span><span class="p">(</span><span class="n">atoms</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">calc_names</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">low_level_calculator_1</span><span class="p">,</span> <span class="n">embed_mask</span><span class="p">,</span> <span class="n">ghosts</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">no_scf</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+        <span class="n">low_level_calculator_3</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="n">qm_embedding_calc</span> <span class="o">=</span> <span class="mi">2</span><span class="p">)</span>
+        <span class="n">low_level_calculator_3</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="n">charge_mix_param</span> <span class="o">=</span> <span class="mf">0.</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">set_layer</span><span class="p">(</span><span class="n">atoms</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">calc_names</span><span class="p">[</span><span class="mi">4</span><span class="p">],</span> <span class="n">low_level_calculator_3</span><span class="p">,</span> <span class="n">embed_mask</span><span class="p">,</span> <span class="n">ghosts</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">no_scf</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+        <span class="n">low_level_calculator_2</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="n">qm_embedding_calc</span> <span class="o">=</span> <span class="mi">2</span><span class="p">)</span>
+        <span class="n">low_level_calculator_2</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="n">charge_mix_param</span> <span class="o">=</span> <span class="mf">0.</span><span class="p">)</span>
+        <span class="n">low_level_calculator_2</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="n">charge</span> <span class="o">=</span> <span class="n">frag_charge</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">set_layer</span><span class="p">(</span><span class="n">atoms</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">calc_names</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">low_level_calculator_2</span><span class="p">,</span> <span class="n">embed_mask</span><span class="p">,</span> <span class="n">ghosts</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">no_scf</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+        <span class="n">high_level_calculator_1</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="n">qm_embedding_calc</span> <span class="o">=</span> <span class="mi">3</span><span class="p">)</span>
+        <span class="n">high_level_calculator_1</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="n">charge</span> <span class="o">=</span> <span class="n">frag_charge</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">set_layer</span><span class="p">(</span><span class="n">atoms</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">calc_names</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span> <span class="n">high_level_calculator_1</span><span class="p">,</span> <span class="n">embed_mask</span><span class="p">,</span> <span class="n">ghosts</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">no_scf</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+        <span class="n">high_level_calculator_2</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="n">qm_embedding_calc</span> <span class="o">=</span> <span class="mi">2</span><span class="p">)</span>
+        <span class="n">high_level_calculator_2</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="n">charge_mix_param</span> <span class="o">=</span> <span class="mf">0.</span><span class="p">)</span>
+        <span class="n">high_level_calculator_2</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="n">charge</span> <span class="o">=</span> <span class="n">frag_charge</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">set_layer</span><span class="p">(</span><span class="n">atoms</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">calc_names</span><span class="p">[</span><span class="mi">3</span><span class="p">],</span> <span class="n">high_level_calculator_2</span><span class="p">,</span> <span class="n">embed_mask</span><span class="p">,</span> <span class="n">ghosts</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">no_scf</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">mu_val</span> <span class="o">=</span> <span class="n">mu_val</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">rank</span> <span class="o">=</span> <span class="n">MPI</span><span class="o">.</span><span class="n">COMM_WORLD</span><span class="o">.</span><span class="n">Get_rank</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">ntasks</span> <span class="o">=</span> <span class="n">MPI</span><span class="o">.</span><span class="n">COMM_WORLD</span><span class="o">.</span><span class="n">Get_size</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">truncate_basis</span> <span class="o">=</span> <span class="n">truncate_basis</span>
+
+<div class="viewcode-block" id="ProjectionEmbedding.calculate_levelshift_projector">
+<a class="viewcode-back" href="../../ASI_Embedding.html#ASI_Embedding.embedding.ProjectionEmbedding.calculate_levelshift_projector">[docs]</a>
+    <span class="k">def</span> <span class="nf">calculate_levelshift_projector</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;_summary_</span>
+
+<span class="sd">        Calculate the level-shift based projection operator from </span>
+<span class="sd">        Manby et al.[1]:</span>
+<span class="sd">                    P^{B} = /mu S^{AB} D^{B} S^{AB}</span>
+<span class="sd">        where S^{AB} is the overlap matrix for the supermolecular system, and</span>
+<span class="sd">        the density matrix for subsystem B.</span>
+
+<span class="sd">        [1] Manby, F. R.; Stella, M.; Goodpaster, J. D.; Miller, T. F. I.</span>
+<span class="sd">        A Simple, Exact Density-Functional-Theory Embedding Scheme.</span>
+<span class="sd">        J. Chem. Theory Comput. 2012, 8 (8), 2564–2568.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">P_b</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">mu_val</span> <span class="o">*</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">AB_LL</span><span class="o">.</span><span class="n">overlap</span> <span class="o">@</span> <span class="bp">self</span><span class="o">.</span><span class="n">AB_LL</span><span class="o">.</span><span class="n">density_matrices_out</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">@</span> <span class="bp">self</span><span class="o">.</span><span class="n">AB_LL</span><span class="o">.</span><span class="n">overlap</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="ProjectionEmbedding.calculate_huzinaga_projector">
+<a class="viewcode-back" href="../../ASI_Embedding.html#ASI_Embedding.embedding.ProjectionEmbedding.calculate_huzinaga_projector">[docs]</a>
+    <span class="k">def</span> <span class="nf">calculate_huzinaga_projector</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">P_b</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">AB_LL</span><span class="o">.</span><span class="n">hamiltonian_total</span> <span class="o">@</span> <span class="bp">self</span><span class="o">.</span><span class="n">AB_LL</span><span class="o">.</span><span class="n">density_matrices_out</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">@</span> <span class="bp">self</span><span class="o">.</span><span class="n">AB_LL</span><span class="o">.</span><span class="n">overlap</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">P_b</span> <span class="o">=</span> <span class="o">-</span><span class="mf">0.5</span><span class="o">*</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">P_b</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">AB_LL</span><span class="o">.</span><span class="n">overlap</span> <span class="o">@</span> <span class="bp">self</span><span class="o">.</span><span class="n">AB_LL</span><span class="o">.</span><span class="n">density_matrices_out</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">@</span> <span class="bp">self</span><span class="o">.</span><span class="n">AB_LL</span><span class="o">.</span><span class="n">hamiltonian_total</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="ProjectionEmbedding.run">
+<a class="viewcode-back" href="../../ASI_Embedding.html#ASI_Embedding.embedding.ProjectionEmbedding.run">[docs]</a>
+    <span class="k">def</span> <span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot; Summary</span>
+<span class="sd">        The primary driver routine for performing QM-in-QM with a</span>
+<span class="sd">        Projection-based embedding scheme. This scheme draws upon</span>
+<span class="sd">        the work of Manby et al. [1, 2].</span>
+
+<span class="sd">        The embedding scheme uses the following total energy expression...</span>
+
+<span class="sd">        Importing and exporting of density matrices and hamiltonians is </span>
+<span class="sd">        performed with the ASI package [3].</span>
+
+<span class="sd">        The workflow operates as follows:</span>
+<span class="sd">        1) Calculate the KS-DFT energy of the combined subsystems A+B. Localised</span>
+<span class="sd">           density matrices, /gamma^{A} and /gamma^{B} </span>
+<span class="sd">        2a) Extract the localised density matrices </span>
+<span class="sd">        2b) (Optional) Select atoms in subsystem B that contribute</span>
+<span class="sd">            significantly to subsystem A (threshold 0.5 |e|) via </span>
+<span class="sd">            Mulliken analysis: </span>
+<span class="sd">                q^{A}_{/mu, /nu} = /gamma^{A}_{/mu, /nu} S_{/mu, /nu}</span>
+<span class="sd">            Basis functions of said atoms within calculations of the </span>
+<span class="sd">            embedded subsystem will be included as ghost atoms. Other</span>
+<span class="sd">            basis functions will be removed (i.e., associated atomic centers</span>
+<span class="sd">            not included in the QM calculation, and associated rows and </span>
+<span class="sd">            columns in intermediate hamiltonians and density matrices</span>
+<span class="sd">            deleted).</span>
+<span class="sd">        2) Calculate the total energy for subsystem A with the density </span>
+<span class="sd">           matrix, /gamma^{A}</span>
+<span class="sd">        3) </span>
+
+<span class="sd">        (For users of LaTeX, I am aware that a forward slash is used</span>
+<span class="sd">        in place of the traditional backward slash for mathematical symbols - </span>
+<span class="sd">        unfortunately using backslashes in these comment blocks produces ugly</span>
+<span class="sd">        warnings within the comment blocks.)</span>
+
+<span class="sd">        </span>
+<span class="sd">        ...</span>
+
+<span class="sd">        (1) Manby, F. R.; Stella, M.; Goodpaster, J. D.; Miller, T. F. I. A Simple, Exact Density-Functional-Theory Embedding Scheme. J. Chem. Theory Comput. 2012, 8 (8), 2564–2568.</span>
+<span class="sd">        (2) Lee, S. J. R.; Welborn, M.; Manby, F. R.; Miller, T. F. Projection-Based Wavefunction-in-DFT Embedding. Acc. Chem. Res. 2019, 52 (5), 1359–1368.</span>
+<span class="sd">        (3) TODO: REF</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+
+        <span class="n">root_print</span><span class="p">(</span><span class="s2">&quot;Embedding calculation begun...&quot;</span><span class="p">)</span>
+
+<span class="w">        </span><span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">        Performs a single-point energy evaluation for a system composed of A</span>
+<span class="sd">        and B. Returns localised density matrices for subsystems A and B, and the two-electron components of the hamiltonian (combined with nuclear-electron potential).</span>
+<span class="sd">        &#39;&#39;&#39;</span>
+        <span class="n">start</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">AB_LL</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>
+        <span class="n">end</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">time_ab_lowlevel</span> <span class="o">=</span> <span class="n">end</span> <span class="o">-</span> <span class="n">start</span>
+
+<span class="w">        </span><span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">        Initialises the density matrix for subsystem A, and calculates the hamiltonian components for subsystem A at the low-level reference.</span>
+<span class="sd">        &#39;&#39;&#39;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">truncate_basis</span><span class="p">:</span>
+            <span class="n">basis_mask</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">select_atoms_basis_truncation</span><span class="p">(</span><span class="mf">0.0001</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">set_truncation_defaults</span><span class="p">(</span><span class="n">basis_mask</span><span class="p">)</span>
+        <span class="c1">#else:</span>
+        <span class="c1">#    self.set_basis_info()</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">A_LL</span><span class="o">.</span><span class="n">density_matrix_in</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">AB_LL</span><span class="o">.</span><span class="n">density_matrices_out</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">start</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">A_LL</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>
+        <span class="n">end</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">time_a_lowlevel</span> <span class="o">=</span> <span class="n">end</span> <span class="o">-</span> <span class="n">start</span>
+
+<span class="w">        </span><span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">        Calculates the electron count for the combined (A+B) and separated subsystems (A and B).</span>
+<span class="sd">        &#39;&#39;&#39;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">AB_pop</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">calc_subsys_pop</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">AB_LL</span><span class="o">.</span><span class="n">overlap</span><span class="p">,</span> 
+                            <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">AB_LL</span><span class="o">.</span><span class="n">density_matrices_out</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+                            <span class="o">+</span><span class="bp">self</span><span class="o">.</span><span class="n">AB_LL</span><span class="o">.</span><span class="n">density_matrices_out</span><span class="p">[</span><span class="mi">1</span><span class="p">]))</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">A_pop</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">calc_subsys_pop</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">AB_LL</span><span class="o">.</span><span class="n">overlap</span><span class="p">,</span> 
+                            <span class="bp">self</span><span class="o">.</span><span class="n">AB_LL</span><span class="o">.</span><span class="n">density_matrices_out</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">B_pop</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">calc_subsys_pop</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">AB_LL</span><span class="o">.</span><span class="n">overlap</span><span class="p">,</span> 
+                            <span class="bp">self</span><span class="o">.</span><span class="n">AB_LL</span><span class="o">.</span><span class="n">density_matrices_out</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+
+        <span class="n">root_print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot; Population of Subsystem AB: </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">AB_pop</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">root_print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot; Population of Subsystem A: </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">A_pop</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">root_print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot; Population of Subsystem B: </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">B_pop</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="w">        </span><span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">        Initialises the density matrix for subsystem A, and calculated the hamiltonian components for subsystem A at the low-level reference.</span>
+<span class="sd">        &#39;&#39;&#39;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">calculate_levelshift_projector</span><span class="p">()</span>
+        <span class="c1">#self.calculate_huzinaga_projector()</span>
+
+<span class="w">        </span><span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">        Calculate density matrix for subsystem A at the higher level of </span>
+<span class="sd">        theory. Two terms are added to the hamiltonian matrix of the embedded</span>
+<span class="sd">        subsystem to form the full embedded Fock-matrix, F^{A}:</span>
+<span class="sd">          F^{A} = h^{core} + g^{high-level}[A] + v_{emb}^[A, B] + /mu P^{B}</span>
+<span class="sd">        1) v_{emb}^[A, B], the embedding potential, which introduces the </span>
+<span class="sd">           Hartree and exchange-correlation potentials of the environment</span>
+<span class="sd">           (in the case of FHI-aims, this includes the full electrostatic</span>
+<span class="sd">           potential, i.e., the Hartree and nuclear-electron potentials of </span>
+<span class="sd">           subsystem B acting on subsystem A).</span>
+<span class="sd">        2) The level-shift operator, /mu P^{B}, which orthogonalises the basis</span>
+<span class="sd">           functions associated with the environment (subsystem B) from the </span>
+<span class="sd">           embedded subsystem by adding a large energy penalty to hamiltonian</span>
+<span class="sd">           components associated with subsystem B.</span>
+
+<span class="sd">        Registered callbacks in ASI add the above components to the Fock-matrix</span>
+<span class="sd">        at every SCF iteration.</span>
+<span class="sd">        &#39;&#39;&#39;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">A_HL</span><span class="o">.</span><span class="n">density_matrix_in</span> <span class="o">=</span> \
+                <span class="bp">self</span><span class="o">.</span><span class="n">AB_LL</span><span class="o">.</span><span class="n">density_matrices_out</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">A_HL</span><span class="o">.</span><span class="n">fock_embedding_matrix</span> <span class="o">=</span> \
+                <span class="bp">self</span><span class="o">.</span><span class="n">AB_LL</span><span class="o">.</span><span class="n">hamiltonian_electrostatic</span> <span class="o">-</span> \
+                    <span class="bp">self</span><span class="o">.</span><span class="n">A_LL</span><span class="o">.</span><span class="n">hamiltonian_electrostatic</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">P_b</span>
+
+        <span class="n">start</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">A_HL</span><span class="o">.</span><span class="n">run</span><span class="p">()</span>
+        <span class="n">end</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">time_a_highlevel</span> <span class="o">=</span> <span class="n">end</span> <span class="o">-</span> <span class="n">start</span>
+
+
+<span class="w">        </span><span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">        Calculate the total energy of the embedded subsystem A at the high</span>
+<span class="sd">        level of theory without the associated embedding potential.</span>
+<span class="sd">        &#39;&#39;&#39;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">A_HL_PP</span><span class="o">.</span><span class="n">density_matrix_in</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">A_HL</span><span class="o">.</span><span class="n">density_matrices_out</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">start</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">A_HL_PP</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">ev_corr_scf</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">subsys_A_highlvl_totalen</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">A_HL_PP</span><span class="o">.</span><span class="n">ev_corr_total_energy</span>
+        <span class="n">end</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">time_a_highlevel_pp</span> <span class="o">=</span> <span class="n">end</span> <span class="o">-</span> <span class="n">start</span>
+
+
+<span class="w">        </span><span class="sd">&#39;&#39;&#39;</span>
+<span class="sd">        A terrible cludge which requires improvement.</span>
+<span class="sd">        &#39;&#39;&#39;</span>        
+        <span class="c1"># Re-normalising charge for differing atomic solvers (bad cludge)</span>
+        <span class="n">root_print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot; Normalizing density matrix from high-level reference...&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">A_HL_pop</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">calc_subsys_pop</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">AB_LL</span><span class="o">.</span><span class="n">overlap</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">A_HL</span><span class="o">.</span><span class="n">density_matrices_out</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+        <span class="n">root_print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot; Population of Subystem A^[HL]: </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">A_HL_pop</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">charge_renorm</span> <span class="o">=</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">A_pop</span><span class="o">/</span><span class="bp">self</span><span class="o">.</span><span class="n">A_HL_pop</span><span class="p">)</span>
+        <span class="n">root_print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot; Population of Subystem A^[HL] (post-norm): </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">calc_subsys_pop</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">AB_LL</span><span class="o">.</span><span class="n">overlap</span><span class="p">,</span><span class="w"> </span><span class="bp">self</span><span class="o">.</span><span class="n">charge_renorm</span><span class="o">*</span><span class="bp">self</span><span class="o">.</span><span class="n">A_HL</span><span class="o">.</span>
+<span class="w">        </span><span class="n">density_matrices_out</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">charge_renorm</span> <span class="o">=</span> <span class="mf">1.0</span>
+
+        <span class="c1"># Calculate A low-level reference energy</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">A_LL</span><span class="o">.</span><span class="n">density_matrix_in</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">charge_renorm</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">A_HL</span><span class="o">.</span><span class="n">density_matrices_out</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">A_LL</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">ev_corr_scf</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">start</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+        <span class="n">subsys_A_lowlvl_totalen</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">A_LL</span><span class="o">.</span><span class="n">ev_corr_total_energy</span>
+        <span class="n">end</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">time_a_lowlevel_pp</span> <span class="o">=</span> <span class="n">end</span> <span class="o">-</span> <span class="n">start</span>
+
+        <span class="c1"># Calculate AB low-level reference energy</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">AB_LL_PP</span><span class="o">.</span><span class="n">density_matrix_in</span> <span class="o">=</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">charge_renorm</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">A_HL</span><span class="o">.</span><span class="n">density_matrices_out</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">AB_LL</span><span class="o">.</span><span class="n">density_matrices_out</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+
+        <span class="n">start</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">AB_LL_PP</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">ev_corr_scf</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="n">subsys_AB_lowlvl_totalen</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">AB_LL_PP</span><span class="o">.</span><span class="n">ev_corr_total_energy</span>
+        <span class="n">end</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">time_ab_lowlevel_pp</span> <span class="o">=</span> <span class="n">end</span> <span class="o">-</span> <span class="n">start</span>
+
+        <span class="c1"># Calculate projected density correction to total energy</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">PB_corr</span> <span class="o">=</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">trace</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">P_b</span> <span class="o">@</span> <span class="bp">self</span><span class="o">.</span><span class="n">A_HL</span><span class="o">.</span><span class="n">density_matrices_out</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span> <span class="o">*</span> <span class="mf">27.211384500</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">DFT_AinB_total_energy</span> <span class="o">=</span> <span class="n">subsys_A_highlvl_totalen</span> <span class="o">-</span> \
+            <span class="n">subsys_A_lowlvl_totalen</span> <span class="o">+</span> <span class="n">subsys_AB_lowlvl_totalen</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">PB_corr</span>
+
+        <span class="n">root_print</span><span class="p">(</span> <span class="sa">f</span><span class="s2">&quot; ----------- FINAL         OUTPUTS --------- &quot;</span> <span class="p">)</span>
+        <span class="n">root_print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot; &quot;</span><span class="p">)</span>
+        <span class="n">root_print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot; Population Information:&quot;</span><span class="p">)</span>
+        <span class="n">root_print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot; Population of Subsystem AB: </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">AB_pop</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">root_print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot; Population of Subsystem A: </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">A_pop</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">root_print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot; Population of Subsystem B: </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">B_pop</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">root_print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot; &quot;</span><span class="p">)</span>
+        <span class="n">root_print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot; Intermediate Information:&quot;</span><span class="p">)</span>
+        <span class="n">root_print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot; WARNING: These are not faithful, ground-state KS total energies - &quot;</span><span class="p">)</span>
+        <span class="n">root_print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot; In the case of low-level references, they are calculated using the &quot;</span><span class="p">)</span>
+        <span class="n">root_print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot; density components of the high-level energy reference for fragment A. &quot;</span><span class="p">)</span>
+        <span class="n">root_print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot; Do not naively use these energies unless you are comfortable with &quot;</span><span class="p">)</span>
+        <span class="n">root_print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot; their true definition. &quot;</span><span class="p">)</span>
+        <span class="n">root_print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot; Total Energy (A+B Low-Level): </span><span class="si">{</span><span class="n">subsys_AB_lowlvl_totalen</span><span class="si">}</span><span class="s2"> eV&quot;</span> <span class="p">)</span>
+        <span class="n">root_print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot; Total Energy (A Low-Level): </span><span class="si">{</span><span class="n">subsys_A_lowlvl_totalen</span><span class="si">}</span><span class="s2"> eV&quot;</span> <span class="p">)</span>
+        <span class="n">root_print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot; Total Energy (A High-Level): </span><span class="si">{</span><span class="n">subsys_A_highlvl_totalen</span><span class="si">}</span><span class="s2"> eV&quot;</span> <span class="p">)</span>
+        <span class="n">root_print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot; Projection operator energy correction DM^(A_HL) @ Pb: </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">PB_corr</span><span class="si">}</span><span class="s2"> eV&quot;</span> <span class="p">)</span>
+        <span class="n">root_print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  &quot;</span> <span class="p">)</span>
+        <span class="n">root_print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot; Final Energies Information:&quot;</span><span class="p">)</span>
+        <span class="n">root_print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot; Final total energy (Uncorrected): </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">DFT_AinB_total_energy</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="bp">self</span><span class="o">.</span><span class="n">PB_corr</span><span class="si">}</span><span class="s2"> eV&quot;</span> <span class="p">)</span>
+        <span class="n">root_print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot; Final total energy (Projection Corrected): </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">DFT_AinB_total_energy</span><span class="si">}</span><span class="s2"> eV&quot;</span> <span class="p">)</span>
+        <span class="n">root_print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot; &quot;</span> <span class="p">)</span>
+        <span class="n">root_print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot; -----------======================--------- &quot;</span> <span class="p">)</span>
+        <span class="n">root_print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot; &quot;</span> <span class="p">)</span></div>
+</div>
+
+
+<span class="c1">#    def test_spade(self):</span>
+<span class="c1">#</span>
+<span class="c1">#        import copy</span>
+<span class="c1">#</span>
+<span class="c1">#        total_c_mat = (np.loadtxt(&#39;./AB_LL/KS_region_1_1.dat&#39;) + np.loadtxt(&#39;./#AB_LL/KS_region_2_1.dat&#39;))[:,:23]</span>
+<span class="c1">#</span>
+<span class="c1">#        a_c_mat = copy.deepcopy(total_c_mat)</span>
+<span class="c1">#        #a_c_mat = np.sqrt(self.AB_LL.overlap) @ a_c_mat</span>
+<span class="c1">#</span>
+<span class="c1">#        active_atoms = [ idx for idx, maskval in enumerate(self.AB_LL.#embed_mask) if maskval==1 ]</span>
+<span class="c1">#</span>
+<span class="c1">#        mask = [ bas_at in active_atoms for bas_at in self.AB_LL.basis_atoms ]</span>
+<span class="c1">#</span>
+<span class="c1">#        for i in range(total_c_mat.shape[1]):</span>
+<span class="c1">#            a_c_mat[:,i] = np.where( mask, a_c_mat[:,i], np.zeros(self.AB_LL.#n_basis) )</span>
+<span class="c1">#</span>
+<span class="c1">#        u, s, v = np.linalg.svd(a_c_mat)</span>
+<span class="c1">#</span>
+<span class="c1">#        import matplotlib.pyplot as plt</span>
+<span class="c1">#        plt.matshow(a_c_mat)</span>
+<span class="c1">#        plt.matshow(total_c_mat @ v.T)</span>
+<span class="c1">#        plt.show()</span>
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024, Gabriel A. Bramley.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

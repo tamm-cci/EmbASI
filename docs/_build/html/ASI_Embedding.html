@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ASI Embedding Package &mdash; ASI_Embedding 00.00.01 documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=80d5e7a1" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=19f00094" />
+
+  
+  <!--[if lt IE 9]>
+    <script src="_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+        <script src="_static/jquery.js?v=5d32c60e"></script>
+        <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+        <script src="_static/documentation_options.js?v=d7bb8d4d"></script>
+        <script src="_static/doctools.js?v=9a2dae69"></script>
+        <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="prev" title="ASI Embedding Modules" href="modules.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            ASI_Embedding
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="explainer.html">How It Works</a></li>
+<li class="toctree-l1"><a class="reference internal" href="codeintegration.html">QM Drivers</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="modules.html">ASI Embedding Modules</a><ul class="current">
+<li class="toctree-l2 current"><a class="current reference internal" href="#">ASI Embedding Package</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#submodules">Submodules</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#module-ASI_Embedding.atoms_embedding_asi">ASI_Embedding.atoms_embedding_asi module</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#module-ASI_Embedding.basis_info">ASI_Embedding.basis_info module</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#module-ASI_Embedding.embedding">ASI_Embedding.embedding module</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#module-ASI_Embedding.parallel_utils">ASI_Embedding.parallel_utils module</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#module-ASI_Embedding">Module contents</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">ASI_Embedding</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="modules.html">ASI Embedding Modules</a></li>
+      <li class="breadcrumb-item active">ASI Embedding Package</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/ASI_Embedding.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="asi-embedding-package">
+<h1>ASI Embedding Package<a class="headerlink" href="#asi-embedding-package" title="Link to this heading"></a></h1>
+<section id="submodules">
+<h2>Submodules<a class="headerlink" href="#submodules" title="Link to this heading"></a></h2>
+</section>
+<section id="module-ASI_Embedding.atoms_embedding_asi">
+<span id="asi-embedding-atoms-embedding-asi-module"></span><h2>ASI_Embedding.atoms_embedding_asi module<a class="headerlink" href="#module-ASI_Embedding.atoms_embedding_asi" title="Link to this heading"></a></h2>
+<dl class="py class">
+<dt class="sig sig-object py" id="ASI_Embedding.atoms_embedding_asi.AtomsEmbed">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ASI_Embedding.atoms_embedding_asi.</span></span><span class="sig-name descname"><span class="pre">AtomsEmbed</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">atoms</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">initial_calc</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">embed_mask</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">no_scf</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ghosts</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">outdir</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'asi.calc'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/ASI_Embedding/atoms_embedding_asi.html#AtomsEmbed"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ASI_Embedding.atoms_embedding_asi.AtomsEmbed" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<dl class="py property">
+<dt class="sig sig-object py" id="ASI_Embedding.atoms_embedding_asi.AtomsEmbed.basis_atoms">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">basis_atoms</span></span><a class="headerlink" href="#ASI_Embedding.atoms_embedding_asi.AtomsEmbed.basis_atoms" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ASI_Embedding.atoms_embedding_asi.AtomsEmbed.basis_info">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">basis_info</span></span><a class="headerlink" href="#ASI_Embedding.atoms_embedding_asi.AtomsEmbed.basis_info" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ASI_Embedding.atoms_embedding_asi.AtomsEmbed.calc_initializer">
+<span class="sig-name descname"><span class="pre">calc_initializer</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asi</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/ASI_Embedding/atoms_embedding_asi.html#AtomsEmbed.calc_initializer"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ASI_Embedding.atoms_embedding_asi.AtomsEmbed.calc_initializer" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ASI_Embedding.atoms_embedding_asi.AtomsEmbed.density_matrices_out">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">density_matrices_out</span></span><a class="headerlink" href="#ASI_Embedding.atoms_embedding_asi.AtomsEmbed.density_matrices_out" title="Link to this definition"></a></dt>
+<dd><dl class="simple">
+<dt>_summary_</dt><dd><p>Returns a list of all density matrices within the dictionary,
+self.atoms.calc.asi.dm_storage, which stores all the matrices
+return from the calculation via ASI Callbacks.</p>
+</dd>
+</dl>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>with dimensions (nbasis,nbasis)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>list of np.ndarray</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ASI_Embedding.atoms_embedding_asi.AtomsEmbed.density_matrix_in">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">density_matrix_in</span></span><a class="headerlink" href="#ASI_Embedding.atoms_embedding_asi.AtomsEmbed.density_matrix_in" title="Link to this definition"></a></dt>
+<dd><dl class="simple">
+<dt>_summary_</dt><dd><p>Defines the density matrix used as an input to construct the density
+upon the initialisation of a given calulation</p>
+</dd>
+</dl>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>with dimensions (nbasis,nbasis)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>np.ndarray</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ASI_Embedding.atoms_embedding_asi.AtomsEmbed.extract_results">
+<span class="sig-name descname"><span class="pre">extract_results</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/ASI_Embedding/atoms_embedding_asi.html#AtomsEmbed.extract_results"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ASI_Embedding.atoms_embedding_asi.AtomsEmbed.extract_results" title="Link to this definition"></a></dt>
+<dd><p>Extracts results from the DFT code output file that are otherwise unavailable
+within the ASE framework. This may need a separate module if other calculators are
+implemented.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ASI_Embedding.atoms_embedding_asi.AtomsEmbed.fock_embedding_matrix">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">fock_embedding_matrix</span></span><a class="headerlink" href="#ASI_Embedding.atoms_embedding_asi.AtomsEmbed.fock_embedding_matrix" title="Link to this definition"></a></dt>
+<dd><dl>
+<dt>_summary_</dt><dd><p>Represents the Fock embedding matrix used to level-shift/orthogonalise
+the subsystem orbitals of the environment from the active system:</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li><dl class="simple">
+<dt>F^{A-in-B} = h^{core} + g^{hilev}[gamma^{A}]</dt><dd><ul class="simple">
+<li><p>v_{emb}[gamma^{A}, gamma^{B}] + P_{B}[1]</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+</ol>
+</div></blockquote>
+<p>where gamma^{A} is the density matrix for the subystem, A},g[gamma]
+are the two-electron interaction terms, is the embedding potential matrix,</p>
+<blockquote>
+<div><ol class="arabic simple" start="2">
+<li><p>v_{emb} = g^{low}[gamma^{A} + gamma^{B}] - g^{low}[gamma^{A}]</p></li>
+</ol>
+</div></blockquote>
+<p>and h_core are the one-electron components of the hamiltonian (kinetic
+energy and nuclear-electron interactions).</p>
+<p>NOTE: For FHI-aims, (1) is not formally constructed fully on the
+wrapper level. Numerical stability in FHI-aims requires that the
+onsite potential per atom exactly cancel, precluding the clean
+separation of the nuclear-electron interactions from the total
+electrostatic matrix. As such, v_{emb} is constructed
+from all potential components.</p>
+<p>Formally, this is exactly the same when the embedded Fock matrix is finally
+constructed in FHI-aims  for the high-level calculation - components of
+F^{A-in-B} are calculated in this function are added to the Hamiltonian
+of FHI-aims before its entry into the eigensolver. As such, removing components of
+the nuclear-potential between atoms of A (included in g^{low}[gamma^{A}])
+makes perfect sense, as they are are calculated natively within FHI-aims.
+For similar reasons, the kinetic energy componnts of h^{core} may be ignored.</p>
+<dl>
+<dt>The final term calculated in the wrapper is then:</dt><dd><ol class="arabic simple" start="2">
+<li><p>F_{wrapper}^{A-in-B} = H_{emb}^{Tot, lolev}[gamma^{A} + gamma^{B}]</p></li>
+</ol>
+<blockquote>
+<div><ul class="simple">
+<li><dl class="simple">
+<dt>H_{emb}^{Tot, lolev}[gamma^{A}] - t_k(gamma^{A} + gamma^{B}}</dt><dd><ul>
+<li><p>t_k(gamma^{A}) + P_{B}</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+</ul>
+</div></blockquote>
+</dd>
+</dl>
+<p>Where t_k is the kinetic energy contribution to the Hamiltonian and
+H_{emb}^{Tot, lolev}[gamma] is the total hamiltonian derived from the
+density matrix, gamma at the low-level reference level of thoery.</p>
+<blockquote>
+<div><p>[1] Lee, S. et al., Acc. Chem. Res. 2019, 52 (5), 1359–1368.</p>
+</div></blockquote>
+</dd>
+<dt>Input:</dt><dd><dl class="simple">
+<dt>vemb, np.ndarray: Embedding potential of environment at calculation at</dt><dd><p>low level of theory (ie., first four terms of
+equation (2)). (nbasis,nbasis):</p>
+</dd>
+<dt>projection_matrix, np.ndarray: Projection matrix to level shift P_B</dt><dd><p>components of the environment upwards relative to
+the active subsystem (nbasis,nbasis)</p>
+</dd>
+</dl>
+</dd>
+</dl>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>fock_embedding_matrix(nbasis,nbasis)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>fock_embedding_matrix, np.ndarray</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ASI_Embedding.atoms_embedding_asi.AtomsEmbed.full_mat_to_truncated">
+<span class="sig-name descname"><span class="pre">full_mat_to_truncated</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">full_mat</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/ASI_Embedding/atoms_embedding_asi.html#AtomsEmbed.full_mat_to_truncated"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ASI_Embedding.atoms_embedding_asi.AtomsEmbed.full_mat_to_truncated" title="Link to this definition"></a></dt>
+<dd><p>_summary_
+Truncate a given matrix with atomic orbitals basis (n_basis x n_basis) dimensions (e.g., hamiltonian, overlap matrix, density matrices) to only atoms specified in atom_mask. Atoms specified in the active region by  self.embed_mask are always honoured.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ASI_Embedding.atoms_embedding_asi.AtomsEmbed.hamiltonian_electrostatic">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">hamiltonian_electrostatic</span></span><a class="headerlink" href="#ASI_Embedding.atoms_embedding_asi.AtomsEmbed.hamiltonian_electrostatic" title="Link to this definition"></a></dt>
+<dd><p>_summary_
+Generates</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ASI_Embedding.atoms_embedding_asi.AtomsEmbed.hamiltonian_kinetic">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">hamiltonian_kinetic</span></span><a class="headerlink" href="#ASI_Embedding.atoms_embedding_asi.AtomsEmbed.hamiltonian_kinetic" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ASI_Embedding.atoms_embedding_asi.AtomsEmbed.hamiltonian_total">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">hamiltonian_total</span></span><a class="headerlink" href="#ASI_Embedding.atoms_embedding_asi.AtomsEmbed.hamiltonian_total" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ASI_Embedding.atoms_embedding_asi.AtomsEmbed.initial_embed_mask">
+<span class="sig-name descname"><span class="pre">initial_embed_mask</span></span><a class="headerlink" href="#ASI_Embedding.atoms_embedding_asi.AtomsEmbed.initial_embed_mask" title="Link to this definition"></a></dt>
+<dd><p>Sets which layer/layers are set to be ghost atoms</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ASI_Embedding.atoms_embedding_asi.AtomsEmbed.n_basis">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">n_basis</span></span><a class="headerlink" href="#ASI_Embedding.atoms_embedding_asi.AtomsEmbed.n_basis" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ASI_Embedding.atoms_embedding_asi.AtomsEmbed.overlap">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">overlap</span></span><a class="headerlink" href="#ASI_Embedding.atoms_embedding_asi.AtomsEmbed.overlap" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ASI_Embedding.atoms_embedding_asi.AtomsEmbed.reorder_atoms_from_embed_mask">
+<span class="sig-name descname"><span class="pre">reorder_atoms_from_embed_mask</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/ASI_Embedding/atoms_embedding_asi.html#AtomsEmbed.reorder_atoms_from_embed_mask"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ASI_Embedding.atoms_embedding_asi.AtomsEmbed.reorder_atoms_from_embed_mask" title="Link to this definition"></a></dt>
+<dd><p>Re-orders atoms to push those in embedding region 1 to the beginning
+:return:</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ASI_Embedding.atoms_embedding_asi.AtomsEmbed.run">
+<span class="sig-name descname"><span class="pre">run</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ev_corr_scf</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/ASI_Embedding/atoms_embedding_asi.html#AtomsEmbed.run"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ASI_Embedding.atoms_embedding_asi.AtomsEmbed.run" title="Link to this definition"></a></dt>
+<dd><p>Actually performed a given simulation run for the calculator.
+Must be separated for indidividual system calls.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ASI_Embedding.atoms_embedding_asi.AtomsEmbed.truncate">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">truncate</span></span><a class="headerlink" href="#ASI_Embedding.atoms_embedding_asi.AtomsEmbed.truncate" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ASI_Embedding.atoms_embedding_asi.AtomsEmbed.truncated_mat_to_full">
+<span class="sig-name descname"><span class="pre">truncated_mat_to_full</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">trunc_mat</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/ASI_Embedding/atoms_embedding_asi.html#AtomsEmbed.truncated_mat_to_full"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ASI_Embedding.atoms_embedding_asi.AtomsEmbed.truncated_mat_to_full" title="Link to this definition"></a></dt>
+<dd><p>_summary_
+Expand a truncated matrix (dim: nbasis_active*nbasis_active) to
+the full supermolecular basis (dim: nbasis*nbasis).</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ASI_Embedding.atoms_embedding_asi.dm_saving_callback">
+<span class="sig-prename descclassname"><span class="pre">ASI_Embedding.atoms_embedding_asi.</span></span><span class="sig-name descname"><span class="pre">dm_saving_callback</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">aux</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">iK</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">iS</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">descr</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">matrix_descr_pointer</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/ASI_Embedding/atoms_embedding_asi.html#dm_saving_callback"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ASI_Embedding.atoms_embedding_asi.dm_saving_callback" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="ASI_Embedding.atoms_embedding_asi.ham_saving_callback">
+<span class="sig-prename descclassname"><span class="pre">ASI_Embedding.atoms_embedding_asi.</span></span><span class="sig-name descname"><span class="pre">ham_saving_callback</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">aux</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">iK</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">iS</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">descr</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">matrix_descr_pointer</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/ASI_Embedding/atoms_embedding_asi.html#ham_saving_callback"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ASI_Embedding.atoms_embedding_asi.ham_saving_callback" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</section>
+<section id="module-ASI_Embedding.basis_info">
+<span id="asi-embedding-basis-info-module"></span><h2>ASI_Embedding.basis_info module<a class="headerlink" href="#module-ASI_Embedding.basis_info" title="Link to this heading"></a></h2>
+<dl class="py class">
+<dt class="sig sig-object py" id="ASI_Embedding.basis_info.Basis_info">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ASI_Embedding.basis_info.</span></span><span class="sig-name descname"><span class="pre">Basis_info</span></span><a class="reference internal" href="_modules/ASI_Embedding/basis_info.html#Basis_info"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ASI_Embedding.basis_info.Basis_info" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>_summary_
+Contains the basis dimension information, which acts as a permanent store
+basis information which may dynamically change for each AtomsEmbed object</p>
+<dl class="py property">
+<dt class="sig sig-object py" id="ASI_Embedding.basis_info.Basis_info.active_atoms">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">active_atoms</span></span><a class="headerlink" href="#ASI_Embedding.basis_info.Basis_info.active_atoms" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ASI_Embedding.basis_info.Basis_info.full_basis_atoms">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">full_basis_atoms</span></span><a class="headerlink" href="#ASI_Embedding.basis_info.Basis_info.full_basis_atoms" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ASI_Embedding.basis_info.Basis_info.full_natoms">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">full_natoms</span></span><a class="headerlink" href="#ASI_Embedding.basis_info.Basis_info.full_natoms" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ASI_Embedding.basis_info.Basis_info.full_nbasis">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">full_nbasis</span></span><a class="headerlink" href="#ASI_Embedding.basis_info.Basis_info.full_nbasis" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ASI_Embedding.basis_info.Basis_info.set_basis_atom_indexes">
+<span class="sig-name descname"><span class="pre">set_basis_atom_indexes</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/ASI_Embedding/basis_info.html#Basis_info.set_basis_atom_indexes"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ASI_Embedding.basis_info.Basis_info.set_basis_atom_indexes" title="Link to this definition"></a></dt>
+<dd><p>_summary_
+Sets the start and end index of the matrices with nbasis*nbasis or
+trunc_nbasis*trunc_nbasis dimensions for each atom block.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ASI_Embedding.basis_info.Basis_info.trunc_basis_atoms">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">trunc_basis_atoms</span></span><a class="headerlink" href="#ASI_Embedding.basis_info.Basis_info.trunc_basis_atoms" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ASI_Embedding.basis_info.Basis_info.trunc_natoms">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">trunc_natoms</span></span><a class="headerlink" href="#ASI_Embedding.basis_info.Basis_info.trunc_natoms" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ASI_Embedding.basis_info.Basis_info.trunc_nbasis">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">trunc_nbasis</span></span><a class="headerlink" href="#ASI_Embedding.basis_info.Basis_info.trunc_nbasis" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+</section>
+<section id="module-ASI_Embedding.embedding">
+<span id="asi-embedding-embedding-module"></span><h2>ASI_Embedding.embedding module<a class="headerlink" href="#module-ASI_Embedding.embedding" title="Link to this heading"></a></h2>
+<dl class="py class">
+<dt class="sig sig-object py" id="ASI_Embedding.embedding.EmbeddingBase">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ASI_Embedding.embedding.</span></span><span class="sig-name descname"><span class="pre">EmbeddingBase</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">atoms</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">embed_mask</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">calc_base_ll</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">calc_base_hl</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/ASI_Embedding/embedding.html#EmbeddingBase"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ASI_Embedding.embedding.EmbeddingBase" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">ABC</span></code></p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ASI_Embedding.embedding.EmbeddingBase.calc_subsys_pop">
+<span class="sig-name descname"><span class="pre">calc_subsys_pop</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">overlap_matrix</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">density_matrix</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/ASI_Embedding/embedding.html#EmbeddingBase.calc_subsys_pop"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ASI_Embedding.embedding.EmbeddingBase.calc_subsys_pop" title="Link to this definition"></a></dt>
+<dd><dl>
+<dt>Summary</dt><dd><p>Calculates the overall electron population of a given subsystem
+through the following relation:</p>
+<blockquote>
+<div><p>P_{pop} = tr[S^{AB}/gamma]</p>
+</div></blockquote>
+<p>where S^{AB} is the overlap matrix for the supermolecular system
+and /gamma is the density matrix of a given subsystem.</p>
+</dd>
+</dl>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>overlap_matrix</strong> (<em>np.ndarray</em>) – Supersystem overlap matrix in AO basis.</p></li>
+<li><p><strong>density_matrix</strong> (<em>np.ndarray</em>) – Subsystem density matrix in AO basis,</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Overall electronic population of subsystem</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>population (int)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ASI_Embedding.embedding.EmbeddingBase.nlayers">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">nlayers</span></span><a class="headerlink" href="#ASI_Embedding.embedding.EmbeddingBase.nlayers" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ASI_Embedding.embedding.EmbeddingBase.run">
+<em class="property"><span class="pre">abstract</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">run</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/ASI_Embedding/embedding.html#EmbeddingBase.run"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ASI_Embedding.embedding.EmbeddingBase.run" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ASI_Embedding.embedding.EmbeddingBase.scf_methods">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">scf_methods</span></span><a class="headerlink" href="#ASI_Embedding.embedding.EmbeddingBase.scf_methods" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ASI_Embedding.embedding.EmbeddingBase.select_atoms_basis_truncation">
+<span class="sig-name descname"><span class="pre">select_atoms_basis_truncation</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">thresh</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/ASI_Embedding/embedding.html#EmbeddingBase.select_atoms_basis_truncation"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ASI_Embedding.embedding.EmbeddingBase.select_atoms_basis_truncation" title="Link to this definition"></a></dt>
+<dd><p>_summary_
+Returns a list of corresponding atoms for which the total contribution of an atoms constituent basis functions to the total charge of subsystem A, q^{A}:</p>
+<blockquote>
+<div><p>q^{A}_{/mu, /nu} = /gamma^{A}_{/mu, /nu} S_{/mu, /nu}</p>
+</div></blockquote>
+<dl class="simple">
+<dt>exceeds the threshold, thresh:</dt><dd><p>thresh &lt; q_{/mu, /nu}</p>
+</dd>
+</dl>
+<p>This is unfortunately just Mulliken analysis.
+:param thresh: _description_
+:type thresh: float</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>True/False mask for</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>active_mask (list)</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ASI_Embedding.embedding.EmbeddingBase.set_layer">
+<span class="sig-name descname"><span class="pre">set_layer</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">atoms</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">layer_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">calc</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">embed_mask</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ghosts</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">no_scf</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/ASI_Embedding/embedding.html#EmbeddingBase.set_layer"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ASI_Embedding.embedding.EmbeddingBase.set_layer" title="Link to this definition"></a></dt>
+<dd><p>Initialises the AtomsEmbed methods for a given method</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ASI_Embedding.embedding.EmbeddingBase.set_truncation_defaults">
+<span class="sig-name descname"><span class="pre">set_truncation_defaults</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">truncated_atom_list</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/ASI_Embedding/embedding.html#EmbeddingBase.set_truncation_defaults"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ASI_Embedding.embedding.EmbeddingBase.set_truncation_defaults" title="Link to this definition"></a></dt>
+<dd><p>_summary_
+Necessary to maintain consistency in values needed for matrix truncation
+/expansion between the AtomsEmbed objects (eg., self.basis_atoms,
+self.n_atoms). Failure to do so leads to unexpected behaviour.
+which
+:param truncated_atom_list: A boolean mask asserting which atoms
+:type truncated_atom_list: list</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ASI_Embedding.embedding.ProjectionEmbedding">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ASI_Embedding.embedding.</span></span><span class="sig-name descname"><span class="pre">ProjectionEmbedding</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">atoms</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">embed_mask</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">calc_base_ll</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">calc_base_hl</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">frag_charge</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">post_scf</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mu_val</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1000000.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">truncate_basis</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/ASI_Embedding/embedding.html#ProjectionEmbedding"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ASI_Embedding.embedding.ProjectionEmbedding" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="#ASI_Embedding.embedding.EmbeddingBase" title="ASI_Embedding.embedding.EmbeddingBase"><code class="xref py py-class docutils literal notranslate"><span class="pre">EmbeddingBase</span></code></a></p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ASI_Embedding.embedding.ProjectionEmbedding.calculate_huzinaga_projector">
+<span class="sig-name descname"><span class="pre">calculate_huzinaga_projector</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/ASI_Embedding/embedding.html#ProjectionEmbedding.calculate_huzinaga_projector"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ASI_Embedding.embedding.ProjectionEmbedding.calculate_huzinaga_projector" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ASI_Embedding.embedding.ProjectionEmbedding.calculate_levelshift_projector">
+<span class="sig-name descname"><span class="pre">calculate_levelshift_projector</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/ASI_Embedding/embedding.html#ProjectionEmbedding.calculate_levelshift_projector"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ASI_Embedding.embedding.ProjectionEmbedding.calculate_levelshift_projector" title="Link to this definition"></a></dt>
+<dd><p>_summary_</p>
+<p>Calculate the level-shift based projection operator from
+Manby et al.[1]:</p>
+<blockquote>
+<div><p>P^{B} = /mu S^{AB} D^{B} S^{AB}</p>
+</div></blockquote>
+<p>where S^{AB} is the overlap matrix for the supermolecular system, and
+the density matrix for subsystem B.</p>
+<p>[1] Manby, F. R.; Stella, M.; Goodpaster, J. D.; Miller, T. F. I.
+A Simple, Exact Density-Functional-Theory Embedding Scheme.
+J. Chem. Theory Comput. 2012, 8 (8), 2564–2568.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ASI_Embedding.embedding.ProjectionEmbedding.run">
+<span class="sig-name descname"><span class="pre">run</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/ASI_Embedding/embedding.html#ProjectionEmbedding.run"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ASI_Embedding.embedding.ProjectionEmbedding.run" title="Link to this definition"></a></dt>
+<dd><p>Summary
+The primary driver routine for performing QM-in-QM with a
+Projection-based embedding scheme. This scheme draws upon
+the work of Manby et al. [1, 2].</p>
+<p>The embedding scheme uses the following total energy expression…</p>
+<p>Importing and exporting of density matrices and hamiltonians is
+performed with the ASI package [3].</p>
+<p>The workflow operates as follows:
+1) Calculate the KS-DFT energy of the combined subsystems A+B. Localised</p>
+<blockquote>
+<div><p>density matrices, /gamma^{A} and /gamma^{B}</p>
+</div></blockquote>
+<p>2a) Extract the localised density matrices
+2b) (Optional) Select atoms in subsystem B that contribute</p>
+<blockquote>
+<div><p>significantly to subsystem A (threshold 0.5 <a href="#id1"><span class="problematic" id="id2">|e|</span></a>) via
+Mulliken analysis:</p>
+<blockquote>
+<div><p>q^{A}_{/mu, /nu} = /gamma^{A}_{/mu, /nu} S_{/mu, /nu}</p>
+</div></blockquote>
+<p>Basis functions of said atoms within calculations of the
+embedded subsystem will be included as ghost atoms. Other
+basis functions will be removed (i.e., associated atomic centers
+not included in the QM calculation, and associated rows and
+columns in intermediate hamiltonians and density matrices
+deleted).</p>
+</div></blockquote>
+<ol class="arabic simple" start="2">
+<li><p>Calculate the total energy for subsystem A with the density
+matrix, /gamma^{A}</p></li>
+<li></li>
+</ol>
+<p>(For users of LaTeX, I am aware that a forward slash is used
+in place of the traditional backward slash for mathematical symbols -
+unfortunately using backslashes in these comment blocks produces ugly
+warnings within the comment blocks.)</p>
+<p>…</p>
+<ol class="arabic simple">
+<li><p>Manby, F. R.; Stella, M.; Goodpaster, J. D.; Miller, T. F. I. A Simple, Exact Density-Functional-Theory Embedding Scheme. J. Chem. Theory Comput. 2012, 8 (8), 2564–2568.</p></li>
+<li><p>Lee, S. J. R.; Welborn, M.; Manby, F. R.; Miller, T. F. Projection-Based Wavefunction-in-DFT Embedding. Acc. Chem. Res. 2019, 52 (5), 1359–1368.</p></li>
+<li><p>TODO: REF</p></li>
+</ol>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+<section id="module-ASI_Embedding.parallel_utils">
+<span id="asi-embedding-parallel-utils-module"></span><h2>ASI_Embedding.parallel_utils module<a class="headerlink" href="#module-ASI_Embedding.parallel_utils" title="Link to this heading"></a></h2>
+<dl class="py function">
+<dt class="sig sig-object py" id="ASI_Embedding.parallel_utils.root_print">
+<span class="sig-prename descclassname"><span class="pre">ASI_Embedding.parallel_utils.</span></span><span class="sig-name descname"><span class="pre">root_print</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/ASI_Embedding/parallel_utils.html#root_print"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ASI_Embedding.parallel_utils.root_print" title="Link to this definition"></a></dt>
+<dd><p>Prints only from the root node</p>
+</dd></dl>
+
+</section>
+<section id="module-ASI_Embedding">
+<span id="module-contents"></span><h2>Module contents<a class="headerlink" href="#module-ASI_Embedding" title="Link to this heading"></a></h2>
+<dl class="py class">
+<dt class="sig sig-object py" id="ASI_Embedding.AtomsEmbed">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ASI_Embedding.</span></span><span class="sig-name descname"><span class="pre">AtomsEmbed</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">atoms</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">initial_calc</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">embed_mask</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">no_scf</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ghosts</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">outdir</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'asi.calc'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/ASI_Embedding/atoms_embedding_asi.html#AtomsEmbed"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ASI_Embedding.AtomsEmbed" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<dl class="py property">
+<dt class="sig sig-object py" id="ASI_Embedding.AtomsEmbed.basis_atoms">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">basis_atoms</span></span><a class="headerlink" href="#ASI_Embedding.AtomsEmbed.basis_atoms" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ASI_Embedding.AtomsEmbed.basis_info">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">basis_info</span></span><a class="headerlink" href="#ASI_Embedding.AtomsEmbed.basis_info" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ASI_Embedding.AtomsEmbed.calc_initializer">
+<span class="sig-name descname"><span class="pre">calc_initializer</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">asi</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/ASI_Embedding/atoms_embedding_asi.html#AtomsEmbed.calc_initializer"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ASI_Embedding.AtomsEmbed.calc_initializer" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ASI_Embedding.AtomsEmbed.density_matrices_out">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">density_matrices_out</span></span><a class="headerlink" href="#ASI_Embedding.AtomsEmbed.density_matrices_out" title="Link to this definition"></a></dt>
+<dd><dl class="simple">
+<dt>_summary_</dt><dd><p>Returns a list of all density matrices within the dictionary,
+self.atoms.calc.asi.dm_storage, which stores all the matrices
+return from the calculation via ASI Callbacks.</p>
+</dd>
+</dl>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>with dimensions (nbasis,nbasis)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>list of np.ndarray</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ASI_Embedding.AtomsEmbed.density_matrix_in">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">density_matrix_in</span></span><a class="headerlink" href="#ASI_Embedding.AtomsEmbed.density_matrix_in" title="Link to this definition"></a></dt>
+<dd><dl class="simple">
+<dt>_summary_</dt><dd><p>Defines the density matrix used as an input to construct the density
+upon the initialisation of a given calulation</p>
+</dd>
+</dl>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>with dimensions (nbasis,nbasis)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>np.ndarray</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ASI_Embedding.AtomsEmbed.extract_results">
+<span class="sig-name descname"><span class="pre">extract_results</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/ASI_Embedding/atoms_embedding_asi.html#AtomsEmbed.extract_results"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ASI_Embedding.AtomsEmbed.extract_results" title="Link to this definition"></a></dt>
+<dd><p>Extracts results from the DFT code output file that are otherwise unavailable
+within the ASE framework. This may need a separate module if other calculators are
+implemented.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ASI_Embedding.AtomsEmbed.fock_embedding_matrix">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">fock_embedding_matrix</span></span><a class="headerlink" href="#ASI_Embedding.AtomsEmbed.fock_embedding_matrix" title="Link to this definition"></a></dt>
+<dd><dl>
+<dt>_summary_</dt><dd><p>Represents the Fock embedding matrix used to level-shift/orthogonalise
+the subsystem orbitals of the environment from the active system:</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li><dl class="simple">
+<dt>F^{A-in-B} = h^{core} + g^{hilev}[gamma^{A}]</dt><dd><ul class="simple">
+<li><p>v_{emb}[gamma^{A}, gamma^{B}] + P_{B}[1]</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+</ol>
+</div></blockquote>
+<p>where gamma^{A} is the density matrix for the subystem, A},g[gamma]
+are the two-electron interaction terms, is the embedding potential matrix,</p>
+<blockquote>
+<div><ol class="arabic simple" start="2">
+<li><p>v_{emb} = g^{low}[gamma^{A} + gamma^{B}] - g^{low}[gamma^{A}]</p></li>
+</ol>
+</div></blockquote>
+<p>and h_core are the one-electron components of the hamiltonian (kinetic
+energy and nuclear-electron interactions).</p>
+<p>NOTE: For FHI-aims, (1) is not formally constructed fully on the
+wrapper level. Numerical stability in FHI-aims requires that the
+onsite potential per atom exactly cancel, precluding the clean
+separation of the nuclear-electron interactions from the total
+electrostatic matrix. As such, v_{emb} is constructed
+from all potential components.</p>
+<p>Formally, this is exactly the same when the embedded Fock matrix is finally
+constructed in FHI-aims  for the high-level calculation - components of
+F^{A-in-B} are calculated in this function are added to the Hamiltonian
+of FHI-aims before its entry into the eigensolver. As such, removing components of
+the nuclear-potential between atoms of A (included in g^{low}[gamma^{A}])
+makes perfect sense, as they are are calculated natively within FHI-aims.
+For similar reasons, the kinetic energy componnts of h^{core} may be ignored.</p>
+<dl>
+<dt>The final term calculated in the wrapper is then:</dt><dd><ol class="arabic simple" start="2">
+<li><p>F_{wrapper}^{A-in-B} = H_{emb}^{Tot, lolev}[gamma^{A} + gamma^{B}]</p></li>
+</ol>
+<blockquote>
+<div><ul class="simple">
+<li><dl class="simple">
+<dt>H_{emb}^{Tot, lolev}[gamma^{A}] - t_k(gamma^{A} + gamma^{B}}</dt><dd><ul>
+<li><p>t_k(gamma^{A}) + P_{B}</p></li>
+</ul>
+</dd>
+</dl>
+</li>
+</ul>
+</div></blockquote>
+</dd>
+</dl>
+<p>Where t_k is the kinetic energy contribution to the Hamiltonian and
+H_{emb}^{Tot, lolev}[gamma] is the total hamiltonian derived from the
+density matrix, gamma at the low-level reference level of thoery.</p>
+<blockquote>
+<div><p>[1] Lee, S. et al., Acc. Chem. Res. 2019, 52 (5), 1359–1368.</p>
+</div></blockquote>
+</dd>
+<dt>Input:</dt><dd><dl class="simple">
+<dt>vemb, np.ndarray: Embedding potential of environment at calculation at</dt><dd><p>low level of theory (ie., first four terms of
+equation (2)). (nbasis,nbasis):</p>
+</dd>
+<dt>projection_matrix, np.ndarray: Projection matrix to level shift P_B</dt><dd><p>components of the environment upwards relative to
+the active subsystem (nbasis,nbasis)</p>
+</dd>
+</dl>
+</dd>
+</dl>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>fock_embedding_matrix(nbasis,nbasis)</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>fock_embedding_matrix, np.ndarray</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ASI_Embedding.AtomsEmbed.full_mat_to_truncated">
+<span class="sig-name descname"><span class="pre">full_mat_to_truncated</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">full_mat</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/ASI_Embedding/atoms_embedding_asi.html#AtomsEmbed.full_mat_to_truncated"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ASI_Embedding.AtomsEmbed.full_mat_to_truncated" title="Link to this definition"></a></dt>
+<dd><p>_summary_
+Truncate a given matrix with atomic orbitals basis (n_basis x n_basis) dimensions (e.g., hamiltonian, overlap matrix, density matrices) to only atoms specified in atom_mask. Atoms specified in the active region by  self.embed_mask are always honoured.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ASI_Embedding.AtomsEmbed.hamiltonian_electrostatic">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">hamiltonian_electrostatic</span></span><a class="headerlink" href="#ASI_Embedding.AtomsEmbed.hamiltonian_electrostatic" title="Link to this definition"></a></dt>
+<dd><p>_summary_
+Generates</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ASI_Embedding.AtomsEmbed.hamiltonian_kinetic">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">hamiltonian_kinetic</span></span><a class="headerlink" href="#ASI_Embedding.AtomsEmbed.hamiltonian_kinetic" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ASI_Embedding.AtomsEmbed.hamiltonian_total">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">hamiltonian_total</span></span><a class="headerlink" href="#ASI_Embedding.AtomsEmbed.hamiltonian_total" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="ASI_Embedding.AtomsEmbed.initial_embed_mask">
+<span class="sig-name descname"><span class="pre">initial_embed_mask</span></span><a class="headerlink" href="#ASI_Embedding.AtomsEmbed.initial_embed_mask" title="Link to this definition"></a></dt>
+<dd><p>Sets which layer/layers are set to be ghost atoms</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ASI_Embedding.AtomsEmbed.n_basis">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">n_basis</span></span><a class="headerlink" href="#ASI_Embedding.AtomsEmbed.n_basis" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ASI_Embedding.AtomsEmbed.overlap">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">overlap</span></span><a class="headerlink" href="#ASI_Embedding.AtomsEmbed.overlap" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ASI_Embedding.AtomsEmbed.reorder_atoms_from_embed_mask">
+<span class="sig-name descname"><span class="pre">reorder_atoms_from_embed_mask</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/ASI_Embedding/atoms_embedding_asi.html#AtomsEmbed.reorder_atoms_from_embed_mask"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ASI_Embedding.AtomsEmbed.reorder_atoms_from_embed_mask" title="Link to this definition"></a></dt>
+<dd><p>Re-orders atoms to push those in embedding region 1 to the beginning
+:return:</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ASI_Embedding.AtomsEmbed.run">
+<span class="sig-name descname"><span class="pre">run</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ev_corr_scf</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/ASI_Embedding/atoms_embedding_asi.html#AtomsEmbed.run"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ASI_Embedding.AtomsEmbed.run" title="Link to this definition"></a></dt>
+<dd><p>Actually performed a given simulation run for the calculator.
+Must be separated for indidividual system calls.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="ASI_Embedding.AtomsEmbed.truncate">
+<em class="property"><span class="pre">property</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">truncate</span></span><a class="headerlink" href="#ASI_Embedding.AtomsEmbed.truncate" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ASI_Embedding.AtomsEmbed.truncated_mat_to_full">
+<span class="sig-name descname"><span class="pre">truncated_mat_to_full</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">trunc_mat</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/ASI_Embedding/atoms_embedding_asi.html#AtomsEmbed.truncated_mat_to_full"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ASI_Embedding.AtomsEmbed.truncated_mat_to_full" title="Link to this definition"></a></dt>
+<dd><p>_summary_
+Expand a truncated matrix (dim: nbasis_active*nbasis_active) to
+the full supermolecular basis (dim: nbasis*nbasis).</p>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="ASI_Embedding.ProjectionEmbedding">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">ASI_Embedding.</span></span><span class="sig-name descname"><span class="pre">ProjectionEmbedding</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">atoms</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">embed_mask</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">calc_base_ll</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">calc_base_hl</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">frag_charge</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">post_scf</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mu_val</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1000000.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">truncate_basis</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/ASI_Embedding/embedding.html#ProjectionEmbedding"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ASI_Embedding.ProjectionEmbedding" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="#ASI_Embedding.embedding.EmbeddingBase" title="ASI_Embedding.embedding.EmbeddingBase"><code class="xref py py-class docutils literal notranslate"><span class="pre">EmbeddingBase</span></code></a></p>
+<dl class="py method">
+<dt class="sig sig-object py" id="ASI_Embedding.ProjectionEmbedding.calculate_huzinaga_projector">
+<span class="sig-name descname"><span class="pre">calculate_huzinaga_projector</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/ASI_Embedding/embedding.html#ProjectionEmbedding.calculate_huzinaga_projector"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ASI_Embedding.ProjectionEmbedding.calculate_huzinaga_projector" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ASI_Embedding.ProjectionEmbedding.calculate_levelshift_projector">
+<span class="sig-name descname"><span class="pre">calculate_levelshift_projector</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/ASI_Embedding/embedding.html#ProjectionEmbedding.calculate_levelshift_projector"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ASI_Embedding.ProjectionEmbedding.calculate_levelshift_projector" title="Link to this definition"></a></dt>
+<dd><p>_summary_</p>
+<p>Calculate the level-shift based projection operator from
+Manby et al.[1]:</p>
+<blockquote>
+<div><p>P^{B} = /mu S^{AB} D^{B} S^{AB}</p>
+</div></blockquote>
+<p>where S^{AB} is the overlap matrix for the supermolecular system, and
+the density matrix for subsystem B.</p>
+<p>[1] Manby, F. R.; Stella, M.; Goodpaster, J. D.; Miller, T. F. I.
+A Simple, Exact Density-Functional-Theory Embedding Scheme.
+J. Chem. Theory Comput. 2012, 8 (8), 2564–2568.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="ASI_Embedding.ProjectionEmbedding.run">
+<span class="sig-name descname"><span class="pre">run</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="_modules/ASI_Embedding/embedding.html#ProjectionEmbedding.run"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#ASI_Embedding.ProjectionEmbedding.run" title="Link to this definition"></a></dt>
+<dd><p>Summary
+The primary driver routine for performing QM-in-QM with a
+Projection-based embedding scheme. This scheme draws upon
+the work of Manby et al. [1, 2].</p>
+<p>The embedding scheme uses the following total energy expression…</p>
+<p>Importing and exporting of density matrices and hamiltonians is
+performed with the ASI package [3].</p>
+<p>The workflow operates as follows:
+1) Calculate the KS-DFT energy of the combined subsystems A+B. Localised</p>
+<blockquote>
+<div><p>density matrices, /gamma^{A} and /gamma^{B}</p>
+</div></blockquote>
+<p>2a) Extract the localised density matrices
+2b) (Optional) Select atoms in subsystem B that contribute</p>
+<blockquote>
+<div><p>significantly to subsystem A (threshold 0.5 <a href="#id3"><span class="problematic" id="id4">|e|</span></a>) via
+Mulliken analysis:</p>
+<blockquote>
+<div><p>q^{A}_{/mu, /nu} = /gamma^{A}_{/mu, /nu} S_{/mu, /nu}</p>
+</div></blockquote>
+<p>Basis functions of said atoms within calculations of the
+embedded subsystem will be included as ghost atoms. Other
+basis functions will be removed (i.e., associated atomic centers
+not included in the QM calculation, and associated rows and
+columns in intermediate hamiltonians and density matrices
+deleted).</p>
+</div></blockquote>
+<ol class="arabic simple" start="2">
+<li><p>Calculate the total energy for subsystem A with the density
+matrix, /gamma^{A}</p></li>
+<li></li>
+</ol>
+<p>(For users of LaTeX, I am aware that a forward slash is used
+in place of the traditional backward slash for mathematical symbols -
+unfortunately using backslashes in these comment blocks produces ugly
+warnings within the comment blocks.)</p>
+<p>…</p>
+<ol class="arabic simple">
+<li><p>Manby, F. R.; Stella, M.; Goodpaster, J. D.; Miller, T. F. I. A Simple, Exact Density-Functional-Theory Embedding Scheme. J. Chem. Theory Comput. 2012, 8 (8), 2564–2568.</p></li>
+<li><p>Lee, S. J. R.; Welborn, M.; Manby, F. R.; Miller, T. F. Projection-Based Wavefunction-in-DFT Embedding. Acc. Chem. Res. 2019, 52 (5), 1359–1368.</p></li>
+<li><p>TODO: REF</p></li>
+</ol>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="modules.html" class="btn btn-neutral float-left" title="ASI Embedding Modules" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024, Gabriel A. Bramley.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
