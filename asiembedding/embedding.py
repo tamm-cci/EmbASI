@@ -1,6 +1,6 @@
 # ~ Overall Embedding object
 from abc import ABC, abstractmethod
-from ASI_Embedding.parallel_utils import root_print
+from asiembedding.parallel_utils import root_print
 import time
 import numpy as np
 
@@ -83,7 +83,7 @@ class EmbeddingBase(ABC):
         Args:
             truncated_atom_list (list): A boolean mask asserting which atoms 
         """
-        from ASI_Embedding.basis_info import Basis_info
+        from asiembedding.basis_info import Basis_info
 
         # Establish mapping corresponding to each new atom from the 
         # truncated matrix
@@ -383,7 +383,7 @@ class ProjectionEmbedding(EmbeddingBase):
 
         '''
         A terrible cludge which requires improvement.
-        '''        
+        '''
         # Re-normalising charge for differing atomic solvers (bad cludge)
         root_print(f" Normalizing density matrix from high-level reference...")
         self.A_HL_pop = self.calc_subsys_pop(self.AB_LL.overlap, self.A_HL.density_matrices_out[0])

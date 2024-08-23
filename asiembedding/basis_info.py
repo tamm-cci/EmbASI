@@ -1,4 +1,4 @@
-from ASI_Embedding.parallel_utils import root_print
+from asiembedding.parallel_utils import root_print
 
 class Basis_info:
     """_summary_

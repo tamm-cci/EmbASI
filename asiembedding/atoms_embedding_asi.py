@@ -1,6 +1,6 @@
 from asi4py.asecalc import ASI_ASE_calculator
 from asi4py.pyasi import triang2herm_inplace, triang_packed2full_hermit
-from ASI_Embedding.parallel_utils import root_print, mpi_bcast_matrix_storage, \
+from asiembedding.parallel_utils import root_print, mpi_bcast_matrix_storage, \
     mpi_bcast_integer
 import numpy as np
 from mpi4py import MPI
