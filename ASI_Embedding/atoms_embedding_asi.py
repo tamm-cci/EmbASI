@@ -1,4 +1,5 @@
 from asi4py.asecalc import ASI_ASE_calculator
+from asi4py.pyasi import triang2herm_inplace, triang_packed2full_hermit
 from ASI_Embedding.parallel_utils import root_print
 import numpy as np
 from mpi4py import MPI
@@ -6,14 +7,21 @@ from ctypes import cdll, CDLL, RTLD_GLOBAL
 from ctypes import POINTER, byref, c_int, c_int64, c_int32, c_bool, c_char_p, c_double, c_void_p, CFUNCTYPE, py_object, cast, byref
 import ctypes
 
-def dm_saving_callback(aux, iK, iS, descr, data, matrix_descr_pointer):
+def dm_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
     try:
         asi, storage_dict, cnt_dict, label = cast(aux, py_object).value
         data_shape = (asi.n_basis,asi.n_basis) if asi.is_hamiltonian_real else (asi.n_basis,asi.n_basis, 2)
 
-        data = asi.scalapack.gather_numpy(descr, data, data_shape)
-        asi.dm_count +=1
+        if (matrix_descr_ptr.contents.storage_type not in {1,2}):
+            data = asi.scalapack.gather_numpy(descr, data, data_shape)
+        elif (matrix_descr_ptr.contents.storage_type in {1,2}): # ASI_STORAGE_TYPE_TRIL,ASI_STORAGE_TYPE_TRIU
+            assert not descr, "default_saving_callback supports only dense full ScaLAPACK arrays"
+            assert matrix_descr_ptr.contents.matrix_type == 1, "Triangular packed storage is supported only for hermitian matrices"
+            uplo = {1:'L',2:'U'}[matrix_descr_ptr.contents.storage_type]
+            data = triang_packed2full_hermit(data, asi.n_basis, asi.is_hamiltonian_real, uplo)
+
         if data is not None:
+            asi.dm_count += 1
             assert len(data.shape) == 2
             storage_dict[(asi.dm_count, iK, iS)] = data.copy()
 
@@ -21,16 +29,24 @@ def dm_saving_callback(aux, iK, iS, descr, data, matrix_descr_pointer):
         print(f"Something happened in ASI default_saving_callback {label}: {eee}\nAborting...")
         MPI.COMM_WORLD.Abort(1)
 
-def ham_saving_callback(aux, iK, iS, descr, data, matrix_descr_pointer):
+def ham_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
     try:
         asi, storage_dict, cnt_dict, label = cast(aux, py_object).value
         data_shape = (asi.n_basis,asi.n_basis) if asi.is_hamiltonian_real else (asi.n_basis,asi.n_basis, 2)
 
-        data = asi.scalapack.gather_numpy(descr, data, data_shape)
-        asi.ham_count +=1
+        if (matrix_descr_ptr.contents.storage_type not in {1,2}):
+            data = asi.scalapack.gather_numpy(descr, data, data_shape)
+        elif (matrix_descr_ptr.contents.storage_type in {1,2}): # ASI_STORAGE_TYPE_TRIL,ASI_STORAGE_TYPE_TRIU
+            assert not descr, "default_saving_callback supports only dense full ScaLAPACK arrays"
+            assert matrix_descr_ptr.contents.matrix_type == 1, "Triangular packed storage is supported only for hermitian matrices"
+            uplo = {1:'L',2:'U'}[matrix_descr_ptr.contents.storage_type]
+            data = triang_packed2full_hermit(data, asi.n_basis, asi.is_hamiltonian_real, uplo)
+
         if data is not None:
+            asi.ham_count += 1
             assert len(data.shape) == 2
             storage_dict[(asi.ham_count, iK, iS)] = data.copy()
+
     except Exception as eee:
         print(f"Something happened in ASI default_saving_callback {label}: {eee}\nAborting...")
         MPI.COMM_WORLD.Abort(1)
@@ -283,6 +299,19 @@ class AtomsEmbed():
 
             if MPI.COMM_WORLD.Get_rank() != 0:
                 self.atoms.calc.asi.dm_storage[tuple(data_key)] = data_buf.copy()
+
+        if MPI.COMM_WORLD.Get_rank() == 0:
+            dm_count_buf = np.full(1, self.atoms.calc.asi.dm_count, dtype=int)
+            ham_count_buf = np.full(1, self.atoms.calc.asi.ham_count, dtype=int)
+        else:
+            dm_count_buf = np.full(1, 0, dtype=int)
+            ham_count_buf = np.full(1, 0, dtype=int)
+
+        MPI.COMM_WORLD.Bcast(dm_count_buf)
+        MPI.COMM_WORLD.Bcast(ham_count_buf)
+
+        self.atoms.calc.asi.dm_count = dm_count_buf[0]
+        self.atoms.calc.asi.ham_count = ham_count_buf[0]
 
         self.total_energy = E0
 
