@@ -1,6 +1,7 @@
 from asi4py.asecalc import ASI_ASE_calculator
 from asi4py.pyasi import triang2herm_inplace, triang_packed2full_hermit
-from ASI_Embedding.parallel_utils import root_print
+from ASI_Embedding.parallel_utils import root_print, mpi_bcast_matrix_storage, \
+    mpi_bcast_integer
 import numpy as np
 from mpi4py import MPI
 from ctypes import cdll, CDLL, RTLD_GLOBAL
@@ -268,55 +269,23 @@ class AtomsEmbed():
             self.atoms.calc.asi.init_hamiltonian = {(1,1): np.asfortranarray(self.fock_embedding_matrix)}
 
         E0 = self.atoms.get_potential_energy()
-
-        # Temporary cludge to communicate DMs from root to other processes,
-        # which somehow aren't stored on any rank other than 0.
-        if MPI.COMM_WORLD.Get_rank() == 0:
-            storage_keys = self.atoms.calc.asi.dm_storage.keys()
-            data = np.array(list(storage_keys), dtype=np.int16)
-            data_shape = np.array(data.shape, dtype=np.int16)
-        else:
-            data_shape = np.array([0,0], dtype=np.int16)
-
-        # Broadcast the size of the data
-        MPI.COMM_WORLD.Bcast([data_shape, MPI.INT16_T], root=0)
-
-        if MPI.COMM_WORLD.Get_rank() == 0:
-            data = np.array(list(storage_keys), dtype=np.int16)
-        else:
-            data = np.zeros(tuple(data_shape), dtype=np.int16)
-
-        MPI.COMM_WORLD.Bcast([data, MPI.INT16_T], root=0)
-        data_dict_keys = data
-
-        for data_key in data_dict_keys:
-            if MPI.COMM_WORLD.Get_rank() == 0:
-                data_buf = self.atoms.calc.asi.dm_storage[tuple(data_key)]
-            else:
-                data_buf = np.zeros((self.atoms.calc.asi.n_basis, self.atoms.calc.asi.n_basis), dtype=np.float64)
-
-            MPI.COMM_WORLD.Bcast([data_buf, MPI.DOUBLE], root=0)
-
-            if MPI.COMM_WORLD.Get_rank() != 0:
-                self.atoms.calc.asi.dm_storage[tuple(data_key)] = data_buf.copy()
-
-        if MPI.COMM_WORLD.Get_rank() == 0:
-            dm_count_buf = np.full(1, self.atoms.calc.asi.dm_count, dtype=int)
-            ham_count_buf = np.full(1, self.atoms.calc.asi.ham_count, dtype=int)
-        else:
-            dm_count_buf = np.full(1, 0, dtype=int)
-            ham_count_buf = np.full(1, 0, dtype=int)
-
-        MPI.COMM_WORLD.Bcast(dm_count_buf)
-        MPI.COMM_WORLD.Bcast(ham_count_buf)
-
-        self.atoms.calc.asi.dm_count = dm_count_buf[0]
-        self.atoms.calc.asi.ham_count = ham_count_buf[0]
-
         self.total_energy = E0
-
         self.basis_atoms = self.atoms.calc.asi.basis_atoms
         self.n_basis = self.atoms.calc.asi.n_basis
+
+
+        # BROADCAST QUANTITIES ONLY CALCULATED TO THE HEAD NODE
+        self.atoms.calc.asi.ham_storage = \
+            mpi_bcast_matrix_storage(self.atoms.calc.asi.ham_storage,
+                                     self.atoms.calc.asi.n_basis,
+                                     self.atoms.calc.asi.n_basis)
+        self.atoms.calc.asi.dm_storage = \
+            mpi_bcast_matrix_storage(self.atoms.calc.asi.dm_storage,
+                                     self.atoms.calc.asi.n_basis,
+                                     self.atoms.calc.asi.n_basis)
+
+        self.atoms.calc.asi.dm_count = mpi_bcast_integer(self.atoms.calc.asi.dm_count)
+        self.atoms.calc.asi.ham_count = mpi_bcast_integer(self.atoms.calc.asi.ham_count)
 
         self.extract_results()
 
