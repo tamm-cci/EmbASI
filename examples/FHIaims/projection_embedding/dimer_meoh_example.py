@@ -1,5 +1,5 @@
-from ASI_Embedding.embedding import ProjectionEmbedding
-from ASI_Embedding.parallel_utils import root_print
+from asiembedding.embedding import ProjectionEmbedding
+from asiembedding.parallel_utils import root_print
 from ase.data.s22 import s22, s26, create_s22_system
 from ase.calculators.aims import Aims
 import os
@@ -42,6 +42,7 @@ calc_ll = Aims(xc='PBE',
     collect_eigenvectors=True,
     density_update_method='density_matrix', # for DM export
     atomic_solver_xc="PBE",
+    lmo_init_guess="random",
     compute_kinetic=True,
   )
 
@@ -51,6 +52,7 @@ calc_hl = Aims(xc='PBE0',
     collect_eigenvectors=True,
     density_update_method='density_matrix', # for DM export
     atomic_solver_xc="PBE",
+    lmo_init_guess="random",
     compute_kinetic=True,
   )
 

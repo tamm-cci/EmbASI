@@ -1,5 +1,5 @@
-from ASI_Embedding.embedding import ProjectionEmbedding
-from ASI_Embedding.parallel_utils import root_print
+from asiembedding.embedding import ProjectionEmbedding
+from asiembedding.parallel_utils import root_print
 from ase.io import read
 from ase.calculators.aims import Aims
 import os
