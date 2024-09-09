@@ -218,6 +218,8 @@ class ProjectionEmbedding(EmbeddingBase):
         high_level_calculator_2.set(qm_embedding_calc = 2)
         high_level_calculator_2.set(charge_mix_param = 0.)
         high_level_calculator_2.set(charge = frag_charge)
+        if "total_energy_method" in high_level_calculator_2.parameters:
+            high_level_calculator_2.set(total_energy_method = high_level_calculator_2.parameters["xc"])
         self.set_layer(atoms, self.calc_names[3], high_level_calculator_2, embed_mask, ghosts=2, no_scf=False)
 
         self.mu_val = mu_val
@@ -412,6 +414,10 @@ class ProjectionEmbedding(EmbeddingBase):
 
         # Calculate projected density correction to total energy
         self.PB_corr = (np.trace(self.P_b @ self.A_HL.density_matrices_out[0]) * 27.211384500)
+
+        if "total_energy_method" in self.A_HL.initial_calc.parameters:
+            subsys_A_highlvl_totalen = subsys_A_highlvl_totalen + \
+                self.A_HL.post_scf_corr_energy - self.A_HL.dft_energy
 
         self.DFT_AinB_total_energy = subsys_A_highlvl_totalen - \
             subsys_A_lowlvl_totalen + subsys_AB_lowlvl_totalen + self.PB_corr

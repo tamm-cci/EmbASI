@@ -215,9 +215,10 @@ class AtomsEmbed():
         implemented.
         """
 
-        with open('./'+self.outdir+'/asi.log') as output:
+        with open('./'+self.outdir+'/asi.log', 'r') as output:
 
             lines = output.readlines()
+
             for line in lines:
                 outline = line.split()
 
@@ -229,6 +230,15 @@ class AtomsEmbed():
 
                 if '  | Sum of eigenvalues            :' in line:
                     self.ev_sum = float(outline[7])
+
+                if '  | Total energy of the DFT' in line:
+                    self.dft_energy = float(outline[11])
+
+                if 'Total XC Energy     :' in line:
+                    self.xc_energy = float(outline[6])
+
+                if 'Total energy after the post-s.c.f. correlation calculation' in line:
+                    self.post_scf_corr_energy = float(outline[9])
 
     def run(self, ev_corr_scf=False):
         """Actually performed a given simulation run for the calculator.
@@ -266,15 +276,17 @@ class AtomsEmbed():
             'TODO: Actual type enforcement and error handling'
             self.atoms.calc.asi.init_density_matrix = {(1,1): np.asfortranarray(self.density_matrix_in)}
         if self.fock_embedding_matrix is not None:
-            self.atoms.calc.asi.init_hamiltonian = {(1,1): np.asfortranarray(self.fock_embedding_matrix)}
+            self.atoms.calc.asi.set_hamiltonian = {(1,1): np.asfortranarray(self.fock_embedding_matrix)}
 
         E0 = self.atoms.get_potential_energy()
+
         self.total_energy = E0
         self.basis_atoms = self.atoms.calc.asi.basis_atoms
         self.n_basis = self.atoms.calc.asi.n_basis
 
 
-        # BROADCAST QUANTITIES ONLY CALCULATED TO THE HEAD NODE
+        # BROADCAST QUANTITIES ONLY CALCULATED FOR THE HEAD NODE TO ALL
+        # OTHER NODES
         self.atoms.calc.asi.ham_storage = \
             mpi_bcast_matrix_storage(self.atoms.calc.asi.ham_storage,
                                      self.atoms.calc.asi.n_basis,
@@ -286,6 +298,9 @@ class AtomsEmbed():
 
         self.atoms.calc.asi.dm_count = mpi_bcast_integer(self.atoms.calc.asi.dm_count)
         self.atoms.calc.asi.ham_count = mpi_bcast_integer(self.atoms.calc.asi.ham_count)
+
+        self.atoms.calc.asi.close()
+        MPI.COMM_WORLD.Barrier()
 
         self.extract_results()
 
@@ -313,8 +328,6 @@ class AtomsEmbed():
                 self.ev_corr_energy = 27.211384500 * np.trace(self.density_matrix_in @ self.hamiltonian_total)
 
             self.ev_corr_total_energy = self.total_energy - self.ev_sum + self.ev_corr_energy
-
-        self.atoms.calc.asi.close()
 
     @property
     def hamiltonian_kinetic(self):

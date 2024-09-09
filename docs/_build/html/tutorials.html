@@ -4,7 +4,7 @@
   <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ASI Embedding Documentation &mdash; asiembedding 00.00.01 documentation</title>
+  <title>Tutorials &mdash; asiembedding 00.00.01 documentation</title>
       <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=80d5e7a1" />
       <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=19f00094" />
 
@@ -20,8 +20,7 @@
         <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
     <script src="_static/js/theme.js"></script>
     <link rel="index" title="Index" href="genindex.html" />
-    <link rel="search" title="Search" href="search.html" />
-    <link rel="next" title="Installation" href="installation.html" /> 
+    <link rel="search" title="Search" href="search.html" /> 
 </head>
 
 <body class="wy-body-for-nav"> 
@@ -32,7 +31,7 @@
 
           
           
-          <a href="#" class="icon icon-home">
+          <a href="index.html" class="icon icon-home">
             asiembedding
           </a>
 <div role="search">
@@ -57,17 +56,17 @@
 
     <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
           <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
-          <a href="#">asiembedding</a>
+          <a href="index.html">asiembedding</a>
       </nav>
 
       <div class="wy-nav-content">
         <div class="rst-content">
           <div role="navigation" aria-label="Page navigation">
   <ul class="wy-breadcrumbs">
-      <li><a href="#" class="icon icon-home" aria-label="Home"></a></li>
-      <li class="breadcrumb-item active">ASI Embedding Documentation</li>
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Tutorials</li>
       <li class="wy-breadcrumbs-aside">
-            <a href="_sources/index.rst.txt" rel="nofollow"> View page source</a>
+            <a href="_sources/tutorials.rst.txt" rel="nofollow"> View page source</a>
       </li>
   </ul>
   <hr/>
@@ -75,48 +74,22 @@
           <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
            <div itemprop="articleBody">
              
-  <section id="asi-embedding-documentation">
-<h1>ASI Embedding Documentation<a class="headerlink" href="#asi-embedding-documentation" title="Link to this heading"></a></h1>
-<p>ASI Embedding (placeholder name) is a Python wrapper for running QM-in-QM embedding simulations. The software package provides communincation protocols for matrix quantities between instances of different QM code system calls through the <a class="reference external" href="https://gitlab.com/pvst/asi">ASI (Atomic Simulation Interface) API</a>. Inputs such as atomic structures and QM code keywords are comtrolled through integration with the <a class="reference external" href="https://wiki.fysik.dtu.dk/ase/">Atomic Simulation Environment (ASE)</a>.</p>
-<p>The software is currently under active development and is subject to major changes.</p>
-<div class="toctree-wrapper compound">
-<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
-<ul>
-<li class="toctree-l1"><a class="reference internal" href="installation.html">Installation</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="installation.html#requirements">Requirements</a></li>
-<li class="toctree-l2"><a class="reference internal" href="installation.html#asi-embedding-installation">ASI Embedding Installation</a></li>
-<li class="toctree-l2"><a class="reference internal" href="installation.html#qm-driver-installation">QM Driver Installation</a></li>
-</ul>
-</li>
-<li class="toctree-l1"><a class="reference internal" href="explainer.html">How It Works</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="explainer.html#workflow">Workflow</a></li>
-</ul>
-</li>
-<li class="toctree-l1"><a class="reference internal" href="codeintegration.html">QM Drivers</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="codeintegration.html#fhi-aims">FHI-aims</a></li>
-</ul>
-</li>
-<li class="toctree-l1"><a class="reference internal" href="modules.html">ASI Embedding Modules</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="ASI_Embedding.html">ASI Embedding Package</a></li>
-</ul>
-</li>
-</ul>
-</div>
+  <section id="tutorials">
+<h1>Tutorials<a class="headerlink" href="#tutorials" title="Link to this heading"></a></h1>
+<p>Examples shown below may be found in &lt;YOUR_ASI_EMBEDDING_ROOT&gt;/examples/FHIaims.</p>
+<section id="basic-embedding-calculation-pbe0-in-pbe">
+<h2>Basic Embedding Calculation (PBE0-in-PBE)<a class="headerlink" href="#basic-embedding-calculation-pbe0-in-pbe" title="Link to this heading"></a></h2>
+<p>We will first demonstrate the use of embedding for a simple methanol dimer. First, using the Atomic Simulation Environment, we may obtain the geometry from the S22 test set</p>
 </section>
-<section id="indices-and-tables">
-<h1>Indices and tables<a class="headerlink" href="#indices-and-tables" title="Link to this heading"></a></h1>
-<ul class="simple">
-<li><p><a class="reference internal" href="genindex.html"><span class="std std-ref">Index</span></a></p></li>
-<li><p><a class="reference internal" href="search.html"><span class="std std-ref">Search Page</span></a></p></li>
-</ul>
+<section id="basis-truncation-pbe0-in-pbe">
+<h2>Basis Truncation (PBE0-in-PBE)<a class="headerlink" href="#basis-truncation-pbe0-in-pbe" title="Link to this heading"></a></h2>
+</section>
 </section>
 
 
            </div>
           </div>
-          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
-        <a href="installation.html" class="btn btn-neutral float-right" title="Installation" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
-    </div>
+          <footer>
 
   <hr/>
 

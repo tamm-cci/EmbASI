@@ -42,7 +42,7 @@ calc_ll = Aims(xc='PBE',
     collect_eigenvectors=True,
     density_update_method='density_matrix', # for DM export
     atomic_solver_xc="PBE",
-    lmo_init_guess="random",
+#    lmo_init_guess="random",
     compute_kinetic=True,
   )
 
@@ -52,7 +52,7 @@ calc_hl = Aims(xc='PBE0',
     collect_eigenvectors=True,
     density_update_method='density_matrix', # for DM export
     atomic_solver_xc="PBE",
-    lmo_init_guess="random",
+#    lmo_init_guess="random",
     compute_kinetic=True,
   )
 
