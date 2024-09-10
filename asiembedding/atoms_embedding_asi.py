@@ -65,15 +65,18 @@ class AtomsEmbed():
             "their atoms object is ordered accordingly"
             self.embed_mask = [1]*embed_mask
             self.embed_mask += [2]*(len(atoms)-embed_mask)
-
-        if isinstance(embed_mask, list):
+        elif isinstance(embed_mask, list):
             self.embed_mask = embed_mask
             assert len(atoms)==len(embed_mask), \
                 "Length of embedding mask does not match number of atoms"
+        elif embed_mask is None:
+            self.embed_mask = None
+
+        if self.embed_mask is not None:
+            self.reorder_atoms_from_embed_mask()
+            self.atoms.info['embedding_mask'] = self.embed_mask
 
         self.initial_calc = initial_calc
-        self.reorder_atoms_from_embed_mask()
-        self.atoms.info['embedding_mask'] = self.embed_mask
 
         self.truncate = False
         self.density_matrix_in = None
@@ -81,9 +84,12 @@ class AtomsEmbed():
 
         self.no_scf = no_scf
 
-        if isinstance(ghosts, int):
-            ghosts = [ghosts]
-        self.ghost_list = [(at in [ghosts]) for at in self.embed_mask]
+        if self.embed_mask is not None:
+            if isinstance(ghosts, int):
+                ghosts = [ghosts]
+            self.ghost_list = [(at in [ghosts]) for at in self.embed_mask]
+        else:
+            self.ghost_list = [False]*len(atoms)
 
     def calc_initializer(self, asi):
 
@@ -97,7 +103,9 @@ class AtomsEmbed():
             ghost_list = self.ghost_list
 
         calc.write_input(asi.atoms, ghosts=ghost_list)
-        self._insert_embedding_region_aims()
+
+        if self.embed_mask is not None:
+            self._insert_embedding_region_aims()
 
     def reorder_atoms_from_embed_mask(self):
         """

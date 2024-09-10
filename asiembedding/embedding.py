@@ -154,12 +154,40 @@ class EmbeddingBase(ABC):
         population = np.trace(overlap_matrix @ (density_matrix))
 
         return population
-
+    
     @abstractmethod
     def run(self):
         pass
 
+class StandardDFT(EmbeddingBase):
+
+    def __init__(self, atoms, embed_mask, calc_base_ll, calc_base_hl):
+        """_summary_
+
+        A class which runs a standard DFT calculation without
+        embedding - mostly useful for reference calculations.
+        """
+
+        from copy import copy, deepcopy
+        from mpi4py import MPI
+
+        self.calc_names = ["AB_LL"]
+
+        super(StandardDFT, self).__init__(atoms, embed_mask, calc_base_ll, calc_base_hl)
+        low_level_calculator_1 = deepcopy(self.calculator_ll)
+
+        self.set_layer(atoms, self.calc_names[0], low_level_calculator_1, embed_mask, ghosts=0, no_scf=False)
+
+    def run(self):
+
+        self.AB_LL.run()
+        root_print(f" -----------======================--------- " )
+        root_print(f" Total Energy (AB High-Level): {self.AB_LL.total_energy} eV" )
+        root_print(f" -----------======================--------- " )
+    
+    
 class ProjectionEmbedding(EmbeddingBase):
+
     def __init__(self, atoms, embed_mask, calc_base_ll, calc_base_hl, frag_charge=0, post_scf=None, mu_val=1e+06, truncate_basis=False):
         """_summary_
 
@@ -391,8 +419,7 @@ class ProjectionEmbedding(EmbeddingBase):
         self.A_HL_pop = self.calc_subsys_pop(self.AB_LL.overlap, self.A_HL.density_matrices_out[0])
         root_print(f" Population of Subystem A^[HL]: {self.A_HL_pop}")
         self.charge_renorm = (self.A_pop/self.A_HL_pop)
-        root_print(f" Population of Subystem A^[HL] (post-norm): {self.calc_subsys_pop(self.AB_LL.overlap, self.charge_renorm*self.A_HL.
-        density_matrices_out[0])}")
+        root_print(f" Population of Subystem A^[HL] (post-norm): {self.calc_subsys_pop(self.AB_LL.overlap, self.charge_renorm*self.A_HL.density_matrices_out[0])}")
         self.charge_renorm = 1.0
 
         # Calculate A low-level reference energy
@@ -445,8 +472,8 @@ class ProjectionEmbedding(EmbeddingBase):
         root_print(f" Final total energy (Projection Corrected): {self.DFT_AinB_total_energy} eV" )
         root_print(f" " )
         root_print(f" -----------======================--------- " )
-        root_print(f" " )
-
+        root_print(f" " )                            
+            
 #    def test_spade(self):
 #
 #        import copy

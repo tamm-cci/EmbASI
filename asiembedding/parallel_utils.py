@@ -3,7 +3,9 @@ import numpy as np
 
 def root_print(*args, **kwargs):
     "Prints only from the root node"
+    import sys
 
+    sys.stdout.flush()
     rank = MPI.COMM_WORLD.Get_rank()
 
     if rank == 0:
