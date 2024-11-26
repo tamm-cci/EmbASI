@@ -138,7 +138,7 @@ class EmbeddingBase(ABC):
 
         # Remove non-active atoms from basis_atoms to form a truncated
         # analogue
-        trunc_basis_atoms = np.array([atom for atom in atomsembed.atoms 
+        trunc_basis_atoms = np.array([atom for atom in atomsembed.basis_atoms 
                                       if atom in active_atoms])
 
         # Count number of basis functions included in truncation calculations
@@ -460,11 +460,18 @@ class ProjectionEmbedding(EmbeddingBase):
                                                             self.AB_LL.density_matrices_out[0],
                                                             self.truncate_basis_thresh)
             basis_info = self.set_truncation_defaults(self.AB_LL, basis_mask)
-            AB_LL.basis_info = basis_info
-            A_LL.basis_info = basis_info
-            A_HL.basis_info = basis_info
-            AB_LL_PP.basis_info = basis_info
-            A_HL_PP.basis_info = basis_info
+
+            self.AB_LL.truncate = False
+            self.A_LL.truncate = True
+            self.A_HL.truncate = True
+            self.A_HL_PP.truncate = True
+            self.AB_LL_PP.truncate = False
+
+            self.AB_LL.basis_info = basis_info
+            self.A_LL.basis_info = basis_info
+            self.A_HL.basis_info = basis_info
+            self.A_HL_PP.basis_info = basis_info
+            self.AB_LL_PP.basis_info = basis_info
 
 
         self.A_LL.density_matrix_in = self.AB_LL.density_matrices_out[0]
@@ -542,7 +549,7 @@ class ProjectionEmbedding(EmbeddingBase):
         # root_print(f" Population of Subystem A^[HL] (post-norm): 
         #             {self.calc_subsys_pop(self.AB_LL.overlap, 
         #             self.charge_renorm*self.A_HL.density_matrices_out[0])}")
-        # self.charge_renorm = 1.0
+        self.charge_renorm = 1.0
 
         # Calculate A low-level reference energy
         self.A_LL.density_matrix_in = self.charge_renorm * \
