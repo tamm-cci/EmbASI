@@ -1,5 +1,5 @@
-from asiembedding.embedding import ProjectionEmbedding
-from asiembedding.parallel_utils import root_print
+from embasi.embedding import ProjectionEmbedding
+from embasi.parallel_utils import root_print
 from ase.data.s22 import s22, s26, create_s22_system
 from ase.calculators.aims import Aims
 import os

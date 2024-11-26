@@ -2,7 +2,16 @@ from mpi4py import MPI
 import numpy as np
 
 def root_print(*args, **kwargs):
-    "Prints only from the root node"
+    """Executes print function on head node only.
+
+    Parameters
+    ----------
+    *args
+        Standard arguments for built-in print().
+    **kwargs
+        Standard  additional arguments for built-in print().
+
+    """
     import sys
 
     sys.stdout.flush()
@@ -12,8 +21,32 @@ def root_print(*args, **kwargs):
         print(*args, **kwargs)
 
 def mpi_bcast_matrix_storage(data_dict, nrows, ncols):
-    # Temporary cludge to communicate DMs from root to other processes,
-    # which somehow aren't stored on any rank other than 0.
+    """Broadcasts a dictionary of numpy arrays from root node.
+
+    The dictionaries of matrix quantities communicated by ASI 
+    are only stored on the root MPI process. This means each
+    node does not store its own copy of the relevant property.
+    If the calculation is initialised from quantities communicated 
+    from a previous ASI library call, a crash will ensue because
+    processes other than the head node do not have a copy of 
+    the relevant matrix. This process function is necessary to
+    ensure each MPI processs posssesses a copy of an input 
+    data_dictionary.
+
+    Parameters
+    ----------
+    data_dict: dict of nrowsxncols np.ndarrays
+        Dictionary of numpy arrays communicate from ASI
+    nrows: int
+        Number of rows in the matrices of data_dict
+    ncols: int
+        Number of columns in the matrices of data_dict
+    Returns
+    -------
+    data_dict: dict of nrowsxncols np.ndarrays
+        Input dictionary broadcast to all nodes
+
+    """
 
     if MPI.COMM_WORLD.Get_rank() == 0:
         storage_keys = data_dict
@@ -48,6 +81,17 @@ def mpi_bcast_matrix_storage(data_dict, nrows, ncols):
     return data_dict
 
 def mpi_bcast_integer(val):
+    """Broadcasts an integer from the root process to all other processes.
+
+    Parameters
+    ----------
+    val: int
+        Integer value to communicate
+    Returns
+    -------
+    int_buf[0]: int
+        Input integer broadcast to all nodes
+    """
 
     if MPI.COMM_WORLD.Get_rank() == 0:
         int_buf = np.full(1, val, dtype=int)
@@ -57,3 +101,4 @@ def mpi_bcast_integer(val):
     MPI.COMM_WORLD.Bcast(int_buf)
 
     return int_buf[0]
+ 

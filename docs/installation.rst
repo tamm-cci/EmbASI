@@ -9,7 +9,7 @@ ____________________
 * `asi4py >= 1.3.0 <https://pvst.gitlab.io/asi/>`_
 * `ASE <= 2.22.1 <https://wiki.fysik.dtu.dk/ase/>`_
 
-ASI Embedding Installation
+Embasi Installation
 __________________________
 
 
@@ -18,19 +18,19 @@ Installation from PyPI
 
 .. highlight:: bash
 
-ASI Embedding may be installed from the PyPI respository, which will automatically download the source code, install the required packages, and install ASI Embedding in the target used for pip installation::
+Embasi may be installed from the PyPI respository, which will automatically download the source code, install the required packages, and install Embasi in the target used for pip installation::
 
-  $ pip install --upgrade asiembedding
+  $ pip install --upgrade embasi
 
 Installation from Source
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. highlight:: bash
 
-The source code for ASI Embedding may be downloaded from the github repository on a local machine, and pip installation executed in the top directory of the ASI Embedding package::
+The source code for Embasi may be downloaded from the github repository on a local machine, and pip installation executed in the top directory of the Embasi package::
 
   $ git clone git@github.com:GabrielBram/ASI_Embedding.git
-  $ cd ASI_Embedding
+  $ cd embasi
   $ pip install .
 
 

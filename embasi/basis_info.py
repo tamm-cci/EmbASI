@@ -1,9 +1,11 @@
-from asiembedding.parallel_utils import root_print
+from embasi.parallel_utils import root_print
 
 class Basis_info:
-    """_summary_
-    Contains the basis dimension information, which acts as a permanent store
-    basis information which may dynamically change for each AtomsEmbed object
+    """Contains the basis dimension information,
+
+    Permanently stores basis information which may dynamically change 
+    for each AtomsEmbed object
+
     """
     def __init__(self):
 
@@ -11,6 +13,9 @@ class Basis_info:
 
     @property
     def full_natoms(self):
+        """ Total number of atoms in supersystems.
+  
+        """
         return self._full_natoms
 
     @full_natoms.setter
@@ -19,6 +24,9 @@ class Basis_info:
 
     @property
     def trunc_natoms(self):
+        """ Total number of atoms in truncated basis supersystem.
+  
+        """
         return self._trunc_natoms
 
     @trunc_natoms.setter
@@ -27,6 +35,9 @@ class Basis_info:
 
     @property
     def active_atoms(self):
+        """ Number of atoms evaluated with the higher-level QM method.
+  
+        """
         return self._active_atoms
 
     @active_atoms.setter
@@ -35,6 +46,9 @@ class Basis_info:
 
     @property
     def full_nbasis(self):
+        """ Number of basis functions in the full supersystem.
+  
+        """
         return self._full_nbasis
 
     @full_nbasis.setter
@@ -43,6 +57,9 @@ class Basis_info:
 
     @property
     def trunc_nbasis(self):
+        """ Number of basis functions in the truncated supersystem.
+  
+        """
         return self._trunc_nbasis
 
     @trunc_nbasis.setter
@@ -51,6 +68,9 @@ class Basis_info:
 
     @property
     def full_basis_atoms(self):
+        """ Index list which maps basis functions to atoms.
+  
+        """
         return self._full_basis_atoms
 
     @full_basis_atoms.setter
@@ -59,6 +79,9 @@ class Basis_info:
 
     @property
     def trunc_basis_atoms(self):
+        """ Index list which maps basis functions after truncation to atoms.
+  
+        """
         return self._trunc_basis_atoms
 
     @trunc_basis_atoms.setter
@@ -66,9 +89,10 @@ class Basis_info:
         self._trunc_basis_atoms = val
 
     def set_basis_atom_indexes(self):
-        """_summary_
-        Sets the start and end index of the matrices with nbasis*nbasis or
-        trunc_nbasis*trunc_nbasis dimensions for each atom block.
+        """Sets lists which maps minimum and maximum index of basis functions 
+           for a given atom.
+
+
         """
         import numpy as np
 

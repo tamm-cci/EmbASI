@@ -6,7 +6,7 @@
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
-project = 'asiembedding'
+project = 'embasi'
 copyright = '2024, Gabriel A. Bramley'
 author = 'Gabriel A. Bramley'
 release = '00.00.01'

@@ -2,7 +2,7 @@
 Tutorials
 ====================
 
-Examples shown below may be found in <YOUR_ASI_EMBEDDING_ROOT>/examples/FHIaims.
+Examples shown below may be found in <YOUR_EMBASI_ROOT>/examples/FHIaims.
 
 Basic Embedding Calculation (PBE0-in-PBE)
 _________________________________________
