@@ -408,6 +408,14 @@ class AtomsEmbed():
                 self.total_energy - self.ev_sum + self.ev_corr_energy
 
     @property
+    def hamiltonian_core(self):
+        core_idx = self.atoms.calc.asi.ham_count - 2
+        if self.truncate:
+            return self.truncated_mat_to_full(self.atoms.calc.asi.ham_storage.get((core_idx,1,1)))
+        else:
+            return self.atoms.calc.asi.ham_storage.get((core_idx,1,1))
+
+    @property
     def hamiltonian_kinetic(self):
         core_idx = self.atoms.calc.asi.ham_count - 1
         if self.truncate:
@@ -429,6 +437,13 @@ class AtomsEmbed():
         Generates
         """
         return self.hamiltonian_total - self.hamiltonian_kinetic
+
+    @property
+    def hamiltonian_electrostatic_v2(self):
+        """_summary_
+        Generates
+        """
+        return self.hamiltonian_total - self.hamiltonian_core
 
     @property
     def fock_embedding_matrix(self):

@@ -108,6 +108,38 @@ class EmbeddingBase(ABC):
 
         return active_atom_mask
 
+    def set_basis_info(self, atomsembed):
+        """Sets default BasisInfo objects for each embedding layer
+
+        Necessary to maintain consistency in values needed for matrix truncation
+        /expansion between the AtomsEmbed objects (eg., self.basis_atoms, 
+        self.n_atoms). Failure to do so leads to unexpected behaviour.
+
+        Parameters
+        ----------
+        atomsembed: AtomsEmbed Object
+            Atoms embed object for which defaults are set
+        active_atom_mask: list
+            Atoms considered active (True), or truncated (False).
+
+        Return
+        ------
+        BasisInfo: BasisInfo object
+            Basis info object to be assigned to each layer
+
+        """
+        from embasi.basis_info import Basis_info
+
+        active_atoms = np.array([True]*len(atomsembed.atoms))
+
+        BasisInfo = Basis_info()
+        BasisInfo.full_natoms = np.size(active_atoms)
+        BasisInfo.active_atoms = active_atoms
+        BasisInfo.full_basis_atoms = atomsembed.basis_atoms
+        BasisInfo.full_nbasis = atomsembed.n_basis
+
+        return BasisInfo
+
     def set_truncation_defaults(self, atomsembed, active_atom_mask):
         """Sets default BasisInfo objects for each embedding layer
 
@@ -315,40 +347,45 @@ class ProjectionEmbedding(EmbeddingBase):
     """
 
     def __init__(self, atoms, embed_mask, calc_base_ll, calc_base_hl,
-                 frag_charge=0, post_scf=None, mu_val=1e+06, truncate_basis_thresh=None):
+                 frag_charge=0, post_scf=None, total_energy_corr="1storder", mu_val=1e+06, \
+                 truncate_basis_thresh=None):
 
         from copy import copy, deepcopy
         from mpi4py import MPI
 
-        self.calc_names = ["AB_LL","A_LL","A_HL","A_HL_PP","AB_LL_PP"]
+        self.total_energy_corr = total_energy_corr
+
+        if self.total_energy_corr == "1storder":
+            self.calc_names = ["AB_LL","A_LL","A_HL","A_HL_PP"]
+        elif self.total_energy_corr == "nonscf": 
+            self.calc_names = ["AB_LL","A_LL","A_HL","A_HL_PP","AB_LL_PP"]
+        else:
+            raise Exception("Invalid entry for total_energy_corr: use '1storder' or 'nonscf' ")
 
         super(ProjectionEmbedding, self).__init__(atoms, embed_mask,
                                                   calc_base_ll, calc_base_hl)
         low_level_calculator_1 = deepcopy(self.calculator_ll)
         low_level_calculator_2 = deepcopy(self.calculator_ll)
-        low_level_calculator_3 = deepcopy(self.calculator_ll)
+        
+        if self.total_energy_corr == "nonscf":
+            low_level_calculator_3 = deepcopy(self.calculator_ll)
 
         high_level_calculator_1 = deepcopy(self.calculator_hl)
         high_level_calculator_2 = deepcopy(self.calculator_hl)
 
         low_level_calculator_1.set(qm_embedding_calc = 1)
-        self.set_layer(atoms, self.calc_names[0], low_level_calculator_1, 
-                       embed_mask, ghosts=0, no_scf=False)
-
-        low_level_calculator_3.set(qm_embedding_calc = 2)
-        low_level_calculator_3.set(charge_mix_param = 0.)
-        self.set_layer(atoms, self.calc_names[4], low_level_calculator_3,
+        self.set_layer(atoms, "AB_LL", low_level_calculator_1, 
                        embed_mask, ghosts=0, no_scf=False)
 
         low_level_calculator_2.set(qm_embedding_calc = 2)
         low_level_calculator_2.set(charge_mix_param = 0.)
         low_level_calculator_2.set(charge = frag_charge)
-        self.set_layer(atoms, self.calc_names[1], low_level_calculator_2,
+        self.set_layer(atoms, "A_LL", low_level_calculator_2,
                        embed_mask, ghosts=2, no_scf=False)
 
         high_level_calculator_1.set(qm_embedding_calc = 3)
         high_level_calculator_1.set(charge = frag_charge)
-        self.set_layer(atoms, self.calc_names[2], high_level_calculator_1,
+        self.set_layer(atoms, "A_HL", high_level_calculator_1,
                        embed_mask, ghosts=2, no_scf=False)
 
         high_level_calculator_2.set(qm_embedding_calc = 2)
@@ -357,9 +394,14 @@ class ProjectionEmbedding(EmbeddingBase):
         if "total_energy_method" in high_level_calculator_2.parameters:
             high_level_calculator_2.set(total_energy_method=
                                         high_level_calculator_2.parameters["xc"])
-
-        self.set_layer(atoms, self.calc_names[3], high_level_calculator_2,
+        self.set_layer(atoms, "A_HL_PP", high_level_calculator_2,
                        embed_mask, ghosts=2, no_scf=False)
+
+        if self.total_energy_corr == "nonscf":
+            low_level_calculator_3.set(qm_embedding_calc = 2)
+            low_level_calculator_3.set(charge_mix_param = 0.)
+            self.set_layer(atoms, "AB_LL_PP", low_level_calculator_3,
+                           embed_mask, ghosts=0, no_scf=False)
 
         self.mu_val = mu_val
         self.rank = MPI.COMM_WORLD.Get_rank()
@@ -450,6 +492,7 @@ class ProjectionEmbedding(EmbeddingBase):
         # nuclear-electron potential).
         start = time.time()
         self.AB_LL.run()
+        subsys_AB_lowlvl_totalen = self.AB_LL.total_energy
         end = time.time()
         self.time_ab_lowlevel = end - start
 
@@ -465,21 +508,28 @@ class ProjectionEmbedding(EmbeddingBase):
             self.A_LL.truncate = True
             self.A_HL.truncate = True
             self.A_HL_PP.truncate = True
-            self.AB_LL_PP.truncate = False
+        else:
+            basis_info = self.set_basis_info(self.AB_LL)
+            self.AB_LL.truncate = False
+            self.A_LL.truncate = False
+            self.A_HL.truncate = False
+            self.A_HL_PP.truncate = False
 
-            self.AB_LL.basis_info = basis_info
-            self.A_LL.basis_info = basis_info
-            self.A_HL.basis_info = basis_info
-            self.A_HL_PP.basis_info = basis_info
+        if self.total_energy_corr == "nonscf":
+            self.AB_LL_PP.truncate = False
             self.AB_LL_PP.basis_info = basis_info
 
+        self.AB_LL.basis_info = basis_info
+        self.A_LL.basis_info = basis_info
+        self.A_HL.basis_info = basis_info
+        self.A_HL_PP.basis_info = basis_info
 
         self.A_LL.density_matrix_in = self.AB_LL.density_matrices_out[0]
         start = time.time()
-        self.A_LL.run()
+        self.A_LL.run(ev_corr_scf=True)
+        subsys_A_lowlvl_totalen = self.A_LL.ev_corr_total_energy
         end = time.time()
         self.time_a_lowlevel = end - start
-
 
         # Calculates the electron count for the combined (A+B) and separated 
         # subsystems (A and B).
@@ -496,7 +546,6 @@ class ProjectionEmbedding(EmbeddingBase):
         root_print(f" Population of Subsystem AB: {self.AB_pop}")
         root_print(f" Population of Subsystem A: {self.A_pop}")
         root_print(f" Population of Subsystem B: {self.B_pop}")
-
 
         # Initialises the density matrix for subsystem A, and calculated the 
         # hamiltonian components for subsystem A at the low-level reference.
@@ -539,37 +588,38 @@ class ProjectionEmbedding(EmbeddingBase):
         end = time.time()
         self.time_a_highlevel_pp = end - start
 
-        # A terrible cludge which requires improvement.
-        # Re-normalising charge for differing atomic solvers (bad cludge)
-        # root_print(f" Normalizing density matrix from high-level reference...")
-        # self.A_HL_pop = self.calc_subsys_pop(self.AB_LL.overlap, 
-        #                                 self.A_HL.density_matrices_out[0])
-        # root_print(f" Population of Subystem A^[HL]: {self.A_HL_pop}")
-        # self.charge_renorm = (self.A_pop/self.A_HL_pop)
-        # root_print(f" Population of Subystem A^[HL] (post-norm): 
-        #             {self.calc_subsys_pop(self.AB_LL.overlap, 
-        #             self.charge_renorm*self.A_HL.density_matrices_out[0])}")
-        self.charge_renorm = 1.0
+        if self.total_energy_corr == "nonscf":
+            # A terrible cludge which requires improvement.
+            # Re-normalising charge for differing atomic solvers (bad cludge)
+            # root_print(f" Normalizing density matrix from high-level reference...")
+            # self.A_HL_pop = self.calc_subsys_pop(self.AB_LL.overlap, 
+            #                                 self.A_HL.density_matrices_out[0])
+            # root_print(f" Population of Subystem A^[HL]: {self.A_HL_pop}")
+            # self.charge_renorm = (self.A_pop/self.A_HL_pop)
+            # root_print(f" Population of Subystem A^[HL] (post-norm): 
+            #             {self.calc_subsys_pop(self.AB_LL.overlap, 
+            #             self.charge_renorm*self.A_HL.density_matrices_out[0])}")
+            self.charge_renorm = 1.0
 
-        # Calculate A low-level reference energy
-        self.A_LL.density_matrix_in = self.charge_renorm * \
-                                      self.A_HL.density_matrices_out[0]
-        self.A_LL.run(ev_corr_scf=True)
-        start = time.time()
-        subsys_A_lowlvl_totalen = self.A_LL.ev_corr_total_energy
-        end = time.time()
-        self.time_a_lowlevel_pp = end - start
+            # Calculate A low-level reference energy
+            self.A_LL.density_matrix_in = self.charge_renorm * \
+                                        self.A_HL.density_matrices_out[0]
+            self.A_LL.run(ev_corr_scf=True)
+            start = time.time()
+            subsys_A_lowlvl_totalen = self.A_LL.ev_corr_total_energy
+            end = time.time()
+            self.time_a_lowlevel_pp = end - start
 
-        # Calculate AB low-level reference energy
-        self.AB_LL_PP.density_matrix_in = \
-            (self.charge_renorm * self.A_HL.density_matrices_out[0]) \
-            + self.AB_LL.density_matrices_out[1]
+            # Calculate AB low-level reference energy
+            self.AB_LL_PP.density_matrix_in = \
+                (self.charge_renorm * self.A_HL.density_matrices_out[0]) \
+                + self.AB_LL.density_matrices_out[1]
 
-        start = time.time()
-        self.AB_LL_PP.run(ev_corr_scf=True)
-        subsys_AB_lowlvl_totalen = self.AB_LL_PP.ev_corr_total_energy
-        end = time.time()
-        self.time_ab_lowlevel_pp = end - start
+            start = time.time()
+            self.AB_LL_PP.run(ev_corr_scf=True)
+            subsys_AB_lowlvl_totalen = self.AB_LL_PP.ev_corr_total_energy
+            end = time.time()
+            self.time_ab_lowlevel_pp = end - start
 
         # Calculate projected density correction to total energy
         self.PB_corr = \
@@ -579,8 +629,18 @@ class ProjectionEmbedding(EmbeddingBase):
             subsys_A_highlvl_totalen = subsys_A_highlvl_totalen + \
                 self.A_HL.post_scf_corr_energy - self.A_HL.dft_energy
 
-        self.DFT_AinB_total_energy = subsys_A_highlvl_totalen - \
-            subsys_A_lowlvl_totalen + subsys_AB_lowlvl_totalen + self.PB_corr
+        if self.total_energy_corr == "1storder":
+            self.order_1_embedding_corr = np.trace((self.A_HL.density_matrices_out[0] \
+                                            - self.AB_LL.density_matrices_out[0])@ \
+                                            self.A_HL.fock_embedding_matrix) * 27.211384500
+
+            self.DFT_AinB_total_energy = subsys_A_highlvl_totalen - \
+                                       subsys_A_lowlvl_totalen + subsys_AB_lowlvl_totalen + \
+                                       self.order_1_embedding_corr + self.PB_corr
+
+        if self.total_energy_corr == "nonscf":
+            self.DFT_AinB_total_energy = subsys_A_highlvl_totalen - \
+                subsys_A_lowlvl_totalen + subsys_AB_lowlvl_totalen + self.PB_corr
 
         root_print( f" ----------- FINAL         OUTPUTS --------- " )
         root_print(f" ")
@@ -599,6 +659,8 @@ class ProjectionEmbedding(EmbeddingBase):
         root_print(f" Total Energy (A Low-Level): {subsys_A_lowlvl_totalen} eV" )
         root_print(f" Total Energy (A High-Level): {subsys_A_highlvl_totalen} eV" )
         root_print(f" Projection operator energy correction DM^(A_HL) @ Pb: {self.PB_corr} eV" )
+        if self.total_energy_corr == "1storder":
+            root_print(f" First order energy correction (DM^(A_HL)-DM^(A_LL)) @ v_emb): {self.order_1_embedding_corr} eV" )
         root_print(f"  " )
         root_print(f" Final Energies Information:")
         root_print(f" Final total energy (Uncorrected): {self.DFT_AinB_total_energy - self.PB_corr} eV" )
