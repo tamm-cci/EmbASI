@@ -621,3 +621,22 @@ class AtomsEmbed():
     @basis_info.setter
     def basis_info(self, val):
         self._basis_info = val
+
+    @property
+    def free_atom_nelectrons(self):
+        
+        tot_nelec = np.sum(self.atoms.numbers)
+        ghost_nelec = np.sum(self.atoms.numbers[self.ghost_list])
+
+        free_atoms_nelec = total_electrons - ghost_electrons
+
+        return self._free_atoms_nelectrons
+
+    @property
+    def input_nelectrons(self):
+        return self._input_nelectrons
+
+    @input_nelectrons.setter
+    def input_nelectrons(self, val):
+        return self._input_nelectrons
+    
