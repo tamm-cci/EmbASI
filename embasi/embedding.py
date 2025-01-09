@@ -347,7 +347,7 @@ class ProjectionEmbedding(EmbeddingBase):
     """
 
     def __init__(self, atoms, embed_mask, calc_base_ll, calc_base_hl,
-                 frag_charge=0, post_scf=None, total_energy_corr="1storder", mu_val=1e+06, \
+                 total_charge=0, post_scf=None, total_energy_corr="1storder", mu_val=1e+06, \
                  truncate_basis_thresh=None, localisation='SPADE'):
 
         from copy import copy, deepcopy
@@ -387,21 +387,19 @@ class ProjectionEmbedding(EmbeddingBase):
         low_level_calculator_1.set(qm_embedding_calc = 1)
         self.set_layer(atoms, "AB_LL", low_level_calculator_1, 
                        embed_mask, ghosts=0, no_scf=False)
+        self.AB_LL.input_total_charge = total_charge
 
         low_level_calculator_2.set(qm_embedding_calc = 2)
         low_level_calculator_2.set(charge_mix_param = 0.)
-        low_level_calculator_2.set(charge = frag_charge)
         self.set_layer(atoms, "A_LL", low_level_calculator_2,
                        embed_mask, ghosts=2, no_scf=False)
 
         high_level_calculator_1.set(qm_embedding_calc = 3)
-        high_level_calculator_1.set(charge = frag_charge)
         self.set_layer(atoms, "A_HL", high_level_calculator_1,
                        embed_mask, ghosts=2, no_scf=False)
 
         high_level_calculator_2.set(qm_embedding_calc = 2)
         high_level_calculator_2.set(charge_mix_param = 0.)
-        high_level_calculator_2.set(charge = frag_charge)
         if "total_energy_method" in high_level_calculator_2.parameters:
             high_level_calculator_2.set(total_energy_method=
                                         high_level_calculator_2.parameters["xc"])
@@ -413,6 +411,7 @@ class ProjectionEmbedding(EmbeddingBase):
             low_level_calculator_3.set(charge_mix_param = 0.)
             self.set_layer(atoms, "AB_LL_PP", low_level_calculator_3,
                            embed_mask, ghosts=0, no_scf=False)
+            self.AB_LL.input_total_charge = total_charge
 
         self.mu_val = mu_val
         self.rank = MPI.COMM_WORLD.Get_rank()
@@ -435,16 +434,11 @@ class ProjectionEmbedding(EmbeddingBase):
 
         self.P_b = self.mu_val * (self.AB_LL.overlap @ densmat @ self.AB_LL.overlap)
 
-    def calculate_huzinaga_projector(self, densmat):
+    def calculate_huzinaga_projector(self, atomsembed, densmat):
 
-        self.P_b = self.AB_LL.hamiltonian_total @ \
-                   densmat @ \
-                   self.AB_LL.overlap
+        P_b = atomsembed.hamiltonian_total @ densmat @ atomsembed.overlap
 
-        self.P_b = -0.5*(self.P_b + 
-                         self.AB_LL.overlap @ 
-                         densmat @ 
-                         self.AB_LL.hamiltonian_total)
+        self.P_b = -0.5*( P_b + P_b.T )
 
     def spade_localisation(self, atomsembed):
         """Calculate the localised density matrix with the SPADE method
@@ -593,13 +587,6 @@ class ProjectionEmbedding(EmbeddingBase):
             densmat_A_LL = self.AB_LL.density_matrices_out[0]
             densmat_B_LL = self.AB_LL.density_matrices_out[1]
 
-        self.A_LL.density_matrix_in = densmat_A_LL
-        start = time.time()
-        self.A_LL.run(ev_corr_scf=True)
-        subsys_A_lowlvl_totalen = self.A_LL.ev_corr_total_energy
-        end = time.time()
-        self.time_a_lowlevel = end - start
-
         # Calculates the electron count for the combined (A+B) and separated 
         # subsystems (A and B).
         self.AB_pop = self.calc_subsys_pop(self.AB_LL.overlap, \
@@ -612,6 +599,15 @@ class ProjectionEmbedding(EmbeddingBase):
         root_print(f" Population of Subsystem AB: {self.AB_pop}")
         root_print(f" Population of Subsystem A: {self.A_pop}")
         root_print(f" Population of Subsystem B: {self.B_pop}")
+
+        # Calculate the energy for subsystem A with the lower level of theory
+        self.A_LL.density_matrix_in = densmat_A_LL
+        self.A_LL.input_fragment_nelectrons = self.A_pop
+        start = time.time()
+        self.A_LL.run(ev_corr_scf=True)
+        subsys_A_lowlvl_totalen = self.A_LL.ev_corr_total_energy
+        end = time.time()
+        self.time_a_lowlevel = end - start
 
         # Initialises the density matrix for subsystem A, and calculated the 
         # hamiltonian components for subsystem A at the low-level reference.
@@ -635,6 +631,7 @@ class ProjectionEmbedding(EmbeddingBase):
         # Registered callbacks in ASI add the above components to the Fock-matrix
         # at every SCF iteration.
         self.A_HL.density_matrix_in = densmat_A_LL
+        self.A_HL.input_fragment_nelectrons = self.A_pop
         self.A_HL.fock_embedding_matrix = \
                 self.AB_LL.hamiltonian_electrostatic - \
                     self.A_LL.hamiltonian_electrostatic + self.P_b
@@ -647,6 +644,7 @@ class ProjectionEmbedding(EmbeddingBase):
         # Calculate the total energy of the embedded subsystem A at the high
         # level of theory without the associated embedding potential.
         self.A_HL_PP.density_matrix_in = self.A_HL.density_matrices_out[0]
+        self.A_HL_PP.input_fragment_nelectrons = self.A_pop
         start = time.time()
         self.A_HL_PP.run(ev_corr_scf=True)
         subsys_A_highlvl_totalen = self.A_HL_PP.ev_corr_total_energy

@@ -80,8 +80,15 @@ class AtomsEmbed():
     def calc_initializer(self, asi):
 
         calc = self.initial_calc
-        if self.no_scf:
-            calc.set(sc_iter_limit=0)
+
+        if hasattr(self, "input_total_charge"):
+            total_charge = self.input_total_charge
+        elif hasattr(self, "input_fragment_nelectrons"):
+            total_charge = self.fragment_total_charge
+        else:
+            total_charge = 0.
+        
+        calc.set(charge=total_charge)
 
         if self.truncate:
             ghost_list = [ 
@@ -628,15 +635,24 @@ class AtomsEmbed():
         tot_nelec = np.sum(self.atoms.numbers)
         ghost_nelec = np.sum(self.atoms.numbers[self.ghost_list])
 
-        free_atoms_nelec = total_electrons - ghost_electrons
-
-        return self._free_atoms_nelectrons
+        return tot_nelec - ghost_nelec
 
     @property
-    def input_nelectrons(self):
-        return self._input_nelectrons
+    def input_total_charge(self):
+        return self._input_total_charge
 
-    @input_nelectrons.setter
-    def input_nelectrons(self, val):
-        return self._input_nelectrons
-    
+    @input_total_charge.setter
+    def input_total_charge(self, val):
+        self._input_total_charge = val
+
+    @property
+    def input_fragment_nelectrons(self):
+        return self._input_fragment_nelectrons
+
+    @input_fragment_nelectrons.setter
+    def input_fragment_nelectrons(self, val):
+        self._input_fragment_nelectrons = val
+
+    @property
+    def fragment_total_charge(self):
+        return -(self.input_fragment_nelectrons - self.free_atom_nelectrons)
