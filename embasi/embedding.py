@@ -347,8 +347,9 @@ class ProjectionEmbedding(EmbeddingBase):
     """
 
     def __init__(self, atoms, embed_mask, calc_base_ll, calc_base_hl,
-                 total_charge=0, post_scf=None, total_energy_corr="1storder", mu_val=1e+06, \
-                 truncate_basis_thresh=None, localisation='SPADE'):
+                 total_charge=0, post_scf=None, total_energy_corr="1storder",
+                 truncate_basis_thresh=None, localisation='SPADE', projection="level-shift",
+                 mu_val=1.e+06):
 
         from copy import copy, deepcopy
         from mpi4py import MPI
@@ -374,6 +375,14 @@ class ProjectionEmbedding(EmbeddingBase):
             self.calculator_hl.set(qm_embedding_mo_localise='.true.')
         else:
             raise Exception("Invalid entry for localisation: use 'SPADE' or 'qmcode' ")
+
+        self.projection = projection
+        if self.projection == "levelshift":
+            root_print(f"MO projection performed with: level-shift")
+        elif self.projection == "huzinaga":
+            root_print(f"MO projection performed with: huzinaga")
+        else:
+            raise Exception("Invalid entry for projection: use 'level-shift' or 'huzinaga' ")
 
         low_level_calculator_1 = deepcopy(self.calculator_ll)
         low_level_calculator_2 = deepcopy(self.calculator_ll)
@@ -611,8 +620,12 @@ class ProjectionEmbedding(EmbeddingBase):
 
         # Initialises the density matrix for subsystem A, and calculated the 
         # hamiltonian components for subsystem A at the low-level reference.
-        self.calculate_levelshift_projector(densmat_B_LL)
-        #self.calculate_huzinaga_projector(densmat_B_LL)
+        if self.projection == "level-shift":
+            self.calculate_levelshift_projector(densmat_B_LL)
+        elif self.projection == "huzinaga":
+            self.calculate_huzinaga_projector(self.AB_LL, densmat_B_LL)
+        else:
+            raise Exception("Invalid entry for projection: use 'level-shift' or 'huzinaga' ")
 
         # Calculate density matrix for subsystem A at the higher level of 
         # theory. Two terms are added to the hamiltonian matrix of the embedded
