@@ -377,7 +377,7 @@ class ProjectionEmbedding(EmbeddingBase):
             raise Exception("Invalid entry for localisation: use 'SPADE' or 'qmcode' ")
 
         self.projection = projection
-        if self.projection == "levelshift":
+        if self.projection == "level-shift":
             root_print(f"MO projection performed with: level-shift")
         elif self.projection == "huzinaga":
             root_print(f"MO projection performed with: huzinaga")
@@ -462,8 +462,10 @@ class ProjectionEmbedding(EmbeddingBase):
 
         root_print('Starting SPADE localisation...')
 
+        nelecs = atomsembed.free_atom_nelectrons - atomsembed.input_total_charge
         evals, evecs, occ_mat = hamiltonian_eigensolv(atomsembed.hamiltonian_total, \
-                                                      atomsembed.overlap)
+                                                      atomsembed.overlap, \
+                                                      nelecs)
         density_matrix_supersystem = calculate_densmat(evecs, occ_mat)
 
         root_print(f'Density matrix total charge: {np.trace(atomsembed.overlap @ density_matrix_supersystem)}')
@@ -591,7 +593,7 @@ class ProjectionEmbedding(EmbeddingBase):
         self.A_HL_PP.basis_info = basis_info
 
         if self.localisation == "SPADE":
-            densmat_A_LL, denmat_B_LL = self.spade_localisation(self.AB_LL)
+            densmat_A_LL, densmat_B_LL = self.spade_localisation(self.AB_LL)
         else:
             densmat_A_LL = self.AB_LL.density_matrices_out[0]
             densmat_B_LL = self.AB_LL.density_matrices_out[1]

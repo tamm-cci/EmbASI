@@ -655,4 +655,4 @@ class AtomsEmbed():
 
     @property
     def fragment_total_charge(self):
-        return -(self.input_fragment_nelectrons - self.free_atom_nelectrons)
+        return +(self.input_fragment_nelectrons - self.free_atom_nelectrons)
