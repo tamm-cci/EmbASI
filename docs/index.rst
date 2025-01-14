@@ -6,7 +6,7 @@
 ASI Embedding Documentation
 ===========================
 
-Embasi is a Python wrapper for running QM-in-QM embedding simulations. The software package provides communincation protocols for matrix quantities between instances of different QM code system calls through the `ASI (Atomic Simulation Interface) API <https://gitlab.com/pvst/asi>`_. Inputs such as atomic structures and QM code keywords are comtrolled through integration with the `Atomic Simulation Environment (ASE) <https://wiki.fysik.dtu.dk/ase/>`_.
+EmbASI is a Python wrapper for running QM-in-QM embedding simulations. The software package provides communincation protocols for matrix quantities between instances of different QM code system calls through the `ASI (Atomic Simulation Interface) API <https://gitlab.com/pvst/asi>`_. Inputs such as atomic structures and QM code keywords are comtrolled through integration with the `Atomic Simulation Environment (ASE) <https://wiki.fysik.dtu.dk/ase/>`_.
 
 The software is currently under active development and is subject to major changes.
 
