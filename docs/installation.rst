@@ -18,7 +18,7 @@ Installation from PyPI
 
 .. highlight:: bash
 
-Embasi may be installed from the PyPI respository, which will automatically download the source code, install the required packages, and install Embasi in the target used for pip installation::
+EmbASI may be installed from the PyPI respository, which will automatically download the source code, install the required packages, and install EmbASI in the target used for pip installation::
 
   $ pip install --upgrade embasi
 
@@ -27,9 +27,9 @@ Installation from Source
 
 .. highlight:: bash
 
-The source code for Embasi may be downloaded from the github repository on a local machine, and pip installation executed in the top directory of the Embasi package::
+The source code for EmbASI may be downloaded from the github repository on a local machine, and pip installation executed in the top directory of the EmbASI package::
 
-  $ git clone git@github.com:GabrielBram/ASI_Embedding.git
+  $ git clone git@github.com:logsdail/EmbASI.git
   $ cd embasi
   $ pip install .
 
@@ -42,7 +42,7 @@ FHI-aims
 
 .. warning::
 
-   FHI-aims is a software package licensed by `MS1P <https://ms1p.org/index.php>`_ for academic and commercial settings. If you do not hold a FHI-aims license, please refer to the `licensing page <https://fhi-aims.org/get-the-code-menu/licensing-models>`_ for further information and instructions.
+   FHI-aims is a software package licensed by `MS1P <https://ms1p.org/index.php>`_ for academic and commercial settings. If you do not hold a FHI-aims license, please refer to the `licensing page <https://fhi-aims.org/get-the-code-menu/licensing-models>`_ for further information and instructions on acquiring a licence.
 
 .. highlight:: bash
 
