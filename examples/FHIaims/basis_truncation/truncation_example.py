@@ -81,7 +81,6 @@ Projection = ProjectionEmbedding(nonanol,
                                  embed_mask=embed_mask,
                                  calc_base_ll=calc_ll,
                                  calc_base_hl=calc_hl,
-                                 frag_charge=-1,
                                  mu_val=1.e+6,
                                  truncate_basis=True)
 
@@ -105,7 +104,6 @@ Projection = ProjectionEmbedding(nonanol,
                                  embed_mask=embed_mask,
                                  calc_base_ll=calc_ll,
                                  calc_base_hl=calc_hl,
-                                 frag_charge=-1,
                                  mu_val=1.e+6,
                                  truncate_basis=False)
 

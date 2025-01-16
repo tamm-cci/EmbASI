@@ -74,7 +74,6 @@ Projection = ProjectionEmbedding(methanol_dimer,
                                  embed_mask=[2,1,2,2,2,1,2,1,2,2,2,1],
                                  calc_base_ll=calc_ll,
                                  calc_base_hl=calc_hl,
-                                 frag_charge=-2,
                                  mu_val=1.e+6)
 
 # Now run the simulation!
@@ -94,7 +93,6 @@ Projection = ProjectionEmbedding(methanol,
                                  embed_mask=[2,1,2,2,2,1],
                                  calc_base_ll=calc_ll,
                                  calc_base_hl=calc_hl,
-                                 frag_charge=-1,
                                  mu_val=1.e+6)
 
 root_print('\nRunning MeOH monomer \n')
