@@ -4,21 +4,21 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "embasi"
-version = "0.0.1"
+version = "0.0.2"
 authors = [
         {name="Gabriel Bramley", email="BramleyG@cardiff.ac.uk"},
 ]
 description = "A generalised workflow for QM/QM Embedding"
 readme = "README.md"
 license = { file="LICENSE" }
-requires-python = ">=3.7"
+requires-python = ">=3.9"
 classifiers = [
             "Programming Language :: Python :: 3",
             "License :: OSI Approved :: MIT License",
             "Operatoring System :: OS Independent",
 ]
 dependencies = [
-             "ase==3.22.1",
+             "ase==3.24.0",
 ]
 
 

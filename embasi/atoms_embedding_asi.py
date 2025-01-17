@@ -88,7 +88,7 @@ class AtomsEmbed():
         else:
             total_charge = 0.
         
-        calc.set(charge=total_charge)
+        calc.parameters['charge'] = float(total_charge)
 
         if self.truncate:
             ghost_list = [ 
@@ -105,7 +105,11 @@ class AtomsEmbed():
                 if ghost:
                     ghost_list[idx] = True
 
-        calc.write_input(asi.atoms, ghosts=ghost_list)
+        # Ensure the Aims template shares the input parameters of the calculator object
+        calc.parameters["ghosts"] = ghost_list
+        calc.template.parameters = calc.parameters
+
+        calc.write_inputfiles(asi.atoms, properties=['energy'])
 
         if self.embed_mask is not None:
             self._insert_embedding_region_aims()

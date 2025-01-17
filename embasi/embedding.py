@@ -368,11 +368,11 @@ class ProjectionEmbedding(EmbeddingBase):
 
         self.localisation = localisation
         if self.localisation == "SPADE":
-            self.calculator_ll.set(qm_embedding_mo_localise='.false.')
-            self.calculator_hl.set(qm_embedding_mo_localise='.false.')
+            self.calculator_ll.parameters['qm_embedding_mo_localise']=".false."
+            self.calculator_hl.parameters['qm_embedding_mo_localise']=".false."
         elif self.localisation == "qmcode":
-            self.calculator_ll.set(qm_embedding_mo_localise='.true.')
-            self.calculator_hl.set(qm_embedding_mo_localise='.true.')
+            self.calculator_ll.parameters['qm_embedding_mo_localise']=".true."
+            self.calculator_hl.parameters['qm_embedding_mo_localise']=".true."
         else:
             raise Exception("Invalid entry for localisation: use 'SPADE' or 'qmcode' ")
 
@@ -393,31 +393,30 @@ class ProjectionEmbedding(EmbeddingBase):
         if self.total_energy_corr == "nonscf":
             low_level_calculator_3 = deepcopy(self.calculator_ll)
 
-        low_level_calculator_1.set(qm_embedding_calc = 1)
+        low_level_calculator_1.parameters['qm_embedding_calc'] = 1
         self.set_layer(atoms, "AB_LL", low_level_calculator_1, 
                        embed_mask, ghosts=0, no_scf=False)
         self.AB_LL.input_total_charge = total_charge
 
-        low_level_calculator_2.set(qm_embedding_calc = 2)
-        low_level_calculator_2.set(charge_mix_param = 0.)
+        low_level_calculator_2.parameters['qm_embedding_calc'] = 2
+        low_level_calculator_2.parameters['charge_mix_param'] = 0.
         self.set_layer(atoms, "A_LL", low_level_calculator_2,
                        embed_mask, ghosts=2, no_scf=False)
 
-        high_level_calculator_1.set(qm_embedding_calc = 3)
+        high_level_calculator_1.parameters['qm_embedding_calc'] = 3
         self.set_layer(atoms, "A_HL", high_level_calculator_1,
                        embed_mask, ghosts=2, no_scf=False)
 
-        high_level_calculator_2.set(qm_embedding_calc = 2)
-        high_level_calculator_2.set(charge_mix_param = 0.)
+        high_level_calculator_2.parameters['qm_embedding_calc'] = 2
+        high_level_calculator_2.parameters['charge_mix_param'] = 0.
         if "total_energy_method" in high_level_calculator_2.parameters:
-            high_level_calculator_2.set(total_energy_method=
-                                        high_level_calculator_2.parameters["xc"])
+            high_level_calculator_2.parameters['total_energy_method'] = high_level_calculator_2.parameters["xc"]
         self.set_layer(atoms, "A_HL_PP", high_level_calculator_2,
                        embed_mask, ghosts=2, no_scf=False)
 
         if self.total_energy_corr == "nonscf":
-            low_level_calculator_3.set(qm_embedding_calc = 2)
-            low_level_calculator_3.set(charge_mix_param = 0.)
+            low_level_calculator_3.parameters['qm_embedding_calc'] = 2
+            low_level_calculator_3.parameters['charge_mix_param'] = 0.
             self.set_layer(atoms, "AB_LL_PP", low_level_calculator_3,
                            embed_mask, ghosts=0, no_scf=False)
             self.AB_LL.input_total_charge = total_charge
@@ -708,8 +707,8 @@ class ProjectionEmbedding(EmbeddingBase):
 
         if self.total_energy_corr == "1storder":
             self.order_1_embedding_corr = np.trace((self.A_HL.density_matrices_out[0] \
-                                                    - densmat_A_LL) @ \
-                                            self.A_HL.fock_embedding_matrix) * 27.211384500
+                                        - densmat_A_LL) @ \
+                                                   (self.A_HL.fock_embedding_matrix - self.P_b)) * 27.211384500
 
             self.DFT_AinB_total_energy = subsys_A_highlvl_totalen - \
                                        subsys_A_lowlvl_totalen + subsys_AB_lowlvl_totalen + \
