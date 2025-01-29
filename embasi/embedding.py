@@ -602,9 +602,9 @@ class ProjectionEmbedding(EmbeddingBase):
         self.AB_pop = self.calc_subsys_pop(self.AB_LL.overlap, \
                                            (densmat_A_LL + densmat_B_LL))
 
-        self.A_pop = self.calc_subsys_pop(self.AB_LL.overlap, densmat_B_LL)
+        self.A_pop = self.calc_subsys_pop(self.AB_LL.overlap, densmat_A_LL)
 
-        self.B_pop = self.calc_subsys_pop(self.AB_LL.overlap, densmat_A_LL)
+        self.B_pop = self.calc_subsys_pop(self.AB_LL.overlap, densmat_B_LL)
 
         root_print(f" Population of Subsystem AB: {self.AB_pop}")
         root_print(f" Population of Subsystem A: {self.A_pop}")
@@ -708,7 +708,7 @@ class ProjectionEmbedding(EmbeddingBase):
         if self.total_energy_corr == "1storder":
             self.order_1_embedding_corr = np.trace((self.A_HL.density_matrices_out[0] \
                                         - densmat_A_LL) @ \
-                                                   (self.A_HL.fock_embedding_matrix - self.P_b)) * 27.211384500
+                                        (self.A_HL.fock_embedding_matrix - self.P_b)) * 27.211384500
 
             self.DFT_AinB_total_energy = subsys_A_highlvl_totalen - \
                                        subsys_A_lowlvl_totalen + subsys_AB_lowlvl_totalen + \

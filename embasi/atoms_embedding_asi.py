@@ -295,8 +295,7 @@ class AtomsEmbed():
                 if 'Total XC Energy     :' in line:
                     self.xc_energy = float(outline[6])
 
-                if """Total energy after the post-s.c.f. correlation 
-                      calculation""" in line:
+                if 'Total energy after the post-s.c.f.' in line:
                     self.post_scf_corr_energy = float(outline[9])
 
     def run(self, ev_corr_scf=False):
