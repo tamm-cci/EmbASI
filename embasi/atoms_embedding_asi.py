@@ -354,7 +354,7 @@ class AtomsEmbed():
             self.atoms.calc.asi.init_density_matrix = \
                 {(1,1): np.asfortranarray(self.density_matrix_in)}
         if self.fock_embedding_matrix is not None:
-            self.atoms.calc.asi.set_hamiltonian = \
+            self.atoms.calc.asi.modify_hamiltonian = \
                 {(1,1): np.asfortranarray(self.fock_embedding_matrix)}
 
         E0 = self.atoms.get_potential_energy()
