@@ -83,6 +83,19 @@ def hamiltonian_eigensolv(hamiltonian, overlap, nelec):
 
     return evals, evecs, occ_mat
 
+def find_squarest_grid(ntasks):
+
+    factors = []
+    for factor in np.arange(1,int(ntasks/2)):
+        if ntasks%factor == 0:
+            factors.append( [int(factor),int(ntasks/factor)] )
+
+    factors = np.array(factors)
+    diffs = factors[:,0] - factors[:,1]
+
+    idx = np.argwhere(diffs==np.min(np.abs(diffs)))
+    return factors[idx][0], factors[idx][0]
+
 def pdsyevx_from_numpy_array(array, scalapack_lib_path, global_array_size):
 
     from scalapack4py import ScaLAPACK4py
@@ -98,7 +111,7 @@ def pdsyevx_from_numpy_array(array, scalapack_lib_path, global_array_size):
     a = array if MPI.COMM_WORLD.rank==0 else None
     a = a.astype(dtype=dtype, order='F') if MPI.COMM_WORLD.rank==0 else None
 
-    MP, NP = comm.Get_size((,1
+    MP, NP = find_squarest_grid(global_array_size)
     ctx = sl.make_blacs_context(sl.get_default_system_context(), MP, NP)
     descr = sl.make_blacs_desc(ctx, n, n)
 
@@ -213,9 +226,10 @@ def pdsyevx_from_numpy_array(array, scalapack_lib_path, global_array_size):
     sl.pdsyevx("V", "A", "U", n, b, ia, ja, descr, 
                vl, vu, il, iu, abstol, m, nz, w, orfac, z, iz, jz, descr, 
                work, lwork, iwork, liwork, ifail, iclustr, gap, info)
-    
-    print(f'EIGVALS: {z}') if MPI.COMM_WORLD.rank==0 else None
-    test_print = sl.gather_numpy(POINTER(c_int)(descr), z.ctypes.data_as(POINTER(c_double)), (n, n))
-    print(f'EIGVEC: {test_print}') if MPI.COMM_WORLD.rank==0 else None
-    print(f'EIGVEC.T @ EIGVEC: {test_print.T @ test_print}') if MPI.COMM_WORLD.rank==0 else None
+
+    eigvals = z
+    eigvecs = sl.gather_numpy(POINTER(c_int)(descr), z.ctypes.data_as(POINTER(c_double)), (n, n))
+
+    return eigvals, eigvecs
+
 
