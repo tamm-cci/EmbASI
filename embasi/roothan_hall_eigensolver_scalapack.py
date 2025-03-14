@@ -99,6 +99,7 @@ def find_squarest_grid(ntasks):
 def pdsyevx_from_numpy_array(array, scalapack_lib_path, global_array_size):
 
     from scalapack4py import ScaLAPACK4py
+    from ctypes import CDLL, POINTER, c_int
     from mpi4py import MPI
 
     comm = MPI.COMM_WORLD
@@ -111,7 +112,7 @@ def pdsyevx_from_numpy_array(array, scalapack_lib_path, global_array_size):
     a = array if MPI.COMM_WORLD.rank==0 else None
     a = a.astype(dtype=dtype, order='F') if MPI.COMM_WORLD.rank==0 else None
 
-    MP, NP = find_squarest_grid(global_array_size)
+    MP, NP = find_squarest_grid(ntasks)
     ctx = sl.make_blacs_context(sl.get_default_system_context(), MP, NP)
     descr = sl.make_blacs_desc(ctx, n, n)
 
@@ -126,7 +127,6 @@ def pdsyevx_from_numpy_array(array, scalapack_lib_path, global_array_size):
     work = np.zeros((descr.locrow), dtype=dtype, order='F')
 
     test_print = sl.gather_numpy(POINTER(c_int)(descr), b.ctypes.data_as(POINTER(c_double)), (n, n))
-    print(test_print)
 
     # Workspace query for PDSYTRD
     lwork = -1
@@ -233,3 +233,56 @@ def pdsyevx_from_numpy_array(array, scalapack_lib_path, global_array_size):
     return eigvals, eigvecs
 
 
+def pdgesvd_from_numpy_array(array, scalapack_lib_path):
+
+    from scalapack4py import ScaLAPACK4py
+    from ctypes import CDLL, POINTER, c_int
+    from mpi4py import MPI
+
+    comm = MPI.COMM_WORLD
+    ntasks = comm.Get_size()
+    rank = comm.Get_rank()
+    
+    sl = ScaLAPACK4py(CDLL(libpath, mode=RTLD_GLOBAL))
+
+    m, n = np.shape(array)[0], np.shape(array)[1]
+    dtype=np.float64
+
+    array = array.astype(dtype=dtype, order='F') if MPI.COMM_WORLD.rank==0 else None
+
+    size = min(m, n)
+
+    MP, NP = find_squarest_grid(ntasks)
+    ctx = sl.make_blacs_context(sl.get_default_system_context(), MP, NP)
+    descr_a = sl.make_blacs_desc(ctx, m, n)
+    descr_u = sl.make_blacs_desc(ctx, m, m)
+    descr_vt = sl.make_blacs_desc(ctx, n, n)
+
+    b = np.zeros((descr_a.locrow, descr_a.loccol), dtype=dtype, order='F')
+    sl.scatter_numpy(a, POINTER(c_int)(descr_a), b.ctypes.data_as(POINTER(c_double)), b.dtype)
+
+    s = np.zeros(size, dtype=dtype, order='F')
+    u = np.zeros((descr_u.locrow, descr_u.loccol), dtype=dtype, order='F')
+    vt = np.zeros((descr_vt.locrow, descr_vt.loccol), dtype=dtype, order='F')
+    work = np.zeros(1, dtype=np.float64, order='F')
+
+    # Workspace query for PDGESVD
+    lwork = -1
+    rwork = -1
+    info = -1
+    sl.pdgesvd("V", "V", m, n, b, 1, 1, descr_a,
+               s, u, 1, 1, descr_u, vt, 1, 1, descr_vt,
+               work, lwork, info) 
+
+    # Execute PDGESVD with optimal workspace
+    lwork = int(work[0])
+    work = np.zeros((lwork), dtype=dtype, order='F')
+    sl.pdgesvd("V", "V", m, n, b, 1, 1, descr_a,
+               s, u, 1, 1, descr_u, vt, 1, 1, descr_vt,
+               work, lwork, info)
+
+    u_gather = sl.gather_numpy(POINTER(c_int)(descr_u), u.ctypes.data_as(POINTER(c_double)), (m, m))
+    vt_gather = sl.gather_numpy(POINTER(c_int)(descr_vt), vt.ctypes.data_as(POINTER(c_double)), (n, n))
+    s_vals = s
+
+    return u_gather, vt_gather, s_vals
