@@ -329,8 +329,15 @@ class AtomsEmbed():
                                         self.atoms,
                                         work_dir=self.outdir)
 
-        self.atoms.calc.asi.deregister_callbacks()
+        # Explicitly set function pointers to NULL to avoid
+        # previosly set function pointers from passing into
+        # the present calculation.
+        self.atoms.calc.asi.register_dm_callback(0, 0)
+        self.atoms.calc.asi.register_DM_init(0, 0)
+        self.atoms.calc.asi.register_hamiltonian_callback(0, 0)
+        self.atoms.calc.asi.register_modify_hamiltonian_callback(0, 0)
 
+        # Register the relevant callbacks
         self.atoms.calc.asi.keep_overlap = True
 
         self.atoms.calc.asi.dm_storage = {}
