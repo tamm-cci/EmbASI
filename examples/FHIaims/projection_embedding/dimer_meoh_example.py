@@ -1,7 +1,7 @@
 from embasi.embedding import ProjectionEmbedding
 from embasi.parallel_utils import root_print
 from ase.data.s22 import s22, s26, create_s22_system
-from ase.calculators.aims import Aims
+from ase.calculators.aims import Aims, AimsProfile
 import os
 
 '''
@@ -19,7 +19,7 @@ The script should calculate the dimer dissociation energy of MeOH.
 '''
 
 # One may also use an environmental variable to achieve this
-os.environ['ASI_LIB_PATH'] = "/home/gabrielbramley/Software/FHIaims/builds/gnu_scalapack_embedding_lib_14082024/libaims.240813.scalapack.mpi.so"
+os.environ['ASI_LIB_PATH'] = "/home/gabrielbramley/Software/FHIaims_dev/_build_electrostatic_embedding_matrix/libaims.250312.scalapack.mpi.so"
 
 # root_print ensures only head node prints
 try:
@@ -36,7 +36,8 @@ except:
 # Set-up calculator parameters (similar to FHIaims Calculator for
 # ASE) for low-level and high-level calculations. Below are the
 # absolute minimum parameters required for normal operation.
-calc_ll = Aims(xc='PBE',
+
+calc_ll = Aims(xc='PBE', profile=AimsProfile(command="asi-doesnt-need-command"),
     KS_method="parallel",
     RI_method="LVL",
     collect_eigenvectors=True,
@@ -44,9 +45,10 @@ calc_ll = Aims(xc='PBE',
     atomic_solver_xc="PBE",
 #    lmo_init_guess="random",
     compute_kinetic=True,
+    override_initial_charge_check=True,
   )
 
-calc_hl = Aims(xc='PBE0',
+calc_hl = Aims(xc='PBE0', profile=AimsProfile(command="asi-doesnt-need-command"),
     KS_method="parallel",
     RI_method="LVL",
     collect_eigenvectors=True,
@@ -54,6 +56,7 @@ calc_hl = Aims(xc='PBE0',
     atomic_solver_xc="PBE",
 #    lmo_init_guess="random",
     compute_kinetic=True,
+    override_initial_charge_check=True,
   )
 
 # Set-up directories
