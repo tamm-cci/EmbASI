@@ -26,7 +26,8 @@ To run this example you will need to:
 '''
 
 # One may also use an environmental variable to achieve this
-os.environ['ASI_LIB_PATH'] = "/home/gabrielbramley/Software/FHIaims/builds/gnu_scalapack_embedding_lib_14082024/libaims.240813.scalapack.mpi.so"
+os.environ['ASI_LIB_PATH'] = "/home/gabrielbramley/Software/FHIaims/_build_embasi/libaims.250403.scalapack.mpi.so"
+os.environ['AIMS_SPECIES_DIR'] = "/home/gabrielbramley/Software/FHIaims/species_defaults/defaults_2020/light/"
 
 # root_print ensures only head node prints
 try:
@@ -43,7 +44,8 @@ except:
 # Set-up calculator parameters (similar to FHIaims Calculator for
 # ASE) for low-level and high-level calculations. Below are the
 # absolute minimum parameters required for normal operation.
-calc_ll = Aims(xc='PBE',
+from ase.calculators.aims import AimsProfile
+calc_ll = Aims(xc='PBE', profile=AimsProfile(command="NOCALC"),
     KS_method="parallel",
     RI_method="LVL",
     collect_eigenvectors=True,
@@ -52,7 +54,7 @@ calc_ll = Aims(xc='PBE',
     compute_kinetic=True,
   )
 
-calc_hl = Aims(xc='PBE0',
+calc_hl = Aims(xc='PBE0', profile=AimsProfile(command="NOCALC"),
     KS_method="parallel",
     RI_method="LVL",
     collect_eigenvectors=True,
@@ -82,7 +84,7 @@ Projection = ProjectionEmbedding(nonanol,
                                  calc_base_ll=calc_ll,
                                  calc_base_hl=calc_hl,
                                  mu_val=1.e+6,
-                                 truncate_basis=True)
+                                 truncate_basis_thresh=0.1,)
 
 root_print('\nRunning truncated basis nonanol \n')
 start = time.time()
@@ -105,7 +107,7 @@ Projection = ProjectionEmbedding(nonanol,
                                  calc_base_ll=calc_ll,
                                  calc_base_hl=calc_hl,
                                  mu_val=1.e+6,
-                                 truncate_basis=False)
+                                 truncate_basis_thresh=0.1,)
 
 root_print('\nRunning full basis nonanol \n')
 start = time.time()
