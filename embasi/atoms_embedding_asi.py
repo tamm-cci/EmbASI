@@ -81,6 +81,21 @@ class AtomsEmbed():
 
         calc = self.initial_calc
 
+        if self.truncate:
+            self.ghost_list = [ 
+                ghst for (idx, ghst) in enumerate(self.ghost_list)
+                           if idx in self.basis_info.active_atoms ]
+        else:
+            self.ghost_list = self.ghost_list
+
+        # Before passing into the main input writer, we may
+        # have extra ghosts needed for the CP correction to the
+        # BSSE
+        #if "ghosts" in self.atoms.info.keys():
+        #    for idx, ghost in enumerate(self.atoms.info["ghosts"]):
+        #        if ghost:
+        #            ghost_list[idx] = True
+
         if hasattr(self, "input_total_charge"):
             total_charge = self.input_total_charge
         elif hasattr(self, "input_fragment_nelectrons"):
@@ -90,23 +105,8 @@ class AtomsEmbed():
         
         calc.parameters['charge'] = -float(total_charge)
 
-        if self.truncate:
-            ghost_list = [ 
-                ghst for (idx, ghst) in enumerate(self.ghost_list)
-                           if idx in self.basis_info.active_atoms ]
-        else:
-            ghost_list = self.ghost_list
-
-        # Before passing into the main input writer, we may
-        # have extra ghosts needed for the CP correction to the
-        # BSSE
-        if "ghosts" in self.atoms.info.keys():
-            for idx, ghost in enumerate(self.atoms.info["ghosts"]):
-                if ghost:
-                    ghost_list[idx] = True
-
         # Ensure the Aims template shares the input parameters of the calculator object
-        calc.parameters["ghosts"] = ghost_list
+        calc.parameters["ghosts"] = self.ghost_list
         calc.template.parameters = calc.parameters
 
         calc.write_inputfiles(asi.atoms, properties=['energy'])
