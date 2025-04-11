@@ -52,15 +52,17 @@ calc_ll = Aims(xc='PBE', profile=AimsProfile(command="NOCALC"),
     density_update_method='density_matrix', # for DM export
     atomic_solver_xc="PBE",
     compute_kinetic=True,
+    override_initial_charge_check=True,
   )
 
-calc_hl = Aims(xc='PBE0', profile=AimsProfile(command="NOCALC"),
+calc_hl = Aims(xc='PBE', profile=AimsProfile(command="NOCALC"),
     KS_method="parallel",
     RI_method="LVL",
     collect_eigenvectors=True,
     density_update_method='density_matrix', # for DM export
     atomic_solver_xc="PBE",
     compute_kinetic=True,
+    override_initial_charge_check=True,
   )
 
 # Read nonanol geometry and set-up embedding mask
@@ -106,8 +108,7 @@ Projection = ProjectionEmbedding(nonanol,
                                  embed_mask=embed_mask,
                                  calc_base_ll=calc_ll,
                                  calc_base_hl=calc_hl,
-                                 mu_val=1.e+6,
-                                 truncate_basis_thresh=0.1,)
+                                 mu_val=1.e+6,)
 
 root_print('\nRunning full basis nonanol \n')
 start = time.time()

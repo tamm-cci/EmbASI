@@ -49,7 +49,7 @@ calc_ll = Aims(xc='PBE', profile=AimsProfile(command="asi-doesnt-need-command"),
     override_initial_charge_check=True,
   )
 
-calc_hl = Aims(xc='PBE0', profile=AimsProfile(command="asi-doesnt-need-command"),
+calc_hl = Aims(xc='PBE', profile=AimsProfile(command="asi-doesnt-need-command"),
     KS_method="parallel",
     RI_method="LVL",
     collect_eigenvectors=True,
