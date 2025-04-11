@@ -110,9 +110,15 @@ def ham_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
                                              asi.is_hamiltonian_real, uplo)
 
         if data is not None:
-            asi.ham_count += 1
             assert len(data.shape) == 2
-            storage_dict[(asi.ham_count, iK, iS)] = data.copy()
+            if asi.ham_count < 3:
+                asi.ham_count = asi.ham_count + 1
+                storage_dict[(asi.ham_count, iK, iS)] = data.copy()
+            else:
+                storage_dict.pop((1, iK, iS))
+                storage_dict[(1, iK, iS)] = storage_dict[(2, iK, iS)].copy()
+                storage_dict[(2, iK, iS)] = storage_dict[(3, iK, iS)].copy()
+                storage_dict[(3, iK, iS)] = data.copy()            
 
     except Exception as eee:
         print(f"""Something happened in ASI default_saving_callback {label}: 

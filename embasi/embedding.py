@@ -649,14 +649,13 @@ class ProjectionEmbedding(EmbeddingBase):
         self.A_HL.fock_embedding_matrix = \
                 self.AB_LL.hamiltonian_electrostatic - \
                     self.A_LL.hamiltonian_electrostatic + self.P_b
-
         start = time.time()
         self.A_HL.run()
         end = time.time()
         self.time_a_highlevel = end - start
 
         # Calculate the total energy of the embedded subsystem A at the high
-        # level of theory without the associated embedding potential.
+        # level of theory without the associated embedding potential.        
         self.A_HL_PP.density_matrix_in = self.A_HL.density_matrices_out[0]
         self.A_HL_PP.input_fragment_nelectrons = self.A_pop
         start = time.time()

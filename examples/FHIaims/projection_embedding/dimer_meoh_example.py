@@ -1,7 +1,7 @@
 from embasi.embedding import ProjectionEmbedding
 from embasi.parallel_utils import root_print
 from ase.data.s22 import s22, s26, create_s22_system
-from ase.calculators.aims import Aims
+from ase.calculators.aims import Aims, AimsProfile
 import os
 
 '''
@@ -37,7 +37,8 @@ except:
 # Set-up calculator parameters (similar to FHIaims Calculator for
 # ASE) for low-level and high-level calculations. Below are the
 # absolute minimum parameters required for normal operation.
-calc_ll = Aims(xc='PBE',
+
+calc_ll = Aims(xc='PBE', profile=AimsProfile(command="asi-doesnt-need-command"),
     KS_method="parallel",
     RI_method="LVL",
     collect_eigenvectors=True,
@@ -45,9 +46,10 @@ calc_ll = Aims(xc='PBE',
     atomic_solver_xc="PBE",
 #    lmo_init_guess="random",
     compute_kinetic=True,
+    override_initial_charge_check=True,
   )
 
-calc_hl = Aims(xc='PBE0',
+calc_hl = Aims(xc='PBE0', profile=AimsProfile(command="asi-doesnt-need-command"),
     KS_method="parallel",
     RI_method="LVL",
     collect_eigenvectors=True,
@@ -55,6 +57,7 @@ calc_hl = Aims(xc='PBE0',
     atomic_solver_xc="PBE",
 #    lmo_init_guess="random",
     compute_kinetic=True,
+    override_initial_charge_check=True,
   )
 
 # Set-up directories

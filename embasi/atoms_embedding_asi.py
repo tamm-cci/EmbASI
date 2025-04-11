@@ -88,7 +88,7 @@ class AtomsEmbed():
         else:
             total_charge = 0.
         
-        calc.parameters['charge'] = float(total_charge)
+        calc.parameters['charge'] = -float(total_charge)
 
         if self.truncate:
             ghost_list = [ 
@@ -329,6 +329,15 @@ class AtomsEmbed():
                                         self.atoms,
                                         work_dir=self.outdir)
 
+        # Explicitly set function pointers to NULL to avoid
+        # previosly set function pointers from passing into
+        # the present calculation.
+        self.atoms.calc.asi.register_dm_callback(0, 0)
+        self.atoms.calc.asi.register_DM_init(0, 0)
+        self.atoms.calc.asi.register_hamiltonian_callback(0, 0)
+        self.atoms.calc.asi.register_modify_hamiltonian_callback(0, 0)
+
+        # Register the relevant callbacks
         self.atoms.calc.asi.keep_overlap = True
 
         self.atoms.calc.asi.dm_storage = {}
@@ -354,7 +363,7 @@ class AtomsEmbed():
             self.atoms.calc.asi.init_density_matrix = \
                 {(1,1): np.asfortranarray(self.density_matrix_in)}
         if self.fock_embedding_matrix is not None:
-            self.atoms.calc.asi.set_hamiltonian = \
+            self.atoms.calc.asi.modify_hamiltonian = \
                 {(1,1): np.asfortranarray(self.fock_embedding_matrix)}
 
         E0 = self.atoms.get_potential_energy()
@@ -362,7 +371,6 @@ class AtomsEmbed():
         self.total_energy = E0
         self.basis_atoms = self.atoms.calc.asi.basis_atoms
         self.n_basis = self.atoms.calc.asi.n_basis
-
 
         # BROADCAST QUANTITIES ONLY CALCULATED FOR THE HEAD NODE TO ALL
         # OTHER NODES
@@ -419,7 +427,7 @@ class AtomsEmbed():
 
     @property
     def hamiltonian_core(self):
-        core_idx = self.atoms.calc.asi.ham_count - 2
+        core_idx = 1
         if self.truncate:
             return self.truncated_mat_to_full(self.atoms.calc.asi.ham_storage.get((core_idx,1,1)))
         else:
@@ -427,7 +435,7 @@ class AtomsEmbed():
 
     @property
     def hamiltonian_kinetic(self):
-        core_idx = self.atoms.calc.asi.ham_count - 1
+        core_idx = 2
         if self.truncate:
             return self.truncated_mat_to_full(self.atoms.calc.asi.ham_storage.get((core_idx,1,1)))
         else:
@@ -435,7 +443,7 @@ class AtomsEmbed():
 
     @property
     def hamiltonian_total(self):
-        tot_idx = self.atoms.calc.asi.ham_count
+        tot_idx = 3
         if self.truncate:
             return self.truncated_mat_to_full(self.atoms.calc.asi.ham_storage.get((tot_idx,1,1)))
         else:
