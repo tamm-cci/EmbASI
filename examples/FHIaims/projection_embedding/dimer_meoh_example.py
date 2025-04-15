@@ -19,8 +19,8 @@ The script should calculate the dimer dissociation energy of MeOH.
 '''
 
 # One may also use an environmental variable to achieve this
-os.environ['ASI_LIB_PATH'] = "/home/gabrielbramley/Software/FHIaims/_build_embasi/libaims.250320.scalapack.mpi.so"
-os.environ['AIMS_SPECIES_DIR'] = "/home/gabrielbramley/Software/FHIaims/species_defaults/defaults_2020/light/"
+#os.environ['ASI_LIB_PATH'] = "/home/gabrielbramley/Software/FHIaims/_build_embasi/libaims.250320.scalapack.mpi.so"
+#os.environ['AIMS_SPECIES_DIR'] = "/home/gabrielbramley/Software/FHIaims/species_defaults/defaults_2020/light/"
 
 # root_print ensures only head node prints
 try:
