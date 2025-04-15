@@ -9,6 +9,6 @@ EmbASI is a python-based wrapper for QM/QM embedding simulations using the ASI (
 # Requires
 
 - Python >=3.8
-- ASE <=2.3.1
-- asi4py (Bespoke version currently)
+- ASE >=2.4.0
+- asi4py >=2.4.1
 - Shared-object library for relevant QM driver
