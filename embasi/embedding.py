@@ -563,6 +563,8 @@ class ProjectionEmbedding(EmbeddingBase):
         end = time.time()
         self.time_ab_lowlevel = end - start
 
+        # Read the localised density matrices output by the QM code or
+        # perform SPADE localisation on the wrapper level.
         basis_info = self.set_basis_info(self.AB_LL)
         self.AB_LL.basis_info = basis_info
         if self.localisation == "SPADE":
