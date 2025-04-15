@@ -24,5 +24,5 @@ dependencies = [
 
 
 [project.urls]
-Homepage = "https://github.com/GabrielBram/ASI_Embedding"
-Issues = "https://github.com/GabrielBram/ASI_Embedding/issues"
+Homepage = "https://github.com/logsdail/EmbASI"
+Issues = "https://github.com/logsdail/EmbASI/issues"
