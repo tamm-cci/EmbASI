@@ -563,6 +563,15 @@ class ProjectionEmbedding(EmbeddingBase):
         end = time.time()
         self.time_ab_lowlevel = end - start
 
+        # Read the localised density matrices output by the QM code or
+        # perform SPADE localisation on the wrapper level.
+        basis_info = self.set_basis_info(self.AB_LL)
+        self.AB_LL.basis_info = basis_info
+        if self.localisation == "SPADE":
+            densmat_A_LL, densmat_B_LL = self.spade_localisation(self.AB_LL)
+        else:
+            densmat_A_LL = self.AB_LL.density_matrices_out[0]
+            densmat_B_LL = self.AB_LL.density_matrices_out[1]
         # Initialises the density matrix for subsystem A, and calculates the
         # hamiltonian components for subsystem A at the low-level reference.
         if self.truncate_basis_thresh is not None:
@@ -590,12 +599,6 @@ class ProjectionEmbedding(EmbeddingBase):
         self.A_LL.basis_info = basis_info
         self.A_HL.basis_info = basis_info
         self.A_HL_PP.basis_info = basis_info
-
-        if self.localisation == "SPADE":
-            densmat_A_LL, densmat_B_LL = self.spade_localisation(self.AB_LL)
-        else:
-            densmat_A_LL = self.AB_LL.density_matrices_out[0]
-            densmat_B_LL = self.AB_LL.density_matrices_out[1]
 
         # Calculates the electron count for the combined (A+B) and separated 
         # subsystems (A and B).
@@ -706,8 +709,9 @@ class ProjectionEmbedding(EmbeddingBase):
 
         if self.total_energy_corr == "1storder":
             self.order_1_embedding_corr = np.trace((self.A_HL.density_matrices_out[0] \
-                                        - densmat_A_LL) @ \
-                                        (self.A_HL.fock_embedding_matrix - self.P_b)) * 27.211384500
+                                                    - densmat_A_LL) @ \
+                                        (self.AB_LL.hamiltonian_electrostatic - \
+                                         self.A_LL.hamiltonian_electrostatic)) * 27.211384500
 
             self.DFT_AinB_total_energy = subsys_A_highlvl_totalen - \
                                        subsys_A_lowlvl_totalen + subsys_AB_lowlvl_totalen + \

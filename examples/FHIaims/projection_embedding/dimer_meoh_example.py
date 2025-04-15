@@ -19,7 +19,8 @@ The script should calculate the dimer dissociation energy of MeOH.
 '''
 
 # One may also use an environmental variable to achieve this
-os.environ['ASI_LIB_PATH'] = "/home/gabrielbramley/Software/FHIaims_dev/_build_electrostatic_embedding_matrix/libaims.250312.scalapack.mpi.so"
+#os.environ['ASI_LIB_PATH'] = "/home/gabrielbramley/Software/FHIaims/_build_embasi/libaims.250320.scalapack.mpi.so"
+#os.environ['AIMS_SPECIES_DIR'] = "/home/gabrielbramley/Software/FHIaims/species_defaults/defaults_2020/light/"
 
 # root_print ensures only head node prints
 try:
@@ -48,7 +49,7 @@ calc_ll = Aims(xc='PBE', profile=AimsProfile(command="asi-doesnt-need-command"),
     override_initial_charge_check=True,
   )
 
-calc_hl = Aims(xc='PBE0', profile=AimsProfile(command="asi-doesnt-need-command"),
+calc_hl = Aims(xc='PBE', profile=AimsProfile(command="asi-doesnt-need-command"),
     KS_method="parallel",
     RI_method="LVL",
     collect_eigenvectors=True,
