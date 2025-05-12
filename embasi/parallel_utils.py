@@ -80,6 +80,48 @@ def mpi_bcast_matrix_storage(data_dict, nrows, ncols):
 
     return data_dict
 
+def mpi_bcast_matrix(array):
+    """Broadcasts a numpy arrays from root node.
+
+    Parameters
+    ----------
+    array: nrowsxncols np.ndarrays
+        ndarray to communicate to all
+    nrows: int
+        Number of rows in the matrices of data_dict
+    ncols: int
+        Number of columns in the matrices of data_dict
+    Returns
+    -------
+    data_dict: nrowsxncols np.ndarrays
+        np array on all nodes
+
+    """
+
+    if MPI.COMM_WORLD.Get_rank() == 0:
+        dim = len(np.shape(array))
+    else:
+        dim = 0
+
+    dim = mpi_bcast_integer(dim)
+
+    if MPI.COMM_WORLD.Get_rank() == 0:
+        data_shape = np.array(np.shape(array), dtype=np.int16)
+    else:
+        data_shape = np.zeros((dim), dtype=np.int16)
+
+    # Broadcast the size of the data
+    MPI.COMM_WORLD.Bcast([data_shape, MPI.INT16_T], root=0)
+    
+    if MPI.COMM_WORLD.Get_rank() == 0:
+        data_buf = array
+    else:
+        data_buf = np.zeros(data_shape, dtype=np.float64)
+
+    MPI.COMM_WORLD.Bcast([data_buf, MPI.DOUBLE], root=0)
+
+    return data_buf
+
 def mpi_bcast_integer(val):
     """Broadcasts an integer from the root process to all other processes.
 

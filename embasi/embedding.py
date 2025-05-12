@@ -1,6 +1,7 @@
 # ~ Overall Embedding object
 from abc import ABC, abstractmethod
 from embasi.parallel_utils import root_print
+import copy
 import time
 import numpy as np
 
@@ -66,7 +67,7 @@ class EmbeddingBase(ABC):
                            ghosts=ghosts, no_scf=no_scf)
         setattr(self, layer_name, layer)
 
-    def select_atoms_basis_truncation(self, atomsembed, densmat, thresh):
+    def select_atoms_basis_truncation(self, atomsembed, densmat, overlap, thresh):
         """Lists atomic centers significant charge for a given density matrix
 
         Returns a list of corresponding atoms for which the total contribution 
@@ -98,7 +99,7 @@ class EmbeddingBase(ABC):
         
         """
 
-        basis_charge = np.diag(densmat @ atomsembed.overlap)
+        basis_charge = np.diag(densmat @ overlap)
         atomic_charge = np.zeros(len(atomsembed.atoms))
 
         for idx, charge in enumerate(basis_charge):
@@ -349,7 +350,7 @@ class ProjectionEmbedding(EmbeddingBase):
     def __init__(self, atoms, embed_mask, calc_base_ll, calc_base_hl,
                  total_charge=0, post_scf=None, total_energy_corr="1storder",
                  truncate_basis_thresh=None, localisation='SPADE', projection="level-shift",
-                 mu_val=1.e+06):
+                 mu_val=1.e+06, parallel=False, gc=True):
 
         from copy import copy, deepcopy
         from mpi4py import MPI
@@ -426,7 +427,10 @@ class ProjectionEmbedding(EmbeddingBase):
         self.ntasks = MPI.COMM_WORLD.Get_size()
         self.truncate_basis_thresh = truncate_basis_thresh
 
-    def calculate_levelshift_projector(self, densmat):
+        self.parallel = parallel
+        self.gc = gc
+
+    def calculate_levelshift_projector(self, densmat, overlap):
         """Calculates level-shift projection operator
 
         Calculate the level-shift based projection operator from 
@@ -440,15 +444,13 @@ class ProjectionEmbedding(EmbeddingBase):
         J. Chem. Theory Comput. 2012, 8 (8), 2564–2568.
         """
 
-        self.P_b = self.mu_val * (self.AB_LL.overlap @ densmat @ self.AB_LL.overlap)
+        self.P_b = self.mu_val * (overlap @ densmat @ overlap)
 
-    def calculate_huzinaga_projector(self, atomsembed, densmat):
+    def calculate_huzinaga_projector(self, hamiltonian, overlap, densmat):
 
-        P_b = atomsembed.hamiltonian_total @ densmat @ atomsembed.overlap
+        self.P_b = -0.5*( (hamiltonian @ densmat @ overlap) + (hamiltonian @ densmat @ overlap).T )
 
-        self.P_b = -0.5*( P_b + P_b.T )
-
-    def spade_localisation(self, atomsembed):
+    def spade_localisation(self, atomsembed, hamiltonian, overlap):
         """Calculate the localised density matrix with the SPADE method
 
         As the eigenvectors (MO coefficient matrix) is not a part of the 
@@ -457,17 +459,25 @@ class ProjectionEmbedding(EmbeddingBase):
 
         """
         from embasi.roothan_hall_eigensolver import hamiltonian_eigensolv, calculate_densmat
+        from embasi.roothan_hall_eigensolver_scalapack import hamiltonian_eigensolv_parallel, pdgesvd_from_numpy_array
+        from embasi.parallel_utils import mpi_bcast_matrix
         import copy
 
         root_print('Starting SPADE localisation...')
 
         nelecs = atomsembed.free_atom_nelectrons - atomsembed.input_total_charge
-        evals, evecs, occ_mat = hamiltonian_eigensolv(atomsembed.hamiltonian_total, \
-                                                      atomsembed.overlap, \
-                                                      nelecs)
+        if self.parallel:
+            evals, evecs, occ_mat = hamiltonian_eigensolv_parallel(hamiltonian, \
+                                                          overlap, \
+                                                          nelecs)
+        else:
+            evals, evecs, occ_mat = hamiltonian_eigensolv(hamiltonian_total, \
+                                                          overlap, \
+                                                          nelecs)
+
         density_matrix_supersystem = calculate_densmat(evecs, occ_mat)
 
-        root_print(f'Density matrix total charge: {np.trace(atomsembed.overlap @ density_matrix_supersystem)}')
+        root_print(f'Density matrix total charge: {np.trace(overlap @ density_matrix_supersystem)}')
 
         mask_val = []
         for idx, basis2atom in enumerate(atomsembed.basis_info.full_basis_atoms):
@@ -484,7 +494,10 @@ class ProjectionEmbedding(EmbeddingBase):
         for idx in range(np.size(occ_mat)):
             evecs_occ_a[:,idx] = np.where(np.array(mask_val), evecs_occ_a[:,idx] * occ_mat[idx]/2, 0)
 
-        u, svals, v = np.linalg.svd(evecs_occ_a)
+        if self.parallel:
+            u, svals, v = pdgesvd_from_numpy_array(evecs_occ_a)
+        else:
+            u, svals, v = np.linalg.svd(evecs_occ_a)
         svals_diff = np.ediff1d(svals**2.0)
         max_sval_change_idx = np.argmax(np.abs(svals_diff))
 
@@ -494,11 +507,11 @@ class ProjectionEmbedding(EmbeddingBase):
         occ_mat_a = occ_mat
         occ_mat_a[max_sval_change_idx+1:] = 0.
 
-        density_matrix_subsys_a = calculate_densmat(evecs_occ, occ_mat_a)
-        density_matrix_subsys_b = density_matrix_supersystem - density_matrix_subsys_a
+        density_matrix_subsys_a = mpi_bcast_matrix(calculate_densmat(evecs_occ, occ_mat_a))
+        density_matrix_subsys_b = mpi_bcast_matrix(density_matrix_supersystem - density_matrix_subsys_a)
 
-        root_print(f'SPADE localised subsystem A charge: {np.trace(atomsembed.overlap @ density_matrix_subsys_a)}')
-        root_print(f'SPADE localised subsystem B charge: {np.trace(atomsembed.overlap @ density_matrix_subsys_b)}')
+        root_print(f'SPADE localised subsystem A charge: {np.trace(overlap @ density_matrix_subsys_a)}')
+        root_print(f'SPADE localised subsystem B charge: {np.trace(overlap @ density_matrix_subsys_b)}')
 
         root_print('Exiting SPADE localisation...')
 
@@ -550,6 +563,9 @@ class ProjectionEmbedding(EmbeddingBase):
         (3) TODO: REF
         """
         import numpy as np
+        import tracemalloc
+        tracemalloc.start(50)
+
 
         root_print("Embedding calculation begun...")
 
@@ -563,20 +579,32 @@ class ProjectionEmbedding(EmbeddingBase):
         end = time.time()
         self.time_ab_lowlevel = end - start
 
+        overlap = copy.deepcopy(self.AB_LL.overlap)
+        hamiltonian_AB_total = copy.deepcopy(self.AB_LL.hamiltonian_total)
+        hamiltonian_AB_electrostatic = copy.deepcopy(self.AB_LL.hamiltonian_electrostatic)
+
         # Read the localised density matrices output by the QM code or
         # perform SPADE localisation on the wrapper level.
         basis_info = self.set_basis_info(self.AB_LL)
         self.AB_LL.basis_info = basis_info
         if self.localisation == "SPADE":
-            densmat_A_LL, densmat_B_LL = self.spade_localisation(self.AB_LL)
+            if self.gc:
+                root_print(f"Pre-GC AB_LL: {tracemalloc.get_traced_memory()}")
+                self.AB_LL.garbage_collect()
+            densmat_A_LL, densmat_B_LL = self.spade_localisation(self.AB_LL, hamiltonian_AB_total, overlap)
         else:
             densmat_A_LL = self.AB_LL.density_matrices_out[0]
             densmat_B_LL = self.AB_LL.density_matrices_out[1]
+            if self.gc:
+                self.AB_LL.garbage_collect()
+
+
         # Initialises the density matrix for subsystem A, and calculates the
         # hamiltonian components for subsystem A at the low-level reference.
         if self.truncate_basis_thresh is not None:
             basis_mask = self.select_atoms_basis_truncation(self.AB_LL,
                                                             densmat_A_LL,
+                                                            overlap,
                                                             self.truncate_basis_thresh)
             basis_info = self.set_truncation_defaults(self.AB_LL, basis_mask)
 
@@ -602,12 +630,12 @@ class ProjectionEmbedding(EmbeddingBase):
 
         # Calculates the electron count for the combined (A+B) and separated 
         # subsystems (A and B).
-        self.AB_pop = self.calc_subsys_pop(self.AB_LL.overlap, \
+        self.AB_pop = self.calc_subsys_pop(overlap, \
                                            (densmat_A_LL + densmat_B_LL))
 
-        self.A_pop = self.calc_subsys_pop(self.AB_LL.overlap, densmat_A_LL)
+        self.A_pop = self.calc_subsys_pop(overlap, densmat_A_LL)
 
-        self.B_pop = self.calc_subsys_pop(self.AB_LL.overlap, densmat_B_LL)
+        self.B_pop = self.calc_subsys_pop(overlap, densmat_B_LL)
 
         root_print(f" Population of Subsystem AB: {self.AB_pop}")
         root_print(f" Population of Subsystem A: {self.A_pop}")
@@ -625,9 +653,9 @@ class ProjectionEmbedding(EmbeddingBase):
         # Initialises the density matrix for subsystem A, and calculated the 
         # hamiltonian components for subsystem A at the low-level reference.
         if self.projection == "level-shift":
-            self.calculate_levelshift_projector(densmat_B_LL)
+            self.calculate_levelshift_projector(densmat_B_LL, overlap)
         elif self.projection == "huzinaga":
-            self.calculate_huzinaga_projector(self.AB_LL, densmat_B_LL)
+            self.calculate_huzinaga_projector(hamiltonian_AB_total, overlap, densmat_B_LL)
         else:
             raise Exception("Invalid entry for projection: use 'level-shift' or 'huzinaga' ")
 
@@ -649,23 +677,39 @@ class ProjectionEmbedding(EmbeddingBase):
         # at every SCF iteration.
         self.A_HL.density_matrix_in = densmat_A_LL
         self.A_HL.input_fragment_nelectrons = self.A_pop
-        self.A_HL.fock_embedding_matrix = \
-                self.AB_LL.hamiltonian_electrostatic - \
-                    self.A_LL.hamiltonian_electrostatic + self.P_b
+        self.vemb = hamiltonian_AB_electrostatic - self.A_LL.hamiltonian_electrostatic
+        self.A_HL.fock_embedding_matrix = self.vemb + self.P_b
+
+        if self.gc:
+            root_print(f"Pre-GC A_LL: {tracemalloc.get_traced_memory()}")
+            self.A_LL.garbage_collect()
+            root_print(f"Post-GC A_LL: {tracemalloc.get_traced_memory()}")
+        
         start = time.time()
         self.A_HL.run()
         end = time.time()
         self.time_a_highlevel = end - start
 
+        densmat_A_HL = copy.deepcopy(self.A_HL.density_matrices_out[0])
+        if self.gc:
+            root_print(f"Pre-GC A_HL: {tracemalloc.get_traced_memory()}")
+            self.A_HL.garbage_collect()
+            root_print(f"Post-GC A_HL: {tracemalloc.get_traced_memory()}")
+                
         # Calculate the total energy of the embedded subsystem A at the high
         # level of theory without the associated embedding potential.        
-        self.A_HL_PP.density_matrix_in = self.A_HL.density_matrices_out[0]
+        self.A_HL_PP.density_matrix_in = densmat_A_HL
         self.A_HL_PP.input_fragment_nelectrons = self.A_pop
         start = time.time()
         self.A_HL_PP.run(ev_corr_scf=True)
         subsys_A_highlvl_totalen = self.A_HL_PP.ev_corr_total_energy
         end = time.time()
         self.time_a_highlevel_pp = end - start
+
+        if self.gc:
+            root_print(f"Pre-GC A_HL_PP: {tracemalloc.get_traced_memory()}")
+            self.A_HL_PP.garbage_collect()
+            root_print(f"Post-GC A_HL_PP: {tracemalloc.get_traced_memory()}")
 
         if self.total_energy_corr == "nonscf":
             # A terrible cludge which requires improvement.
@@ -701,17 +745,15 @@ class ProjectionEmbedding(EmbeddingBase):
 
         # Calculate projected density correction to total energy
         self.PB_corr = \
-            (np.trace(self.P_b @ self.A_HL.density_matrices_out[0]) * 27.211384500)
+            (np.trace(self.P_b @ densmat_A_HL) * 27.211384500)
 
         if "total_energy_method" in self.A_HL.initial_calc.parameters:
             subsys_A_highlvl_totalen = subsys_A_highlvl_totalen + \
                 self.A_HL.post_scf_corr_energy - self.A_HL.dft_energy
 
         if self.total_energy_corr == "1storder":
-            self.order_1_embedding_corr = np.trace((self.A_HL.density_matrices_out[0] \
-                                                    - densmat_A_LL) @ \
-                                        (self.AB_LL.hamiltonian_electrostatic - \
-                                         self.A_LL.hamiltonian_electrostatic)) * 27.211384500
+            self.order_1_embedding_corr = np.trace((densmat_A_HL - densmat_A_LL) @ \
+                                        (self.vemb)) * 27.211384500
 
             self.DFT_AinB_total_energy = subsys_A_highlvl_totalen - \
                                        subsys_A_lowlvl_totalen + subsys_AB_lowlvl_totalen + \

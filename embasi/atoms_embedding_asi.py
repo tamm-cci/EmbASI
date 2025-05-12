@@ -425,6 +425,17 @@ class AtomsEmbed():
             self.ev_corr_total_energy = \
                 self.total_energy - self.ev_sum + self.ev_corr_energy
 
+    def garbage_collect(self):
+        """Removes all stored matrices from memory
+
+        """
+        import gc
+
+        del self.atoms.calc.asi
+        self.density_matrix_in = None
+        self.fock_embedding_matrix = None
+        gc.collect()
+            
     @property
     def hamiltonian_core(self):
         core_idx = 1
