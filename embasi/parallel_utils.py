@@ -14,11 +14,12 @@ def root_print(*args, **kwargs):
     """
     import sys
 
-    sys.stdout.flush()
     rank = MPI.COMM_WORLD.Get_rank()
 
     if rank == 0:
         print(*args, **kwargs)
+
+    sys.stdout.flush()
 
 def mpi_bcast_matrix_storage(data_dict, nrows, ncols):
     """Broadcasts a dictionary of numpy arrays from root node.

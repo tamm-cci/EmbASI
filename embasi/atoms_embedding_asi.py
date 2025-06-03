@@ -330,7 +330,7 @@ class AtomsEmbed():
                                         work_dir=self.outdir)
 
         # Explicitly set function pointers to NULL to avoid
-        # previosly set function pointers from passing into
+        # previously set function pointers from passing into
         # the present calculation.
         self.atoms.calc.asi.register_dm_callback(0, 0)
         self.atoms.calc.asi.register_DM_init(0, 0)

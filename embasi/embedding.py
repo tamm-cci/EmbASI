@@ -29,13 +29,20 @@ class EmbeddingBase(ABC):
         Calculator object for layer 2
 
     """
-    def __init__(self, atoms, embed_mask, calc_base_ll=None, calc_base_hl=None):
+    def __init__(self, atoms, embed_mask, calc_base_ll=None, calc_base_hl=None, run_dir="./EmbASI_calc"):
         import os
 
         self.asi_lib_path = os.environ['ASI_LIB_PATH']
         self.embed_mask = embed_mask
         self.calculator_ll = calc_base_ll
         self.calculator_hl = calc_base_hl
+        self.run_dir = run_dir
+
+        try:
+            os.makedirs(self.run_dir, exist_ok=True)
+            root_print(f"Running EmbASI calculation in directory: {self.run_dir}")
+        except OSError as error:
+            root_print(f"Directory {self.run_dir} can not be created")
 
     def set_layer(self, atoms, layer_name, calc, embed_mask, ghosts=0, 
                       no_scf=False):
@@ -62,8 +69,11 @@ class EmbeddingBase(ABC):
 
         """
         from .atoms_embedding_asi import AtomsEmbed
+        import os
 
-        layer = AtomsEmbed(atoms, calc, embed_mask, outdir=layer_name, 
+        outdir_name = os.path.join(self.run_dir, layer_name)
+
+        layer = AtomsEmbed(atoms, calc, embed_mask, outdir=outdir_name, 
                            ghosts=ghosts, no_scf=no_scf)
         setattr(self, layer_name, layer)
 
@@ -267,7 +277,7 @@ class EmbeddingBase(ABC):
 
 class StandardDFT(EmbeddingBase):
 
-    def __init__(self, atoms, calc_base_ll, embed_mask=None, calc_base_hl=None):
+    def __init__(self, atoms, calc_base_ll, embed_mask=None, calc_base_hl=None, run_dir="./EmbASI_calc"):
         """Runs a normal DFT calculation without embedding
 
         A class which runs a standard DFT calculation without
@@ -294,7 +304,7 @@ class StandardDFT(EmbeddingBase):
         self.calc_names = ["AB_LL"]
 
         super(StandardDFT, self).__init__(atoms, embed_mask, calc_base_ll, 
-                                          calc_base_hl)
+                                          calc_base_hl, run_dir=run_dir)
         low_level_calculator_1 = deepcopy(self.calculator_ll)
 
         self.set_layer(atoms, self.calc_names[0], low_level_calculator_1, 
@@ -350,7 +360,7 @@ class ProjectionEmbedding(EmbeddingBase):
     def __init__(self, atoms, embed_mask, calc_base_ll, calc_base_hl,
                  total_charge=0, post_scf=None, total_energy_corr="1storder",
                  truncate_basis_thresh=None, localisation='SPADE', projection="level-shift",
-                 mu_val=1.e+06, parallel=False, gc=True):
+                 mu_val=1.e+06, parallel=False, gc=True, run_dir="./EmbASI_calc"):
 
         from copy import copy, deepcopy
         from mpi4py import MPI
@@ -365,7 +375,8 @@ class ProjectionEmbedding(EmbeddingBase):
             raise Exception("Invalid entry for total_energy_corr: use '1storder' or 'nonscf' ")
 
         super(ProjectionEmbedding, self).__init__(atoms, embed_mask,
-                                                  calc_base_ll, calc_base_hl)
+                                                  calc_base_ll, calc_base_hl,
+                                                  run_dir=run_dir)
 
         self.localisation = localisation
         if self.localisation == "SPADE":
@@ -458,8 +469,8 @@ class ProjectionEmbedding(EmbeddingBase):
         and construct the density matrix at the wrapper level.
 
         """
-        from embasi.roothan_hall_eigensolver import hamiltonian_eigensolv, calculate_densmat
-        from embasi.roothan_hall_eigensolver_scalapack import hamiltonian_eigensolv_parallel, pdgesvd_from_numpy_array
+        from embasi.roothan_hall_eigensolver import hamiltonian_eigensolv, calculate_densmat, overlap_illcondition_check
+        from embasi.roothan_hall_eigensolver_scalapack import hamiltonian_eigensolv_parallel, pdgesvd_from_numpy_array, overlap_illcondition_check_parallel, pdsyevx_from_numpy_array
         from embasi.parallel_utils import mpi_bcast_matrix
         import copy
 
@@ -468,16 +479,14 @@ class ProjectionEmbedding(EmbeddingBase):
         nelecs = atomsembed.free_atom_nelectrons - atomsembed.input_total_charge
         if self.parallel:
             evals, evecs, occ_mat = hamiltonian_eigensolv_parallel(hamiltonian, \
-                                                          overlap, \
-                                                          nelecs)
+                                                                   overlap, \
+                                                                   nelecs)#, \
+                                                                   #return_orthog=True)
         else:
-            evals, evecs, occ_mat = hamiltonian_eigensolv(hamiltonian_total, \
+            evals, evecs, occ_mat = hamiltonian_eigensolv(hamiltonian, \
                                                           overlap, \
-                                                          nelecs)
-
-        density_matrix_supersystem = calculate_densmat(evecs, occ_mat)
-
-        root_print(f'Density matrix total charge: {np.trace(overlap @ density_matrix_supersystem)}')
+                                                          nelecs)#, \
+                                                          #return_orthog=True)
 
         mask_val = []
         for idx, basis2atom in enumerate(atomsembed.basis_info.full_basis_atoms):
@@ -485,31 +494,62 @@ class ProjectionEmbedding(EmbeddingBase):
                 mask_val.append(True)
             else:
                 mask_val.append(False)
+        
+        mask_val = np.array(mask_val)
 
         evecs_occ = copy.deepcopy(evecs)
         for idx in range(np.size(occ_mat)):
             evecs_occ[:,idx] = evecs_occ[:,idx] * occ_mat[idx]/2
 
+        # Return the orthonormalisation transformation matrix and return discarded basis
+        # matrix
+        #if self.parallel:
+        #    ovlp_evals, ovlp_evecs = pdsyevx_from_numpy_array(overlap, np.shape(overlap)[0], vl=1e-5, vu=100000)
+        #    good_mask = (ovlp_evals > 1e-5)
+        #else:
+        #    xform_mat, n_bad, good_mask = overlap_illcondition_check(overlap, 1e-5, inv=False, return_mask=True)
+
+        # Reduce atom basis mask to non-linear dependence basis functions
+        #mask_val = mask_val[good_mask]
+
         evecs_occ_a = copy.deepcopy(evecs_occ)
         for idx in range(np.size(occ_mat)):
-            evecs_occ_a[:,idx] = np.where(np.array(mask_val), evecs_occ_a[:,idx] * occ_mat[idx]/2, 0)
+            evecs_occ_a[:,idx] = np.where(mask_val, evecs_occ_a[:,idx], 0)
+
+        #root_print(f"occ_mat: {occ_mat}")
+        root_print(f"evecs_occ_a row: {evecs_occ_a[0,:]}")
+        root_print(f"evals row: {evals}")
+        #root_print(f"evecs_occ_a col: {evecs_occ_a[:,0]}")
+        #print(f"evecs_occ_a shape: {np.shape(evecs_occ_a)}")
+        #print(f"good mask shape: {np.shape(good_mask)}")
+        #print(f"mask_val shape: {np.shape(mask_val)}")
 
         if self.parallel:
             u, svals, v = pdgesvd_from_numpy_array(evecs_occ_a)
         else:
             u, svals, v = np.linalg.svd(evecs_occ_a)
+
         svals_diff = np.ediff1d(svals**2.0)
+        root_print(svals)
         max_sval_change_idx = np.argmax(np.abs(svals_diff))
 
         root_print(f'Maximum SPADE state for subsystem A: {max_sval_change_idx}')
-        
+
         evecs_occ = evecs_occ @ v.T
-        occ_mat_a = occ_mat
+        occ_mat_a = copy.deepcopy(occ_mat)
         occ_mat_a[max_sval_change_idx+1:] = 0.
+
+        density_matrix_supersystem = calculate_densmat(evecs_occ, occ_mat)
+        #root_print(f"bxform: {(xform_mat@evecs)[0,:]}")
+        #root_print(f"overlap: {overlap[0,:]}")
+        #root_print(f"dmat: {density_matrix_supersystem[0,:]}")
+        #root_print(f"dmat: {density_matrix_supersystem[0,:]}")
+        #root_print(f'Density matrix total charge: {np.trace(overlap @ density_matrix_supersystem)}')
 
         density_matrix_subsys_a = mpi_bcast_matrix(calculate_densmat(evecs_occ, occ_mat_a))
         density_matrix_subsys_b = mpi_bcast_matrix(density_matrix_supersystem - density_matrix_subsys_a)
 
+        root_print(f'SPADE total supersystem A+B charge: {np.trace(overlap @ density_matrix_supersystem)}')
         root_print(f'SPADE localised subsystem A charge: {np.trace(overlap @ density_matrix_subsys_a)}')
         root_print(f'SPADE localised subsystem B charge: {np.trace(overlap @ density_matrix_subsys_b)}')
 
@@ -575,7 +615,7 @@ class ProjectionEmbedding(EmbeddingBase):
         # nuclear-electron potential).
         start = time.time()
         self.AB_LL.run()
-        subsys_AB_lowlvl_totalen = self.AB_LL.total_energy
+        self.subsys_AB_lowlvl_totalen = self.AB_LL.total_energy
         end = time.time()
         self.time_ab_lowlevel = end - start
 
@@ -646,7 +686,7 @@ class ProjectionEmbedding(EmbeddingBase):
         self.A_LL.input_fragment_nelectrons = self.A_pop
         start = time.time()
         self.A_LL.run(ev_corr_scf=True)
-        subsys_A_lowlvl_totalen = self.A_LL.ev_corr_total_energy
+        self.subsys_A_lowlvl_totalen = self.A_LL.ev_corr_total_energy
         end = time.time()
         self.time_a_lowlevel = end - start
 
@@ -702,7 +742,7 @@ class ProjectionEmbedding(EmbeddingBase):
         self.A_HL_PP.input_fragment_nelectrons = self.A_pop
         start = time.time()
         self.A_HL_PP.run(ev_corr_scf=True)
-        subsys_A_highlvl_totalen = self.A_HL_PP.ev_corr_total_energy
+        self.subsys_A_highlvl_totalen = self.A_HL_PP.ev_corr_total_energy
         end = time.time()
         self.time_a_highlevel_pp = end - start
 
@@ -729,7 +769,7 @@ class ProjectionEmbedding(EmbeddingBase):
                                         self.A_HL.density_matrices_out[0]
             self.A_LL.run(ev_corr_scf=True)
             start = time.time()
-            subsys_A_lowlvl_totalen = self.A_LL.ev_corr_total_energy
+            self.subsys_A_lowlvl_totalen = self.A_LL.ev_corr_total_energy
             end = time.time()
             self.time_a_lowlevel_pp = end - start
 
@@ -739,7 +779,7 @@ class ProjectionEmbedding(EmbeddingBase):
 
             start = time.time()
             self.AB_LL_PP.run(ev_corr_scf=True)
-            subsys_AB_lowlvl_totalen = self.AB_LL_PP.ev_corr_total_energy
+            self.subsys_AB_lowlvl_totalen = self.AB_LL_PP.ev_corr_total_energy
             end = time.time()
             self.time_ab_lowlevel_pp = end - start
 
@@ -748,20 +788,20 @@ class ProjectionEmbedding(EmbeddingBase):
             (np.trace(self.P_b @ densmat_A_HL) * 27.211384500)
 
         if "total_energy_method" in self.A_HL.initial_calc.parameters:
-            subsys_A_highlvl_totalen = subsys_A_highlvl_totalen + \
+            self.subsys_A_highlvl_totalen = self.subsys_A_highlvl_totalen + \
                 self.A_HL.post_scf_corr_energy - self.A_HL.dft_energy
 
         if self.total_energy_corr == "1storder":
             self.order_1_embedding_corr = np.trace((densmat_A_HL - densmat_A_LL) @ \
                                         (self.vemb)) * 27.211384500
 
-            self.DFT_AinB_total_energy = subsys_A_highlvl_totalen - \
-                                       subsys_A_lowlvl_totalen + subsys_AB_lowlvl_totalen + \
+            self.DFT_AinB_total_energy = self.subsys_A_highlvl_totalen - \
+                                       self.subsys_A_lowlvl_totalen + self.subsys_AB_lowlvl_totalen + \
                                        self.order_1_embedding_corr + self.PB_corr
 
         if self.total_energy_corr == "nonscf":
-            self.DFT_AinB_total_energy = subsys_A_highlvl_totalen - \
-                subsys_A_lowlvl_totalen + subsys_AB_lowlvl_totalen + self.PB_corr
+            self.DFT_AinB_total_energy = self.subsys_A_highlvl_totalen - \
+                self.subsys_A_lowlvl_totalen + self.subsys_AB_lowlvl_totalen + self.PB_corr
 
         root_print( f" ----------- FINAL         OUTPUTS --------- " )
         root_print(f" ")
@@ -776,9 +816,9 @@ class ProjectionEmbedding(EmbeddingBase):
         root_print(f" density components of the high-level energy reference for fragment A. ")
         root_print(f" Do not naively use these energies unless you are comfortable with ")
         root_print(f" their true definition. ")
-        root_print(f" Total Energy (A+B Low-Level): {subsys_AB_lowlvl_totalen} eV" )
-        root_print(f" Total Energy (A Low-Level): {subsys_A_lowlvl_totalen} eV" )
-        root_print(f" Total Energy (A High-Level): {subsys_A_highlvl_totalen} eV" )
+        root_print(f" Total Energy (A+B Low-Level): {self.subsys_AB_lowlvl_totalen} eV" )
+        root_print(f" Total Energy (A Low-Level): {self.subsys_A_lowlvl_totalen} eV" )
+        root_print(f" Total Energy (A High-Level): {self.subsys_A_highlvl_totalen} eV" )
         root_print(f" Projection operator energy correction DM^(A_HL) @ Pb: {self.PB_corr} eV" )
         if self.total_energy_corr == "1storder":
             root_print(f" First order energy correction (DM^(A_HL)-DM^(A_LL)) @ v_emb): {self.order_1_embedding_corr} eV" )
