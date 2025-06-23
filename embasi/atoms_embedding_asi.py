@@ -42,7 +42,7 @@ class AtomsEmbed():
 
     def __init__(self, atoms, initial_calc, embed_mask, ghosts=0,
                  outdir='asi.calc', no_scf=False):
-        self.atoms = atoms
+        self.atoms = atoms.copy()
         self.initial_embed_mask = embed_mask
         self.outdir = outdir
 
@@ -335,6 +335,7 @@ class AtomsEmbed():
         self.atoms.calc.asi.register_dm_callback(0, 0)
         self.atoms.calc.asi.register_DM_init(0, 0)
         self.atoms.calc.asi.register_hamiltonian_callback(0, 0)
+        self.atoms.calc.asi.register_set_hamiltonian_callback(0, 0)
         self.atoms.calc.asi.register_modify_hamiltonian_callback(0, 0)
 
         # Register the relevant callbacks
@@ -374,6 +375,11 @@ class AtomsEmbed():
 
         # BROADCAST QUANTITIES ONLY CALCULATED FOR THE HEAD NODE TO ALL
         # OTHER NODES
+        self.atoms.calc.asi.overlap_storage = \
+            mpi_bcast_matrix_storage(self.atoms.calc.asi.overlap_storage,
+                                     self.atoms.calc.asi.n_basis,
+                                     self.atoms.calc.asi.n_basis)
+
         self.atoms.calc.asi.ham_storage = \
             mpi_bcast_matrix_storage(self.atoms.calc.asi.ham_storage,
                                      self.atoms.calc.asi.n_basis,
@@ -412,7 +418,6 @@ class AtomsEmbed():
         # the interaction of the input density matrix, as opposed to the first 
         # set of KS-eigenvectors resulting from the DFT code.
         if ev_corr_scf:
-
             if self.truncate:
                 self.ev_corr_energy = \
                     27.211384500 * np.trace(self.density_matrix_in @ 
@@ -421,6 +426,9 @@ class AtomsEmbed():
                 self.ev_corr_energy = \
                     27.211384500 * np.trace(self.density_matrix_in @
                                             self.hamiltonian_total)
+
+            root_print(f"ham_total ev_energy: {self.hamiltonian_total}")
+            root_print(f"dm_in ev_energy: {self.density_matrix_in}")
 
             self.ev_corr_total_energy = \
                 self.total_energy - self.ev_sum + self.ev_corr_energy
@@ -437,42 +445,31 @@ class AtomsEmbed():
         gc.collect()
             
     @property
-    def hamiltonian_core(self):
-        core_idx = 1
-        if self.truncate:
-            return self.truncated_mat_to_full(self.atoms.calc.asi.ham_storage.get((core_idx,1,1)))
-        else:
-            return self.atoms.calc.asi.ham_storage.get((core_idx,1,1))
-
-    @property
-    def hamiltonian_kinetic(self):
-        core_idx = 2
-        if self.truncate:
-            return self.truncated_mat_to_full(self.atoms.calc.asi.ham_storage.get((core_idx,1,1)))
-        else:
-            return self.atoms.calc.asi.ham_storage.get((core_idx,1,1))
-
-    @property
     def hamiltonian_total(self):
-        tot_idx = 3
+        tot_idx = 1
         if self.truncate:
             return self.truncated_mat_to_full(self.atoms.calc.asi.ham_storage.get((tot_idx,1,1)))
         else:
             return self.atoms.calc.asi.ham_storage.get((tot_idx,1,1))
 
     @property
-    def hamiltonian_electrostatic(self):
+    def hamiltonian_estat_plus_xc(self):
         """_summary_
         Generates
         """
-        return self.hamiltonian_total - self.hamiltonian_kinetic
+        estat_idx = 2
+        if self.truncate:
+            return self.truncated_mat_to_full(self.atoms.calc.asi.ham_storage.get((estat_idx,1,1)))
+        else:
+            return self.atoms.calc.asi.ham_storage.get((estat_idx,1,1))
 
     @property
-    def hamiltonian_electrostatic_v2(self):
-        """_summary_
-        Generates
-        """
-        return self.hamiltonian_total - self.hamiltonian_core
+    def hamiltonian_kinetic(self):
+        kin_idx = 3
+        if self.truncate:
+            return self.truncated_mat_to_full(self.atoms.calc.asi.ham_storage.get((kin_idx,1,1)))
+        else:
+            return self.atoms.calc.asi.ham_storage.get((kin_idx,1,1))
 
     @property
     def fock_embedding_matrix(self):

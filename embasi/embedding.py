@@ -478,15 +478,15 @@ class ProjectionEmbedding(EmbeddingBase):
 
         nelecs = atomsembed.free_atom_nelectrons - atomsembed.input_total_charge
         if self.parallel:
-            evals, evecs, occ_mat = hamiltonian_eigensolv_parallel(hamiltonian, \
-                                                                   overlap, \
-                                                                   nelecs)#, \
-                                                                   #return_orthog=True)
+            evals, evecs, occ_mat, xform_mat = hamiltonian_eigensolv_parallel(hamiltonian, \
+                                                                              overlap, \
+                                                                              nelecs, \
+                                                                              return_orthog=True)
         else:
-            evals, evecs, occ_mat = hamiltonian_eigensolv(hamiltonian, \
-                                                          overlap, \
-                                                          nelecs)#, \
-                                                          #return_orthog=True)
+            evals, evecs, occ_mat, xform_mat = hamiltonian_eigensolv(hamiltonian, \
+                                                           overlap, \
+                                                           nelecs,
+                                                           return_orthog=True)
 
         mask_val = []
         for idx, basis2atom in enumerate(atomsembed.basis_info.full_basis_atoms):
@@ -497,57 +497,39 @@ class ProjectionEmbedding(EmbeddingBase):
         
         mask_val = np.array(mask_val)
 
-        evecs_occ = copy.deepcopy(evecs)
-        for idx in range(np.size(occ_mat)):
-            evecs_occ[:,idx] = evecs_occ[:,idx] * occ_mat[idx]/2
+        if self.parallel:
+            u, sval, v = pdgesvd_from_numpy_array(overlap)
+        else:
+            u, sval, v = np.linalg.svd(overlap, full_matrices=True)
 
-        # Return the orthonormalisation transformation matrix and return discarded basis
-        # matrix
-        #if self.parallel:
-        #    ovlp_evals, ovlp_evecs = pdsyevx_from_numpy_array(overlap, np.shape(overlap)[0], vl=1e-5, vu=100000)
-        #    good_mask = (ovlp_evals > 1e-5)
-        #else:
-        #    xform_mat, n_bad, good_mask = overlap_illcondition_check(overlap, 1e-5, inv=False, return_mask=True)
+        rank = sval > 1e-5
+        n_bad_vals = np.count_nonzero([not val for val in rank])
 
-        # Reduce atom basis mask to non-linear dependence basis functions
-        #mask_val = mask_val[good_mask]
+        if n_bad_vals > 0:
+            raise Exception("Error in spade_localisation: Non-singular values in overlap matrix - basis likely too large.")
 
-        evecs_occ_a = copy.deepcopy(evecs_occ)
-        for idx in range(np.size(occ_mat)):
-            evecs_occ_a[:,idx] = np.where(mask_val, evecs_occ_a[:,idx], 0)
+        mask_val = [val for (val, good_val) in zip(mask_val, rank) if good_val]
 
-        #root_print(f"occ_mat: {occ_mat}")
-        root_print(f"evecs_occ_a row: {evecs_occ_a[0,:]}")
-        root_print(f"evals row: {evals}")
-        #root_print(f"evecs_occ_a col: {evecs_occ_a[:,0]}")
-        #print(f"evecs_occ_a shape: {np.shape(evecs_occ_a)}")
-        #print(f"good mask shape: {np.shape(good_mask)}")
-        #print(f"mask_val shape: {np.shape(mask_val)}")
+        max_occ_state = np.count_nonzero(occ_mat)
+        evecs_occ = evecs[:, :max_occ_state]
+        evecs_occ_a = evecs_occ[mask_val, :]
 
         if self.parallel:
             u, svals, v = pdgesvd_from_numpy_array(evecs_occ_a)
         else:
-            u, svals, v = np.linalg.svd(evecs_occ_a)
+            u, svals, v = np.linalg.svd(evecs_occ_a, full_matrices=True)
 
         svals_diff = np.ediff1d(svals**2.0)
-        root_print(svals)
-        max_sval_change_idx = np.argmax(np.abs(svals_diff))
+        max_sval_change_idx = np.argmax(np.abs(svals_diff)) + 1
 
         root_print(f'Maximum SPADE state for subsystem A: {max_sval_change_idx}')
 
-        evecs_occ = evecs_occ @ v.T
-        occ_mat_a = copy.deepcopy(occ_mat)
-        occ_mat_a[max_sval_change_idx+1:] = 0.
+        evecs_occ_a = xform_mat @ evecs_occ @ v.T[:, :max_sval_change_idx]
+        evecs_occ_b = xform_mat @ evecs_occ @ v.T[:, max_sval_change_idx:]
 
-        density_matrix_supersystem = calculate_densmat(evecs_occ, occ_mat)
-        #root_print(f"bxform: {(xform_mat@evecs)[0,:]}")
-        #root_print(f"overlap: {overlap[0,:]}")
-        #root_print(f"dmat: {density_matrix_supersystem[0,:]}")
-        #root_print(f"dmat: {density_matrix_supersystem[0,:]}")
-        #root_print(f'Density matrix total charge: {np.trace(overlap @ density_matrix_supersystem)}')
-
-        density_matrix_subsys_a = mpi_bcast_matrix(calculate_densmat(evecs_occ, occ_mat_a))
-        density_matrix_subsys_b = mpi_bcast_matrix(density_matrix_supersystem - density_matrix_subsys_a)
+        density_matrix_subsys_a = mpi_bcast_matrix(2.0 * (evecs_occ_a @ evecs_occ_a.T))
+        density_matrix_subsys_b = mpi_bcast_matrix(2.0 * (evecs_occ_b @ evecs_occ_b.T))
+        density_matrix_supersystem = density_matrix_subsys_a + density_matrix_subsys_b
 
         root_print(f'SPADE total supersystem A+B charge: {np.trace(overlap @ density_matrix_supersystem)}')
         root_print(f'SPADE localised subsystem A charge: {np.trace(overlap @ density_matrix_subsys_a)}')
@@ -621,7 +603,7 @@ class ProjectionEmbedding(EmbeddingBase):
 
         overlap = copy.deepcopy(self.AB_LL.overlap)
         hamiltonian_AB_total = copy.deepcopy(self.AB_LL.hamiltonian_total)
-        hamiltonian_AB_electrostatic = copy.deepcopy(self.AB_LL.hamiltonian_electrostatic)
+        AB_hamiltonian_estat_plus_xc = copy.deepcopy(self.AB_LL.hamiltonian_estat_plus_xc)
 
         # Read the localised density matrices output by the QM code or
         # perform SPADE localisation on the wrapper level.
@@ -717,8 +699,13 @@ class ProjectionEmbedding(EmbeddingBase):
         # at every SCF iteration.
         self.A_HL.density_matrix_in = densmat_A_LL
         self.A_HL.input_fragment_nelectrons = self.A_pop
-        self.vemb = hamiltonian_AB_electrostatic - self.A_LL.hamiltonian_electrostatic
+        self.vemb = AB_hamiltonian_estat_plus_xc - self.A_LL.hamiltonian_estat_plus_xc
         self.A_HL.fock_embedding_matrix = self.vemb + self.P_b
+
+        root_print(f"AB etat: {AB_hamiltonian_estat_plus_xc}")
+        root_print(f"A etat: {self.A_LL.hamiltonian_estat_plus_xc}")
+        root_print(f"AB ham_tot: {hamiltonian_AB_total}")
+        root_print(f"fock_embedding: {self.vemb + self.P_b}")
 
         if self.gc:
             root_print(f"Pre-GC A_LL: {tracemalloc.get_traced_memory()}")
