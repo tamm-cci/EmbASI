@@ -427,9 +427,6 @@ class AtomsEmbed():
                     27.211384500 * np.trace(self.density_matrix_in @
                                             self.hamiltonian_total)
 
-            root_print(f"ham_total ev_energy: {self.hamiltonian_total}")
-            root_print(f"dm_in ev_energy: {self.density_matrix_in}")
-
             self.ev_corr_total_energy = \
                 self.total_energy - self.ev_sum + self.ev_corr_energy
 
@@ -534,10 +531,7 @@ class AtomsEmbed():
 
             raise TypeError("Input vemb needs to be np.ndarray of dimensions nbasis*nbasis.")
 
-        if ((inp_fock_embedding_mat is None)):
-            self._fock_embedding_matrix = None
-
-        if self.truncate:
+        if ((inp_fock_embedding_mat is not None) and (self.truncate)):
             inp_fock_embedding_mat = self.full_mat_to_truncated(inp_fock_embedding_mat)
 
         self._fock_embedding_matrix = inp_fock_embedding_mat
@@ -564,8 +558,7 @@ class AtomsEmbed():
             raise TypeError("Input needs to be np.ndarray of dimensions nbasis*nbasis.")
 
         # TODO: DIMENSION CHECKING
-
-        if self.truncate:
+        if ((densmat is not None) and (self.truncate)):
             densmat = self.full_mat_to_truncated(densmat)
 
         self._density_matrix_in = densmat

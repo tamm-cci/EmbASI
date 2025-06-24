@@ -412,6 +412,7 @@ class ProjectionEmbedding(EmbeddingBase):
 
         low_level_calculator_2.parameters['qm_embedding_calc'] = 2
         low_level_calculator_2.parameters['charge_mix_param'] = 0.
+        low_level_calculator_2.parameters['sc_iter_limit'] = 0
         self.set_layer(atoms, "A_LL", low_level_calculator_2,
                        embed_mask, ghosts=2, no_scf=False)
 
@@ -421,6 +422,7 @@ class ProjectionEmbedding(EmbeddingBase):
 
         high_level_calculator_2.parameters['qm_embedding_calc'] = 2
         high_level_calculator_2.parameters['charge_mix_param'] = 0.
+        high_level_calculator_2.parameters['sc_iter_limit'] = 0
         if "total_energy_method" in high_level_calculator_2.parameters:
             high_level_calculator_2.parameters['total_energy_method'] = high_level_calculator_2.parameters["xc"]
         self.set_layer(atoms, "A_HL_PP", high_level_calculator_2,
@@ -459,7 +461,7 @@ class ProjectionEmbedding(EmbeddingBase):
 
     def calculate_huzinaga_projector(self, hamiltonian, overlap, densmat):
 
-        self.P_b = -0.5*( (hamiltonian @ densmat @ overlap) + (hamiltonian @ densmat @ overlap).T )
+        self.P_b = -0.5*( (hamiltonian @ densmat @ overlap.T) + (overlap @ densmat @ hamiltonian.T) )
 
     def spade_localisation(self, atomsembed, hamiltonian, overlap):
         """Calculate the localised density matrix with the SPADE method
@@ -525,11 +527,11 @@ class ProjectionEmbedding(EmbeddingBase):
         root_print(f'Maximum SPADE state for subsystem A: {max_sval_change_idx}')
 
         evecs_occ_a = xform_mat @ evecs_occ @ v.T[:, :max_sval_change_idx]
-        evecs_occ_b = xform_mat @ evecs_occ @ v.T[:, max_sval_change_idx:]
+        evecs_occ_ab = xform_mat @ evecs_occ
 
+        density_matrix_supersystem = mpi_bcast_matrix(2.0 * (evecs_occ_ab @ evecs_occ_ab.T))
         density_matrix_subsys_a = mpi_bcast_matrix(2.0 * (evecs_occ_a @ evecs_occ_a.T))
-        density_matrix_subsys_b = mpi_bcast_matrix(2.0 * (evecs_occ_b @ evecs_occ_b.T))
-        density_matrix_supersystem = density_matrix_subsys_a + density_matrix_subsys_b
+        density_matrix_subsys_b = density_matrix_supersystem - density_matrix_subsys_a
 
         root_print(f'SPADE total supersystem A+B charge: {np.trace(overlap @ density_matrix_supersystem)}')
         root_print(f'SPADE localised subsystem A charge: {np.trace(overlap @ density_matrix_subsys_a)}')
@@ -697,15 +699,11 @@ class ProjectionEmbedding(EmbeddingBase):
         #
         # Registered callbacks in ASI add the above components to the Fock-matrix
         # at every SCF iteration.
+
         self.A_HL.density_matrix_in = densmat_A_LL
         self.A_HL.input_fragment_nelectrons = self.A_pop
         self.vemb = AB_hamiltonian_estat_plus_xc - self.A_LL.hamiltonian_estat_plus_xc
         self.A_HL.fock_embedding_matrix = self.vemb + self.P_b
-
-        root_print(f"AB etat: {AB_hamiltonian_estat_plus_xc}")
-        root_print(f"A etat: {self.A_LL.hamiltonian_estat_plus_xc}")
-        root_print(f"AB ham_tot: {hamiltonian_AB_total}")
-        root_print(f"fock_embedding: {self.vemb + self.P_b}")
 
         if self.gc:
             root_print(f"Pre-GC A_LL: {tracemalloc.get_traced_memory()}")
