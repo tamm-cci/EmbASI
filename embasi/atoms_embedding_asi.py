@@ -274,7 +274,7 @@ class AtomsEmbed():
 
         """
 
-        with open('./'+self.outdir+'/asi.log', 'r') as output:
+        with open(self.outdir+'/asi.log', 'r') as output:
 
             lines = output.readlines()
 

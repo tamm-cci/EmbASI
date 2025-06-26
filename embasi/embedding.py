@@ -28,13 +28,20 @@ class EmbeddingBase(ABC):
         Calculator object for layer 2
 
     """
-    def __init__(self, atoms, embed_mask, calc_base_ll=None, calc_base_hl=None):
+    def __init__(self, atoms, embed_mask, calc_base_ll=None, calc_base_hl=None, run_dir="./EmbASI_calc"):
         import os
 
         self.asi_lib_path = os.environ['ASI_LIB_PATH']
         self.embed_mask = embed_mask
         self.calculator_ll = calc_base_ll
         self.calculator_hl = calc_base_hl
+        self.run_dir=run_dir
+
+        try:
+            os.makedirs(self.run_dir, exist_ok=True)
+            root_print(f"Running EmbASI calculation in directory: {self.run_dir}")
+        except OSError as error:
+            root_print(f"Directory {self.run_dir} can not be created")
 
     def set_layer(self, atoms, layer_name, calc, embed_mask, ghosts=0, 
                       no_scf=False):
@@ -61,8 +68,11 @@ class EmbeddingBase(ABC):
 
         """
         from .atoms_embedding_asi import AtomsEmbed
+        import os
 
-        layer = AtomsEmbed(atoms, calc, embed_mask, outdir=layer_name, 
+        outdir_name = os.path.join(self.run_dir, layer_name)
+
+        layer = AtomsEmbed(atoms, calc, embed_mask, outdir=outdir_name, 
                            ghosts=ghosts, no_scf=no_scf)
         setattr(self, layer_name, layer)
 
@@ -266,7 +276,7 @@ class EmbeddingBase(ABC):
 
 class StandardDFT(EmbeddingBase):
 
-    def __init__(self, atoms, calc_base_ll, embed_mask=None, calc_base_hl=None):
+    def __init__(self, atoms, calc_base_ll, embed_mask=None, calc_base_hl=None, run_dir="./EmbASI_calc"):
         """Runs a normal DFT calculation without embedding
 
         A class which runs a standard DFT calculation without
@@ -293,11 +303,11 @@ class StandardDFT(EmbeddingBase):
         self.calc_names = ["AB_LL"]
 
         super(StandardDFT, self).__init__(atoms, embed_mask, calc_base_ll, 
-                                          calc_base_hl)
+                                          calc_base_hl, run_dir=run_dir)
         low_level_calculator_1 = deepcopy(self.calculator_ll)
 
         self.set_layer(atoms, self.calc_names[0], low_level_calculator_1, 
-                       embed_mask, ghosts=0, no_scf=False)
+                       embed_mask, ghosts=0, no_scf=False, run_dir=run_dir)
 
     def run(self):
 
@@ -349,7 +359,7 @@ class ProjectionEmbedding(EmbeddingBase):
     def __init__(self, atoms, embed_mask, calc_base_ll, calc_base_hl,
                  total_charge=0, post_scf=None, total_energy_corr="1storder",
                  truncate_basis_thresh=None, localisation='SPADE', projection="level-shift",
-                 mu_val=1.e+06):
+                 mu_val=1.e+06, run_dir="./EmbASI_calc"):
 
         from copy import copy, deepcopy
         from mpi4py import MPI
@@ -364,7 +374,7 @@ class ProjectionEmbedding(EmbeddingBase):
             raise Exception("Invalid entry for total_energy_corr: use '1storder' or 'nonscf' ")
 
         super(ProjectionEmbedding, self).__init__(atoms, embed_mask,
-                                                  calc_base_ll, calc_base_hl)
+                                                  calc_base_ll, calc_base_hl, run_dir=run_dir)
 
         self.localisation = localisation
         if self.localisation == "SPADE":

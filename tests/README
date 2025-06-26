@@ -1,0 +1,58 @@
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+EmbASI Regression Testing Infrastructure
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+Hello! Welcome to EmbASI's regression testing infrastructure
+
+In it's current state, the regression testing is a little patchy - I am still
+getting to grips with pytest, so some things will need to be set-up manually
+until I figure out certain things (e.g., A sensible, automatic way of importing
+the compiled, QM code library from environmental variables).
+
+However, for the time being, please find instructions below for running the
+regression tests on your own machine.
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+                Set-up
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+First, install the relevant libraries required for the testing infrastructure
+
+```
+pip install -r requirements.txt
+```
+
+Then, set-up the environmental variables which point to the your compile QM
+code library (for now, only FHI-aims is implemented, so we will use this as our
+example):
+
+```
+export AIMS_LIB_PATH=<locationofaimsroot/aims.XXX.so>
+export AIMS_ROOT_DIR=<locationofaimsroot>
+```
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+            Running Tests
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+To run the tests in serial:
+
+```
+pytest
+```
+
+TODO: INTRODUCE TESTING WITH MPI - CURRENTLY THROWS AN MPI ABORT
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+       Updating reference values
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+If you have added a new test, the new values for the regression test
+will be added automatically. However, if for whatever good faith reason
+you have to update the reference values, run the following:
+
+```
+pytest --force-regen TEST_FILE
+```
+
+Afterwards, commit the update .yml file in the test directory
