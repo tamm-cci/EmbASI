@@ -116,6 +116,7 @@ class AtomsEmbed():
 
     def reorder_atoms_from_embed_mask(self):
         """ Re-orders atoms to push those in embedding region 1 to the beginning
+        of the atom lists to ensure data is organised in a predictable manner.
 
         """
 
@@ -273,7 +274,7 @@ class AtomsEmbed():
 
         """
 
-        with open('./'+self.outdir+'/asi.log', 'r') as output:
+        with open(self.outdir+'/asi.log', 'r') as output:
 
             lines = output.readlines()
 
