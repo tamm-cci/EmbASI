@@ -375,6 +375,8 @@ class ProjectionEmbedding(EmbeddingBase):
             self.calculator_hl.parameters['qm_embedding_mo_localise']=".true."
         else:
             raise Exception("Invalid entry for localisation: use 'SPADE' or 'qmcode' ")
+        self.calculator_ll.parameters['override_default_empty_basis_order']=".true."
+        self.calculator_hl.parameters['override_default_empty_basis_order']=".true."
 
         self.projection = projection
         if self.projection == "level-shift":
