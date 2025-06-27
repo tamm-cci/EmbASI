@@ -6,6 +6,10 @@ import copy
 import time
 import numpy as np
 
+# Development purposes 
+import os
+import shutil
+
 class EmbeddingBase(ABC):
     """Base object on which all embedding methods are based
 
@@ -907,3 +911,178 @@ class ProjectionEmbedding(EmbeddingBase):
         from scalapack4py.npscal.blacs_ctxt_management import CTXT_Register, DESCR_Register
         CTXT_Register.clear_register()
         DESCR_Register.clear_register()
+
+
+class FrozenDensityEmbedding(EmbeddingBase):
+    """Implementation of Projeciton-Based Embedding with ASI communication
+    A class controlling the interaction between two subsystems calculated at
+    two levels of theory (low-level and high-level) with the
+    Projection-Based Embedding (PbE) scheme of Manby et al.[1].
+    Parameters
+    ----------
+    atoms: ASE Atoms
+        Structural and chemical information of system
+    embed_mask: int or list
+        Number of atoms from index 0 in layer 1, or list of reigons assigned
+        to each atom (i.e., [1,1,1,2,2,2])
+    calc_base_ll: ASE FileIOCalculator
+        Calculator object for layer 1
+    calc_base_hl: ASE FileIOCalculator
+        Calculator object for layer 2
+    frag_charge: int
+        Charge of the embedded fragment. Defaults to 0.
+    post_scf: str
+        Post-HF method applied to high-level calculation. Defaults to None.
+    mu_val: float
+        Pre-factor for level-shift orthogonalisation. Defaults to 1e+06 Ha.
+    truncate_basis: float or None:
+        Truncates the basis functions of the environment based on
+        a Mulliken charge metrix. Turned off if None. Defaults to None.
+    References
+    ----------
+    [1] Weso
+    """
+
+    def __init__(self, atoms, embed_mask, calc_base_ll, calc_base_hl,
+                 total_charge=0, post_scf=None, total_energy_corr="1storder",
+                 truncate_basis_thresh=None, localisation='SPADE', projection="level-shift",
+                 mu_val=1.e+06):
+
+        from copy import copy, deepcopy
+        from mpi4py import MPI
+
+        self.calc_names = ["MU0","F2A1","F1A2"]
+
+        super(FrozenDensityEmbedding, self).__init__(atoms, embed_mask,
+                                                  calc_base_ll, calc_base_hl)
+
+        initial_calculator    = deepcopy(self.calculator_ll)
+        low_level_calculator  = deepcopy(self.calculator_ll)
+        high_level_calculator = deepcopy(self.calculator_hl)
+
+        self.Test_RI = True
+        self.Test_NonAdd = True  
+        self.Test_Embed = True
+        self.qmlayer = 1
+
+        if self.Test_RI:
+            initial_calculator.parameters['ri_potential_restart'] = 'write'
+            low_level_calculator.parameters['ri_potential_restart'] = 'read_and_write'
+            high_level_calculator.parameters['ri_potential_restart'] = 'read_and_write'
+
+        if self.Test_NonAdd:
+            low_level_calculator.parameters['qm_embedding_type'] = 'frozendensity'
+            high_level_calculator.parameters['qm_embedding_type'] = 'frozendensity'
+
+        if self.Test_Embed:
+            initial_calculator.parameters['qm_embedding_calc'] = self.qmlayer
+            low_level_calculator.parameters['qm_embedding_calc'] = self.qmlayer
+            high_level_calculator.parameters['qm_embedding_calc'] = self.qmlayer
+
+        initial_calculator.parameters["aims_output"] = "rho_and_derivs_on_grid"
+        low_level_calculator.parameters['aims_output'] = "rho_and_derivs_on_grid"
+        high_level_calculator.parameters['aims_output'] = "rho_and_derivs_on_grid"
+
+        self.set_layer(atoms, "MU0", initial_calculator, 
+                       embed_mask, ghosts=2, no_scf=False)
+
+        self.set_layer(atoms, "F2A1", low_level_calculator, 
+                       embed_mask, ghosts=2, no_scf=False)
+
+        self.set_layer(atoms, "F1A2", high_level_calculator,
+                       embed_mask, ghosts=1, no_scf=False)
+
+        self.rank = MPI.COMM_WORLD.Get_rank()
+        self.ntasks = MPI.COMM_WORLD.Get_size()
+
+    def get_embedding_pot(self, atomsembed, n_scf, ):
+        return 
+
+    def run(self):
+        """ Summary 
+        """
+        import numpy as np
+
+        root_print("Embedding calculation begun...")
+
+        start = time.time()
+
+        ediff = 1.0
+        etot_prev = 0.0
+        max_cycle = 50
+        n_cycle = 0
+
+        cwd = os.getcwd()
+
+        MU0_ri  = os.path.join(cwd, "MU0/ri_restart_coeffs.out")
+        F2A1_ri = os.path.join(cwd, "F2A1/ri_restart_coeffs.out")
+        F1A2_ri = os.path.join(cwd, "F1A2/ri_restart_coeffs.out")
+
+        MU0_dd  = os.path.join(cwd, "MU0/rho_and_derivs_spin_1.dat")
+        F2A1_dd = os.path.join(cwd, "F2A1/rho_and_derivs_spin_1.dat")
+        F1A2_dd = os.path.join(cwd, "F1A2/rho_and_derivs_spin_1.dat")
+
+        F2A1_df = os.path.join(cwd, "F2A1/subsystem_info.dat")
+        F1A2_df = os.path.join(cwd, "F1A2/subsystem_info.dat")
+
+        # Outer SCF loop
+        fdet_file = open("fdet.txt", "w")
+        while np.abs(ediff) > 1.e-6 and n_cycle < max_cycle:
+            n_cycle += 1
+            print("SCF cycle: ", n_cycle)
+
+            if n_cycle == 1:
+                self.MU0.run()
+                try:
+                    os.mkdir("F2A1")
+                except FileExistsError:
+                    root_print("Directory F2A1 already exists")
+                try:
+                    os.mkdir("F1A2")
+                except FileExistsError:
+                    root_print("Directory F1A2 already exists")
+                if self.Test_RI: shutil.copy(MU0_ri, F1A2_ri)
+                if self.Test_NonAdd: shutil.copy(MU0_dd, F1A2_df)
+
+            # Cluster Calculation
+            self.F1A2.run()
+            F1A2E = self.F1A2.total_energy
+
+            if self.Test_RI: shutil.copy(F1A2_ri, F2A1_ri)
+            if self.Test_NonAdd: shutil.copy(F1A2_dd, F2A1_df)
+
+            # Environment Calculation
+            self.F2A1.run()
+            if self.Test_RI: shutil.copy(F2A1_ri,F1A2_ri)
+            if self.Test_NonAdd: shutil.copy(F2A1_dd, F1A2_df)
+
+            if n_cycle == max_cycle:
+                root_print("Max SCF cycles reached")
+                break
+
+            etot_current = self.F2A1.total_energy + self.F1A2.total_energy
+            fdet_file.write("__________________________\n")
+            fdet_file.write(f"FDET Cycle: {n_cycle}\n")
+            fdet_file.write(f"etot_F2A1 {self.F2A1.total_energy}\n")
+            fdet_file.write(f"etot_F1A2 {self.F1A2.total_energy}\n")
+            fdet_file.write(f"etot_current {etot_current}\n")
+            ediff = etot_current - etot_prev
+            etot_prev = etot_current
+            fdet_file.write(f"ediff {ediff}\n")
+            fdet_file.write("__________________________\n")
+            fdet_file.flush()
+            #print(ediff)
+
+
+        end = time.time()
+        fdet_file.close()
+
+        root_print(f"Total time (s): {end-start}")
+
+
+""" Pseudo code for the run method
+        if n_scf == 1:
+            self.cluster.run()   # --> (no embedding)
+            self.env.run()       # --> (no embedding)
+            c2e_emb = get_embedding_pot()
+"""
