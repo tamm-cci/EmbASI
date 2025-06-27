@@ -2,6 +2,7 @@ from embasi.embedding import ProjectionEmbedding
 from embasi.parallel_utils import root_print
 from ase.data.s22 import s22, s26, create_s22_system
 from ase.calculators.aims import Aims, AimsProfile
+import numpy as np
 import os
 
 class FHIaims_projection_embedding_test():
@@ -75,10 +76,10 @@ class FHIaims_projection_embedding_test():
 
     def output_ref_values(self):
 
-        return {
-            "energy_values": {
-                "MeOH_energy"       : self.monomer_energy_total_energy.item(),
-                "PB_corr_energy"    : self.PB_corr.item(),
+        return  {
+                "MeOH_energy"       : self.monomer_energy_total_energy,
+                "PB_corr_energy"    : self.PB_corr,
                 }
-            }
+
+
 
