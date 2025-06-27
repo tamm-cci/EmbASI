@@ -314,6 +314,7 @@ class StandardDFT(EmbeddingBase):
                                           calc_base_hl, run_dir=run_dir)
         low_level_calculator_1 = deepcopy(self.calculator_ll)
 
+        low_level_calculator_1.parameters['qm_embedding_calc'] = 1
         self.set_layer(atoms, self.calc_names[0], low_level_calculator_1, 
                        embed_mask, ghosts=0, no_scf=False)
 
