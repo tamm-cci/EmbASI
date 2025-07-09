@@ -799,17 +799,18 @@ class FrozenDensityEmbedding(EmbeddingBase):
     """
 
     def __init__(self, atoms, embed_mask, calc_base_ll, calc_base_hl,
-                 total_charge=0, post_scf=None, total_energy_corr="1storder",
-                 truncate_basis_thresh=None, localisation='SPADE', projection="level-shift",
-                 mu_val=1.e+06):
+                 run_dir="./EmbASI_calc"):
 
         from copy import copy, deepcopy
         from mpi4py import MPI
 
         self.calc_names = ["MU0","F2A1","F1A2"]
 
-        super(FrozenDensityEmbedding, self).__init__(atoms, embed_mask,
-                                                  calc_base_ll, calc_base_hl)
+        super(FrozenDensityEmbedding, self).__init__(atoms,
+                                                     embed_mask,
+                                                     calc_base_ll,
+                                                     calc_base_hl,
+                                                     run_dir=run_dir)
 
         initial_calculator    = deepcopy(self.calculator_ll)
         low_level_calculator  = deepcopy(self.calculator_ll)
@@ -817,8 +818,9 @@ class FrozenDensityEmbedding(EmbeddingBase):
 
         self.Test_RI = True
         self.Test_NonAdd = True  
-        self.Test_Embed = True
+        self.Test_Embed = False
         self.qmlayer = 1
+        self.run_dir =  run_dir
 
         if self.Test_RI:
             initial_calculator.parameters['ri_potential_restart'] = 'write'
@@ -867,8 +869,8 @@ class FrozenDensityEmbedding(EmbeddingBase):
         max_cycle = 50
         n_cycle = 0
 
-        cwd = os.getcwd()
-
+        cwd = os.path.join(os.getcwd(),self.run_dir[2:])
+    
         MU0_ri  = os.path.join(cwd, "MU0/ri_restart_coeffs.out")
         F2A1_ri = os.path.join(cwd, "F2A1/ri_restart_coeffs.out")
         F1A2_ri = os.path.join(cwd, "F1A2/ri_restart_coeffs.out")
@@ -889,11 +891,13 @@ class FrozenDensityEmbedding(EmbeddingBase):
             if n_cycle == 1:
                 self.MU0.run()
                 try:
-                    os.mkdir("F2A1")
+                    tmp = os.path.join(self.run_dir, "F2A1")
+                    os.mkdir(tmp)
                 except FileExistsError:
                     root_print("Directory F2A1 already exists")
                 try:
-                    os.mkdir("F1A2")
+                    tmp = os.path.join(self.run_dir, "F1A2")
+                    os.mkdir(tmp)
                 except FileExistsError:
                     root_print("Directory F1A2 already exists")
                 if self.Test_RI: shutil.copy(MU0_ri, F1A2_ri)
