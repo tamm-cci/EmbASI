@@ -6,7 +6,11 @@ from pytest_regressions.num_regression import NumericRegressionFixture
 
 sys.path.append(os.getcwd()+"/../../../")
 print(sys.path)
-from fhiaims_meoh_test_generator import FHIaims_projection_embedding_test
+try:
+    from fhiaims_meoh_test_generator import FHIaims_projection_embedding_test
+except ImportError:
+    sys.path.insert(1,"/home/dchen/Downloads/DChen_EmbASI/")
+    from tests.fhiaims_meoh_test_generator import FHIaims_projection_embedding_test
 
 def test_spade_localisation_serial(num_regression: NumericRegressionFixture, tmp_path):
 
