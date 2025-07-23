@@ -46,7 +46,7 @@ class Extrapolation:
         Value used for the formula E(∞)
 
     """
-    def __init__(self, file1, file2, path, atom, embed_mask, calc_ll, calc_hl, asi_path, projection1_param = {} , projection2_param = {} ,d=2.65, alpha = 4.51, **kwargs):
+    def __init__(self, file1, file2, path, atom, embed_mask, calc_ll, calc_hl, asi_path, projection1_param = {} , projection2_param = {} , d=2.65, alpha = 4.51, **kwargs):
         self.asi_path = asi_path
         os.environ["ASI_LIB_PATH"] = self.asi_path
         self.file1:str= file1
@@ -91,15 +91,15 @@ class Extrapolation:
                 embed_mask=self.embed_mask,
                 calc_base_hl=self.calc_hl,
                 calc_base_ll=self.calc_ll,
-                mu_val=self.mu_val,
+                mu_val=self.mu_val
             )
 
             if cycle == 0:
                 for key, val in self.projection1_param.items():
-                    projection.parameters[key] = val
+                    setattr(projection, key, val)
             else:
                 for key, val in self.projection2_param.items():
-                    projection.parameters[key] = val
+                    setattr(projection, key, val)
 
             projection.run()
 
