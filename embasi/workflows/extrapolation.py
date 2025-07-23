@@ -64,6 +64,17 @@ class Extrapolation:
         self.d = d
         self.alpha = alpha
 
+    def checkInParam(self, item, default, cycle):
+        if cycle == 0:
+            app_Dict = self.projection1_param.items()
+        else:
+            app_Dict = self.projection2_param.items()
+        for key, val in app_Dict:
+            if key == item:
+                return val
+
+        return default
+
     @property
     def extrapolate(self) -> float:
         cycle: int = 0
@@ -91,7 +102,10 @@ class Extrapolation:
                 embed_mask=self.embed_mask,
                 calc_base_hl=self.calc_hl,
                 calc_base_ll=self.calc_ll,
-                mu_val=self.mu_val
+                mu_val=self.mu_val,
+                total_energy_corr= self.checkInParam("total_energy_corr","1storder", cycle),
+                localisation = self.checkInParam("localisation","SPADE", cycle),
+                projection = self.checkInParam("projection","level-shift", cycle)
             )
 
             if cycle == 0:
