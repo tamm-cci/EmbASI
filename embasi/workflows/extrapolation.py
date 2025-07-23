@@ -17,10 +17,6 @@ import typing
 class Extrapolation:
     """
 
-    E
-    E(∞) is then applied to be found.
-
-    E(∞) = E[n₁]n₁³ - E[
 
     Parameters
     ----------
@@ -43,9 +39,17 @@ class Extrapolation:
         Calculator object for layer 2
     asi_path: str
         Name of directory where ASI (Atomic Simulation Interface) is installed
+    projection1_param: dict
+        Additional parameters for the first projection
+    projection2_param: dict
+        Additional parameters for the second projection
+    d: float
+        Value used for the formula E(∞)
+    alpha: float
+        Value used for the formula E(∞)
 
     """
-    def __init__(self, file1, file2, path, atom, embed_mask, calc_ll, calc_hl, asi_path,projection1_param={},projection2_param={}):
+    def __init__(self, file1, file2, path, atom, embed_mask, calc_ll, calc_hl, asi_path,projection1_param={},projection2_param={},d=2.65,alpha=4.51):
         self.asi_path = asi_path
         os.environ["ASI_LIB_PATH"] = self.asi_path
         self.file1:str= file1
@@ -62,6 +66,8 @@ class Extrapolation:
         self.energy = []
         self.projection1_param = projection1_param
         self.projection2_param = projection2_param
+        self.d = d
+        self.alpha = alpha
 
     @property
     def extrapolate(self) -> float:
@@ -107,11 +113,6 @@ class Extrapolation:
             self.results.append(energy)
             type +=1
 
-        #return ((self.results[0] * int(self.file1) ** 3) - (self.results[1]) * int(self.file2) ** 3) / (int(self.file1)** 3 - (int(self.file2) ** 3))
-
-        d = 2.65
-        alpha = 4.51
-
-        return (self.results[0]*(int(self.file1)+d)**alpha - self.results[1]*(int(self.file2)+d)**alpha)/((int(self.file1) + d)**alpha-(int(self.file2)+d)**alpha)
+        return (self.results[0]*(int(self.file1)+self.d)**self.alpha - self.results[1]*(int(self.file2)+self.d)**self.alpha)/((int(self.file1) + self.d)**self.alpha-(int(self.file2)+self.d)**self.alpha)
 
 
