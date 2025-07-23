@@ -1,4 +1,4 @@
-import os,sys
+import os,sys,typing
 from argparse import ArgumentError
 try:
     from embasi.embedding import ProjectionEmbedding
@@ -8,9 +8,6 @@ except ImportError:
     parent_dir2 = os.path.dirname(parent_dir)
     sys.path.append(parent_dir2)
     from embasi.embedding import ProjectionEmbedding
-from embasi.embedding import ProjectionEmbedding
-import typing
-
 
 #os.environ["ASI_LIB_PATH"] = "/home/dchen/Software/FHIaims/_build_lib/libaims.250711.scalapack.mpi.so"
 
@@ -49,7 +46,7 @@ class Extrapolation:
         Value used for the formula E(∞)
 
     """
-    def __init__(self, file1, file2, path, atom, embed_mask, calc_ll, calc_hl, asi_path,projection1_param={},projection2_param={},d=2.65,alpha=4.51):
+    def __init__(self, file1, file2, path, atom, embed_mask, calc_ll, calc_hl, asi_path, projection1_param = {} , projection2_param = {} ,d=2.65, alpha = 4.51, **kwargs):
         self.asi_path = asi_path
         os.environ["ASI_LIB_PATH"] = self.asi_path
         self.file1:str= file1
@@ -61,9 +58,7 @@ class Extrapolation:
         self.calc_hl = calc_hl
         self.mu_val: float = 1.e+6
         self.options: typing.List[str] = [file1,file2]
-        self.cleansed_objects = []
         self.results = []
-        self.energy = []
         self.projection1_param = projection1_param
         self.projection2_param = projection2_param
         self.d = d
@@ -71,7 +66,7 @@ class Extrapolation:
 
     @property
     def extrapolate(self) -> float:
-        type: int = 0
+        cycle: int = 0
         try:
             conv1 = int(self.file1)
             conv2 = int(self.file2)
@@ -99,7 +94,7 @@ class Extrapolation:
                 mu_val=self.mu_val,
             )
 
-            if type == 0:
+            if cycle == 0:
                 for key, val in self.projection1_param.items():
                     projection.parameters[key] = val
             else:
@@ -111,7 +106,7 @@ class Extrapolation:
             energy = projection.DFT_AinB_total_energy
 
             self.results.append(energy)
-            type +=1
+            cycle +=1
 
         return (self.results[0]*(int(self.file1)+self.d)**self.alpha - self.results[1]*(int(self.file2)+self.d)**self.alpha)/((int(self.file1) + self.d)**self.alpha-(int(self.file2)+self.d)**self.alpha)
 
