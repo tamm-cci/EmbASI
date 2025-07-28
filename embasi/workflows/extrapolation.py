@@ -64,7 +64,7 @@ class Extrapolation:
         self.d = d
         self.alpha = alpha
 
-    def checkInParam(self, item, default, cycle):
+    def checkInParam(self, item: str, default: str, cycle: int) -> str:
         if cycle == 0:
             app_Dict = self.projection1_param.items()
         else:
@@ -123,5 +123,3 @@ class Extrapolation:
             cycle +=1
 
         return (self.results[0]*(int(self.file1)+self.d)**self.alpha - self.results[1]*(int(self.file2)+self.d)**self.alpha)/((int(self.file1) + self.d)**self.alpha-(int(self.file2)+self.d)**self.alpha)
-
-
