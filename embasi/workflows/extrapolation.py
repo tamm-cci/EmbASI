@@ -14,6 +14,11 @@ except ImportError:
 class Extrapolation:
     """
 
+    Provides an estimated value based on the assumption that the
+    existing trend would continue. Allows us to predict energy at
+    the CBS Limit by using results from smaller basis sets, while
+    maintaining a high degree of accuracy as well as a more efficient
+    method which requires less computing power as well as less time.
 
     Parameters
     ----------
