@@ -43,17 +43,19 @@ class ChemShellInterface(ProjectionEmbedding):
     def write_multipoles(self):
         self.multipole_atoms.write_to_geometry_in()
 
-    def add_atoms(self, coord, charge, multipole_order=0):
+    def add_atoms(self, entry_type, coord, charge, multipole_order=0):
         self.multipole_atoms.add_atoms(coord, charge, multipole_order)
 
 class MultipoleAtoms():
 
     def __init__(self):
+        self._entry_type = []
         self._coords = []  
-        self._charges = []  
+        self._charges = [] 
         self._multipole_order = 0  
     
-    def add_atoms(self, coord, charge, multipole_order=0):
+    def add_atoms(self, entry_type, coord, charge, multipole_order=0):
+        self._entry_type.append()
         self._coords.append(coord)
         self._charges.append(charge)
         self._multipole_order.append(multipole_order)
@@ -71,6 +73,11 @@ class MultipoleAtoms():
         cwd = os.getcwd()
         geometry_path = os.path.join(cwd, "geometry.in")
         with open(geometry_path, 'a') as f:
-            for coord, charge in zip(self._coords, self._charges):
+            for i, (entry_type, coord, charge) in enumerate(zip(self._entry_type, self._coords, self._charges)):
                 x, y, z = coord
-                f.write(f"multipole {x:16.9f} {y:16.9f} {z:16.9f} {self._multipole_order:2d} {charge:12.8f}\n")
+                if entry_type == 'atom':
+                    f.write(f"atom {x:16.9f} {y:16.9f} {z:16.9f}\n")
+                    if self._regions[i] is not None:
+                        f.write(f"qm_embedding_region {self._embed_mask[i]}\n")
+                elif entry_type == 'multipole':
+                    f.write(f"multipole {x:16.9f} {y:16.9f} {z:16.9f} {self._multipole_order:2d} {charge:12.8f}\n")
