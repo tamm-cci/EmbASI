@@ -42,7 +42,7 @@ class AtomsEmbed():
 
     def __init__(self, atoms, initial_calc, embed_mask, ghosts=0,
                  outdir='asi.calc', no_scf=False):
-        self.atoms = atoms
+        self.atoms = atoms.copy()
         self.initial_embed_mask = embed_mask
         self.outdir = outdir
 
@@ -333,11 +333,12 @@ class AtomsEmbed():
                                         work_dir=self.outdir)
 
         # Explicitly set function pointers to NULL to avoid
-        # previosly set function pointers from passing into
+        # previously set function pointers from passing into
         # the present calculation.
         self.atoms.calc.asi.register_dm_callback(0, 0)
         self.atoms.calc.asi.register_DM_init(0, 0)
         self.atoms.calc.asi.register_hamiltonian_callback(0, 0)
+        self.atoms.calc.asi.register_set_hamiltonian_callback(0, 0)
         self.atoms.calc.asi.register_modify_hamiltonian_callback(0, 0)
         self.parallel = True
 
@@ -404,6 +405,11 @@ class AtomsEmbed():
                                          self.atoms.calc.asi.n_basis,
                                          self.atoms.calc.asi.n_basis)
 
+            self.atoms.calc.asi.overlap_storage = \
+                mpi_bcast_matrix_storage(self.atoms.calc.asi.overlap_storage,
+                                     self.atoms.calc.asi.n_basis,
+                                     self.atoms.calc.asi.n_basis)
+
             self.atoms.calc.asi.dm_count = mpi_bcast_integer(self.atoms.calc.asi.dm_count)
             self.atoms.calc.asi.ham_count = mpi_bcast_integer(self.atoms.calc.asi.ham_count)
 
@@ -438,7 +444,6 @@ class AtomsEmbed():
         # the interaction of the input density matrix, as opposed to the first 
         # set of KS-eigenvectors resulting from the DFT code.
         if ev_corr_scf:
-
             if self.truncate:
                 self.ev_corr_energy = \
                     27.211384500 * np.trace(self.density_matrix_in @ 
@@ -451,43 +456,43 @@ class AtomsEmbed():
             self.ev_corr_total_energy = \
                 self.total_energy - self.ev_sum + self.ev_corr_energy
 
-    @property
-    def hamiltonian_core(self):
-        core_idx = 1
-        if self.truncate:
-            return self.truncated_mat_to_full(self.atoms.calc.asi.ham_storage.get((core_idx,1,1)))
-        else:
-            return self.atoms.calc.asi.ham_storage.get((core_idx,1,1))
+    def garbage_collect(self):
+        """Removes all stored matrices from memory
 
-    @property
-    def hamiltonian_kinetic(self):
-        core_idx = 2
-        if self.truncate:
-            return self.truncated_mat_to_full(self.atoms.calc.asi.ham_storage.get((core_idx,1,1)))
-        else:
-            return self.atoms.calc.asi.ham_storage.get((core_idx,1,1))
+        """
+        import gc
 
+        del self.atoms.calc.asi
+        self.density_matrix_in = None
+        self.fock_embedding_matrix = None
+        gc.collect()
+            
     @property
     def hamiltonian_total(self):
-        tot_idx = 3
+        tot_idx = 1
         if self.truncate:
             return self.truncated_mat_to_full(self.atoms.calc.asi.ham_storage.get((tot_idx,1,1)))
         else:
             return self.atoms.calc.asi.ham_storage.get((tot_idx,1,1))
 
     @property
-    def hamiltonian_electrostatic(self):
+    def hamiltonian_estat_plus_xc(self):
         """_summary_
         Generates
         """
-        return self.hamiltonian_total - self.hamiltonian_kinetic
+        estat_idx = 2
+        if self.truncate:
+            return self.truncated_mat_to_full(self.atoms.calc.asi.ham_storage.get((estat_idx,1,1)))
+        else:
+            return self.atoms.calc.asi.ham_storage.get((estat_idx,1,1))
 
     @property
-    def hamiltonian_electrostatic_v2(self):
-        """_summary_
-        Generates
-        """
-        return self.hamiltonian_total - self.hamiltonian_core
+    def hamiltonian_kinetic(self):
+        kin_idx = 3
+        if self.truncate:
+            return self.truncated_mat_to_full(self.atoms.calc.asi.ham_storage.get((kin_idx,1,1)))
+        else:
+            return self.atoms.calc.asi.ham_storage.get((kin_idx,1,1))
 
     @property
     def fock_embedding_matrix(self):
@@ -552,10 +557,7 @@ class AtomsEmbed():
 
             raise TypeError("Input vemb needs to be np.ndarray of dimensions nbasis*nbasis.")
 
-        if ((inp_fock_embedding_mat is None)):
-            self._fock_embedding_matrix = None
-
-        if self.truncate:
+        if ((inp_fock_embedding_mat is not None) and (self.truncate)):
             inp_fock_embedding_mat = self.full_mat_to_truncated(inp_fock_embedding_mat)
 
         self._fock_embedding_matrix = inp_fock_embedding_mat
@@ -582,8 +584,7 @@ class AtomsEmbed():
         #    raise TypeError("Input needs to be np.ndarray of dimensions nbasis*nbasis.")
 
         # TODO: DIMENSION CHECKING
-
-        if self.truncate:
+        if ((densmat is not None) and (self.truncate)):
             densmat = self.full_mat_to_truncated(densmat)
 
         self._density_matrix_in = densmat

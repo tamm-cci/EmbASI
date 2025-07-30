@@ -1,4 +1,7 @@
 import numpy as np
+from ctypes import RTLD_GLOBAL, CDLL, POINTER, byref, c_int, c_int64, c_int32, c_bool, c_double
+from embasi.parallel_utils import root_print, mpi_bcast_matrix
+import os
 
 def invsqr_overlap_calc(overlap):
 
@@ -40,48 +43,75 @@ def calculate_densmat(eigenvectors, occ_mat):
 
     return occ_evecs @ occ_evecs.T
 
-def overlap_illcondition_check(overlap, thresh):
+def overlap_illcondition_check_parallel(overlap, thresh, inv=True, return_mask=False):
 
     from scipy.linalg import eig_banded, eigh
+    from embasi.parallel_utils import root_print
 
     n_basis = np.shape(overlap)[0]
 
-    ovlp_evals, ovlp_evecs = eigh(overlap, subset_by_value=[thresh,10000.])
-    
+    ovlp_evals, ovlp_evecs = pdsyevx_from_numpy_array(overlap, n_basis, vl=thresh, vu=100000)
+
     # Count non-singular values
-    n_good = np.size(ovlp_evals)
-    n_bad = np.shape(overlap)[0] - n_good
+    n_bad = (ovlp_evals < thresh).sum()
+    n_good = np.shape(overlap)[0] - n_bad
+
+    good_val_mask = (ovlp_evals > thresh)
 
     if n_bad > 0:
         # Transform overlap matrix
-        ovlp_filtered = ovlp_evecs
+        ovlp_filtered = ovlp_evecs[:, good_val_mask]
+        evals_filtered = ovlp_evals[good_val_mask]
 
-        for idx in np.arange(n_good):
-            sqrt_ev = np.sqrt(ovlp_evals[idx])
-            ovlp_filtered[:, idx] = ovlp_filtered[:, idx]/sqrt_ev
+        for idx in range(np.size(evals_filtered)):
+            sqrt_ev = np.sqrt(evals_filtered[idx])
+
+            if inv:
+                ovlp_filtered[:, idx] = ovlp_filtered[:, idx]/sqrt_ev
+            else:
+                ovlp_filtered[:, idx] = ovlp_filtered[:, idx]*sqrt_ev
 
     else:
-        sigma_sqrt = np.diag(ovlp_evals**(-0.5))
+        if inv:
+            sigma_sqrt = np.diag(ovlp_evals**(-0.5))
+        else:
+            sigma_sqrt = np.diag(ovlp_evals**(0.5))
+
         ovlp_filtered = ovlp_evecs @ sigma_sqrt @ ovlp_evecs.T
 
-    return ovlp_filtered, n_bad
+    if return_mask:
+        return ovlp_filtered, n_bad, good_val_mask
+    else:
+        return ovlp_filtered, n_bad
 
-def hamiltonian_eigensolv(hamiltonian, overlap, nelec):
+def hamiltonian_eigensolv_parallel(hamiltonian, overlap, nelec, return_orthog=False):
 
     from embasi.parallel_utils import root_print
 
+    overlap_dist = mpi_bcast_matrix(overlap)
+
     thresh = 1e-5
     n_basis = np.shape(overlap)[0]
-    xform_mat, n_bad = overlap_illcondition_check(overlap, thresh)
+    xform_mat, n_bad = overlap_illcondition_check_parallel(overlap, thresh)
     n_good = n_basis - n_bad
 
-    evals, evecs = np.linalg.eig(xform_hamiltonian(hamiltonian, xform_mat))
-    evecs = back_xform_evecs(evecs, xform_mat)
+    evals, evecs = pdsyevx_from_numpy_array(xform_hamiltonian(hamiltonian, xform_mat), n_good)
 
-    evals, evecs = sort_eigvals_and_evecs(evals, evecs)
-    occ_mat = calculate_occ_mat(evals, nelec)
+    evecs = mpi_bcast_matrix(evecs)
 
-    return evals, evecs, occ_mat
+    if return_orthog:
+        evals, evecs = sort_eigvals_and_evecs(evals, evecs)
+        occ_mat = calculate_occ_mat(evals, nelec)
+        
+        return evals, evecs, occ_mat, xform_mat
+
+    else:
+        evecs = back_xform_evecs(evecs, xform_mat)
+
+        evals, evecs = sort_eigvals_and_evecs(evals, evecs)
+        occ_mat = calculate_occ_mat(evals, nelec)
+
+        return evals, evecs, occ_mat
 
 def find_squarest_grid(ntasks):
 
@@ -94,9 +124,9 @@ def find_squarest_grid(ntasks):
     diffs = factors[:,0] - factors[:,1]
 
     idx = np.argwhere(diffs==np.min(np.abs(diffs)))
-    return factors[idx][0], factors[idx][0]
+    return factors[idx][0][0][0], factors[idx][0][0][1]
 
-def pdsyevx_from_numpy_array(array, scalapack_lib_path, global_array_size):
+def pdsyevx_from_numpy_array(array, global_array_size, vl=None, vu=None):
 
     from scalapack4py import ScaLAPACK4py
     from ctypes import CDLL, POINTER, c_int
@@ -105,7 +135,7 @@ def pdsyevx_from_numpy_array(array, scalapack_lib_path, global_array_size):
     comm = MPI.COMM_WORLD
     ntasks = comm.Get_size()
     rank = comm.Get_rank()
-    sl = ScaLAPACK4py(CDLL(scalapack_libpath_path, mode=RTLD_GLOBAL))
+    sl = ScaLAPACK4py(CDLL(os.environ['ASI_LIB_PATH'], mode=RTLD_GLOBAL))
 
     n = global_array_size
     dtype = np.float64
@@ -119,59 +149,49 @@ def pdsyevx_from_numpy_array(array, scalapack_lib_path, global_array_size):
     b = np.zeros((descr.locrow, descr.loccol), dtype=dtype, order='F')
     sl.scatter_numpy(a, POINTER(c_int)(descr), b.ctypes.data_as(POINTER(c_double)), b.dtype)
     
-    d = np.zeros((n), dtype=dtype, order='F')
-    e = np.zeros((n), dtype=dtype, order='F')
-    tau = np.zeros((n), dtype=dtype, order='F')
-    taup = np.zeros((n), dtype=dtype, order='F')
-    tauq = np.zeros((n), dtype=dtype, order='F')
-    work = np.zeros((descr.locrow), dtype=dtype, order='F')
-
-    test_print = sl.gather_numpy(POINTER(c_int)(descr), b.ctypes.data_as(POINTER(c_double)), (n, n))
-
-    # Workspace query for PDSYTRD
-    lwork = -1
-    info = -1
-    sl.pdsytrd("U", 5, b, 1, 1, descr,
-               d, e, tau, work, lwork, info)
-
-    # Execute PDSYTRD with optimal workspace
-    lwork = int(work[0])
-    print(lwork)
-    work = np.zeros((lwork), dtype=dtype, order='F')
-
-    sl.pdsytrd("U", 5, b, 1, 1, descr,
-           d, e, tau, work, lwork, info)
-
-    test_print = sl.gather_numpy(POINTER(c_int)(descr), b.ctypes.data_as(POINTER(c_double)), (n, n))
-
-    # Workspace query for PDGEBRD
-    lwork=-1
-    sl.pdgebrd(5, 5, b, 1, 1, descr,
-           d, e, taup, tauq, work,
-           lwork, info)
-
-    # Execute PDGEBRD with optimal workspace
-    lwork = int(work[0])
-    work = np.zeros((lwork), dtype=dtype, order='F')
-    sl.pdgebrd(5, 5, b, 1, 1, descr,
-           d, e, taup, tauq, work,
-           lwork, info)
-
-    test_print = sl.gather_numpy(POINTER(c_int)(descr), b.ctypes.data_as(POINTER(c_double)), (n, n))
-
-    # Workspace query for PDGEHRD
-    lwork=-1
-    sl.pdgehrd(5, 1, 5, b, 1, 1, descr,
-           tau, work, lwork, info)
-
-    # Execute PDGEHRD with optimal workspace
-    lwork = int(work[0])
-    work = np.zeros((lwork), dtype=dtype, order='F')
-    sl.pdgehrd(5, 1, 5, b, 1, 1, descr,
-               tau, work, lwork, info)
-
-    test_print = sl.gather_numpy(POINTER(c_int)(descr), b.ctypes.data_as(POINTER(c_double)), (n, n))
-    print(test_print)
+    #d = np.zeros((n), dtype=dtype, order='F')
+    #e = np.zeros((n), dtype=dtype, order='F')
+    #tau = np.zeros((n), dtype=dtype, order='F')
+    #taup = np.zeros((n), dtype=dtype, order='F')
+    #tauq = np.zeros((n), dtype=dtype, order='F')
+    #work = np.zeros((descr.locrow), dtype=dtype, order='F')
+    #
+    ## Workspace query for PDSYTRD
+    #lwork = -1
+    #info = -1
+    #sl.pdsytrd("U", n, b, 1, 1, descr,
+    #           d, e, tau, work, lwork, info)
+    #
+    ## Execute PDSYTRD with optimal workspace
+    #lwork = int(work[0])
+    #work = np.zeros((lwork), dtype=dtype, order='F')
+    #
+    #sl.pdsytrd("U", n, b, 1, 1, descr,
+    #       d, e, tau, work, lwork, info)
+    #
+    ## Workspace query for PDGEBRD
+    #lwork=-1
+    #sl.pdgebrd(n, n, b, 1, 1, descr,
+    #       d, e, taup, tauq, work,
+    #       lwork, info)
+    #
+    ## Execute PDGEBRD with optimal workspace
+    #lwork = int(work[0])
+    #work = np.zeros((lwork), dtype=dtype, order='F')
+    #sl.pdgebrd(n, n, b, 1, 1, descr,
+    #       d, e, taup, tauq, work,
+    #       lwork, info)
+    #
+    ## Workspace query for PDGEHRD
+    #lwork=-1
+    #sl.pdgehrd(n, 1, n, b, 1, 1, descr,
+    #       tau, work, lwork, info)
+    #
+    ## Execute PDGEHRD with optimal workspace
+    #lwork = int(work[0])
+    #work = np.zeros((lwork), dtype=dtype, order='F')
+    #sl.pdgehrd(n, 1, n, b, 1, 1, descr,
+    #           tau, work, lwork, info)
 
     # Execution of PDSYEVX
     w = np.zeros(n, dtype=np.float64, order='F') # Eigenvalues
@@ -179,14 +199,19 @@ def pdsyevx_from_numpy_array(array, scalapack_lib_path, global_array_size):
 
     # Parameters for PDSYEVX
     jobz = "V"  
-    range_type = "A"  
     uplo = "U"  
     ia = 1
     ja = 1 
     iz = 1
-    jz = 1 
-    vl = 0.0  
-    vu = 0.0  
+    jz = 1
+    if vl is None:
+        vl = 0.
+        vu = 0.
+        range_type = "A"
+    else:
+        vl = vl
+        vu = vu
+        range_type = "V"
     il = 1  
     iu = n  
     abstol = 2.0 * 1e-15
@@ -206,7 +231,7 @@ def pdsyevx_from_numpy_array(array, scalapack_lib_path, global_array_size):
     ifail = np.zeros(n, dtype=np.int32, order='F')
     iclustr = np.zeros(1, dtype=np.int32, order='F')
     gap = np.zeros(1, dtype=np.float64, order='F')
-    sl.pdsyevx("V", "A", "U", n, b, ia, ja, descr, 
+    sl.pdsyevx("V", range_type, "U", n, b, ia, ja, descr, 
                vl, vu, il, iu, abstol, m, nz, w, orfac, z, iz, jz, descr, 
                work, lwork, iwork, liwork, ifail, iclustr, gap, info)
 
@@ -223,17 +248,16 @@ def pdsyevx_from_numpy_array(array, scalapack_lib_path, global_array_size):
     gap = np.zeros(nprow * npcol, dtype=np.float64, order='F')
     
     # Call PDSYEVX with optimal workspace
-    sl.pdsyevx("V", "A", "U", n, b, ia, ja, descr, 
+    sl.pdsyevx("V", range_type, "U", n, b, ia, ja, descr, 
                vl, vu, il, iu, abstol, m, nz, w, orfac, z, iz, jz, descr, 
                work, lwork, iwork, liwork, ifail, iclustr, gap, info)
 
-    eigvals = z
-    eigvecs = sl.gather_numpy(POINTER(c_int)(descr), z.ctypes.data_as(POINTER(c_double)), (n, n))
+    eigvals = w
+    eigvecs = mpi_bcast_matrix(sl.gather_numpy(POINTER(c_int)(descr), z.ctypes.data_as(POINTER(c_double)), (n, n)))
 
     return eigvals, eigvecs
 
-
-def pdgesvd_from_numpy_array(array, scalapack_lib_path):
+def pdgesvd_from_numpy_array(array):
 
     from scalapack4py import ScaLAPACK4py
     from ctypes import CDLL, POINTER, c_int
@@ -243,7 +267,7 @@ def pdgesvd_from_numpy_array(array, scalapack_lib_path):
     ntasks = comm.Get_size()
     rank = comm.Get_rank()
     
-    sl = ScaLAPACK4py(CDLL(libpath, mode=RTLD_GLOBAL))
+    sl = ScaLAPACK4py(CDLL(os.environ['ASI_LIB_PATH'], mode=RTLD_GLOBAL))
 
     m, n = np.shape(array)[0], np.shape(array)[1]
     dtype=np.float64
@@ -259,7 +283,7 @@ def pdgesvd_from_numpy_array(array, scalapack_lib_path):
     descr_vt = sl.make_blacs_desc(ctx, n, n)
 
     b = np.zeros((descr_a.locrow, descr_a.loccol), dtype=dtype, order='F')
-    sl.scatter_numpy(a, POINTER(c_int)(descr_a), b.ctypes.data_as(POINTER(c_double)), b.dtype)
+    sl.scatter_numpy(array, POINTER(c_int)(descr_a), b.ctypes.data_as(POINTER(c_double)), b.dtype)
 
     s = np.zeros(size, dtype=dtype, order='F')
     u = np.zeros((descr_u.locrow, descr_u.loccol), dtype=dtype, order='F')
@@ -281,8 +305,8 @@ def pdgesvd_from_numpy_array(array, scalapack_lib_path):
                s, u, 1, 1, descr_u, vt, 1, 1, descr_vt,
                work, lwork, info)
 
-    u_gather = sl.gather_numpy(POINTER(c_int)(descr_u), u.ctypes.data_as(POINTER(c_double)), (m, m))
-    vt_gather = sl.gather_numpy(POINTER(c_int)(descr_vt), vt.ctypes.data_as(POINTER(c_double)), (n, n))
+    u_gather = mpi_bcast_matrix(sl.gather_numpy(POINTER(c_int)(descr_u), u.ctypes.data_as(POINTER(c_double)), (m, m)))
     s_vals = s
+    vt_gather = mpi_bcast_matrix(sl.gather_numpy(POINTER(c_int)(descr_vt), vt.ctypes.data_as(POINTER(c_double)), (n, n)))
 
-    return u_gather, vt_gather, s_vals
+    return u_gather, s_vals, vt_gather
