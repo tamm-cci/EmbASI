@@ -3,7 +3,12 @@ from ctypes import POINTER, byref, c_int, c_int64, c_int32, c_bool, \
                    cast, byref, Structure
 from asi4py.pyasi import triang2herm_inplace, triang_packed2full_hermit
 from mpi4py import MPI
-import ctypes
+from npscal.distarray import NPScal
+from npscal.blacs_ctxt_management import DESCR_Register, CTXT_Register
+from npscal.blacs_ctxt_management import BLACSContextManager, BLACSDESCRManager
+from scalapack4py.array_types import nullable_ndpointer, ctypes2ndarray
+import numpy as np
+import traceback, sys
 
 def dm_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
     """Default callback for saving density matrices
@@ -31,9 +36,79 @@ def dm_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
         Numerical value indexing matrix shape (See: ASI docs)
 
     """
-
     try:
-        asi, storage_dict, cnt_dict, label = cast(aux, py_object).value
+        asi, storage_dict, cnt_dict, parallel, label = cast(aux, py_object).value
+
+        if asi.is_hamiltonian_real:
+            data_shape = (asi.n_basis,asi.n_basis)
+        else:
+            data_shape = (asi.n_basis,asi.n_basis, 2)        
+
+        if (matrix_descr_ptr.contents.storage_type not in {1,2}):
+            if parallel:
+                if not(CTXT_Register.check_register("main")):
+                    descr_cast = asi.scalapack.wrap_blacs_desc(descr)
+                    MP = asi.scalapack.blacs_gridinfo(descr_cast.ctxt)[0]
+                    NP = asi.scalapack.blacs_gridinfo(descr_cast.ctxt)[1]
+                    ctxt = BLACSContextManager("main", MP, NP, asi.scalapack)
+                                                
+                if not(DESCR_Register.check_register("default")):
+                    descr_cast = asi.scalapack.wrap_blacs_desc(descr)
+                    m, n, mb, nb = descr_cast.m, descr_cast.n, descr_cast.mb, descr_cast.nb
+                    rsrc, csrc, lld = descr_cast.rsrc, descr_cast.csrc, descr_cast.lld
+                    descr = BLACSDESCRManager("main", "default", asi.scalapack, m, n,
+                                              mb, nb, rsrc, csrc, lld)
+                data = NPScal(loc_array=data, ctxt_tag="main", descr_tag="default", lib=asi.scalapack)
+            else:
+                data = asi.scalapack.gather_numpy(descr, data, data_shape)
+        elif (matrix_descr_ptr.contents.storage_type in {1,2}):
+            assert not descr, """default_saving_callback supports only dense full 
+                                 ScaLAPACK arrays"""
+            assert matrix_descr_ptr.contents.matrix_type == 1, \
+                "Triangular packed storage is supported only for hermitian matrices"
+
+            uplo = {1:'L',2:'U'}[matrix_descr_ptr.contents.storage_type]
+            data = triang_packed2full_hermit(data, asi.n_basis,
+                                             asi.is_hamiltonian_real, uplo)
+            
+        if data is not None:
+            asi.dm_count += 1
+            #assert len(data.shape) == 2
+            storage_dict[(asi.dm_count, iK, iS)] = data.copy()
+    except Exception as eee:
+        print(f"""Something happened in ASI default_saving_callback 
+                  {label}: {eee}\nAborting...""")
+        traceback.print_tb(eee.__traceback__, limit=5, file=sys.stdout)
+        MPI.COMM_WORLD.Abort(1)
+
+def ovlp_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
+    """Default callback for saving density matrices
+
+    Callback function from ASI to be registered and invoked by 
+    a given QM code. Saves density matrices from a given ASI_run()
+    call to a dictionary of np.ndarray arrays, indexed by the 
+    number of density matrices exported, k-point, and spin channel.
+
+    Code derived from the default saving callback from asi4py
+    
+    Parameters
+    ----------
+    aux: Object
+        Auxiliary object passed to callback 
+    iK: c_int
+        k-point index of matrix
+    iS: c_int
+        Spin channel index of matrix        
+    descr: c_types.POINTER(c_int)
+        Pointer to BLACS descriptor of matrix
+    data: c_types.POINTER
+        Pointer to dble/cdble matrix
+    matrix_descr_ptr: c_types.POINTER(c_int)
+        Numerical value indexing matrix shape (See: ASI docs)
+
+    """
+    try:
+        asi, storage_dict, parallel, label = cast(aux, py_object).value
 
         if asi.is_hamiltonian_real:
             data_shape = (asi.n_basis,asi.n_basis)
@@ -41,7 +116,22 @@ def dm_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
             data_shape = (asi.n_basis,asi.n_basis, 2)
 
         if (matrix_descr_ptr.contents.storage_type not in {1,2}):
-            data = asi.scalapack.gather_numpy(descr, data, data_shape)
+            if parallel:
+                if not(CTXT_Register.check_register("main")):
+                    descr_cast = asi.scalapack.wrap_blacs_desc(descr)
+                    MP = asi.scalapack.blacs_gridinfo(descr_cast.ctxt)[0]
+                    NP = asi.scalapack.blacs_gridinfo(descr_cast.ctxt)[1]
+                    ctxt = BLACSContextManager("main", MP, NP, asi.scalapack)
+                                                
+                if not(DESCR_Register.check_register("default")):
+                    descr_cast = asi.scalapack.wrap_blacs_desc(descr)
+                    m, n, mb, nb = descr_cast.m, descr_cast.n, descr_cast.mb, descr_cast.nb
+                    rsrc, csrc, lld = descr_cast.rsrc, descr_cast.csrc, descr_cast.lld
+                    descr = BLACSDESCRManager("main", "default", asi.scalapack, m, n,
+                                              mb, nb, rsrc, csrc, lld)
+                data = NPScal(loc_array=data, ctxt_tag="main", descr_tag="default", lib=asi.scalapack)
+            else:
+                data = asi.scalapack.gather_numpy(descr, data, data_shape)
         elif (matrix_descr_ptr.contents.storage_type in {1,2}):
             assert not descr, """default_saving_callback supports only dense full 
                                  ScaLAPACK arrays"""
@@ -53,13 +143,12 @@ def dm_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
                                              asi.is_hamiltonian_real, uplo)
 
         if data is not None:
-            asi.dm_count += 1
-            assert len(data.shape) == 2
-            storage_dict[(asi.dm_count, iK, iS)] = data.copy()
-
+            #assert len(data.shape) == 2
+            storage_dict[(1, iK, iS)] = data.copy()
     except Exception as eee:
         print(f"""Something happened in ASI default_saving_callback 
                   {label}: {eee}\nAborting...""")
+        traceback.print_tb(eee.__traceback__, limit=5, file=sys.stdout)
         MPI.COMM_WORLD.Abort(1)
 
 def ham_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
@@ -90,7 +179,7 @@ def ham_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
     """
 
     try:
-        asi, storage_dict, cnt_dict, label = cast(aux, py_object).value
+        asi, storage_dict, cnt_dict, parallel, label = cast(aux, py_object).value
         
         if asi.is_hamiltonian_real:
             data_shape = (asi.n_basis,asi.n_basis) 
@@ -99,7 +188,22 @@ def ham_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
 
         # ASI_STORAGE_TYPE_TRIL,ASI_STORAGE_TYPE_TRIU
         if (matrix_descr_ptr.contents.storage_type not in {1,2}):
-            data = asi.scalapack.gather_numpy(descr, data, data_shape)
+            if parallel:
+                if not(CTXT_Register.check_register("main")):
+                    descr_cast = asi.scalapack.wrap_blacs_desc(descr)
+                    MP = asi.scalapack.blacs_gridinfo(descr_cast.ctxt)[0]
+                    NP = asi.scalapack.blacs_gridinfo(descr_cast.ctxt)[1]
+                    ctxt = BLACSContextManager("main", MP, NP, asi.scalapack)
+                                                
+                if not(DESCR_Register.check_register("default")):
+                    descr_cast = asi.scalapack.wrap_blacs_desc(descr)
+                    m, n, mb, nb = descr_cast.m, descr_cast.n, descr_cast.mb, descr_cast.nb
+                    rsrc, csrc, lld = descr_cast.rsrc, descr_cast.csrc, descr_cast.lld
+                    descr = BLACSDESCRManager("main", "default", asi.scalapack, m, n,
+                                              mb, nb, rsrc, csrc, lld)
+                data = NPScal(loc_array=data, ctxt_tag="main", descr_tag="default", lib=asi.scalapack)
+            else:
+                data = asi.scalapack.gather_numpy(descr, data, data_shape)
         elif (matrix_descr_ptr.contents.storage_type in {1,2}): #
             assert not descr, """default_saving_callback supports only dense 
                                  full ScaLAPACK arrays"""
@@ -110,7 +214,7 @@ def ham_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
                                              asi.is_hamiltonian_real, uplo)
 
         if data is not None:
-            assert len(data.shape) == 2
+            #assert len(data.shape) == 2
             if asi.ham_count < 3:
                 asi.ham_count = asi.ham_count + 1
                 storage_dict[(asi.ham_count, iK, iS)] = data.copy()
@@ -123,4 +227,67 @@ def ham_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
     except Exception as eee:
         print(f"""Something happened in ASI default_saving_callback {label}: 
                   {eee}\nAborting...""")
+        traceback.print_tb(eee.__traceback__, limit=5, file=sys.stdout)
+        MPI.COMM_WORLD.Abort(1)
+
+
+def matrix_loading_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
+    """Default callback for loading matrices
+
+    Callback function from ASI to be registered and invoked by 
+    a given QM code. Loads a given matrix at a given point in the
+    code where the callback is invokes
+
+    Code derived from the default saving callback from asi4py
+
+    Parameters
+    ----------
+    aux: Object
+        Auxiliary object passed to callback 
+    iK: c_int
+        k-point index of matrix
+    iS: c_int
+        Spin channel index of matrix        
+    descr: c_types.POINTER(c_int)
+        Pointer to BLACS descriptor of matrix
+    data: c_types.POINTER
+        Pointer to dble/cdble matrix
+    matrix_descr_ptr: c_types.POINTER(c_int)
+        Numerical value indexing matrix shape (See: ASI docs)
+
+    """
+
+    try:
+        asi, storage_dict, parallel, label = cast(aux, py_object).value
+
+        if parallel:
+            m = storage_dict[(iK, iS)]
+        else:
+            m = storage_dict[(iK, iS)] if asi.scalapack.is_root(descr) else None
+
+        # ASI_STORAGE_TYPE_TRIL,ASI_STORAGE_TYPE_TRIU
+        if (matrix_descr_ptr.contents.storage_type not in {1,2}):
+            if parallel:
+                if not(CTXT_Register.check_register("main")):
+                    raise Exception("Context not recognised")
+                                                
+                if not(DESCR_Register.check_register("default")):
+                    raise Exception("BLACS descriptor not recognised")
+
+                src_descr = DESCR_Register.get_register("default")
+                dest_descr = asi.scalapack.wrap_blacs_desc(descr)
+                data = ctypes2ndarray(data, (dest_descr.locrow, dest_descr.loccol)).T
+
+                asi.scalapack.pdgemr2d(asi.n_basis, asi.n_basis,
+                                       m.loc_array, 1, 1, src_descr,
+                                       data, 1, 1, dest_descr,
+                                       dest_descr.ctxt)
+                return 1
+            else:
+                asi.scalapack.scatter_numpy(m, descr, data, asi.hamiltonian_dtype)
+
+    except Exception as eee:
+        print(f"""Something happened in ASI default_saving_callback {label}: 
+                  {eee}\nAborting...""")
+        traceback.print_tb(eee.__traceback__, limit=5, file=sys.stdout)
         MPI.COMM_WORLD.Abort(1)

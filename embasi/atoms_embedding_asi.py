@@ -317,7 +317,9 @@ class AtomsEmbed():
         import numpy as np
         from asi4py.asecalc import ASI_ASE_calculator
         from embasi.asi_default_callbacks import dm_saving_callback, \
-                                                        ham_saving_callback
+                                                        ham_saving_callback, \
+                                                        ovlp_saving_callback, \
+                                                        matrix_loading_callback
 
         root_print(f'Calculation {self.outdir}...')
 
@@ -337,9 +339,17 @@ class AtomsEmbed():
         self.atoms.calc.asi.register_DM_init(0, 0)
         self.atoms.calc.asi.register_hamiltonian_callback(0, 0)
         self.atoms.calc.asi.register_modify_hamiltonian_callback(0, 0)
+        self.parallel = True
 
         # Register the relevant callbacks
-        self.atoms.calc.asi.keep_overlap = True
+        # self.atoms.calc.asi.keep_overlap = True
+        self.atoms.calc.asi.overlap_storage = {}
+        self.atoms.calc.asi.register_overlap_callback(ovlp_saving_callback, 
+                                                      (self.atoms.calc.asi, 
+                                                       self.atoms.calc.asi.overlap_storage,
+                                                       self.parallel,
+                                                       'Ovlp calc'))
+
 
         self.atoms.calc.asi.dm_storage = {}
         self.atoms.calc.asi.dm_calc_cnt = {}
@@ -347,7 +357,8 @@ class AtomsEmbed():
         self.atoms.calc.asi.register_dm_callback(dm_saving_callback, 
                                                  (self.atoms.calc.asi, 
                                                   self.atoms.calc.asi.dm_storage, 
-                                                  self.atoms.calc.asi.dm_calc_cnt, 
+                                                  self.atoms.calc.asi.dm_calc_cnt,
+                                                  self.parallel,
                                                   'DM calc'))
 
         self.atoms.calc.asi.ham_storage = {}
@@ -357,38 +368,52 @@ class AtomsEmbed():
                                                           (self.atoms.calc.asi,
                                                            self.atoms.calc.asi.ham_storage,
                                                            self.atoms.calc.asi.ham_calc_cnt,
+                                                           self.parallel,
                                                            'Ham calc'))
 
         if self.density_matrix_in is not None:
-            'TODO: Actual type enforcement and error handling'
-            self.atoms.calc.asi.init_density_matrix = \
-                {(1,1): np.asfortranarray(self.density_matrix_in)}
+            self.atoms.calc.asi.register_DM_init(matrix_loading_callback,
+                                                 (self.atoms.calc.asi,
+                                                 {(1,1): self.density_matrix_in},
+                                                 self.parallel,
+                                                 'DM init'))
+
         if self.fock_embedding_matrix is not None:
-            self.atoms.calc.asi.modify_hamiltonian = \
-                {(1,1): np.asfortranarray(self.fock_embedding_matrix)}
+            self.atoms.calc.asi.register_modify_hamiltonian_callback(matrix_loading_callback,
+                                                                     (self.atoms.calc.asi,
+                                                                     {(1,1): self.fock_embedding_matrix},
+                                                                     self.parallel,
+                                                                     'Modify H'))
 
         E0 = self.atoms.get_potential_energy()
 
         self.total_energy = E0
         self.basis_atoms = self.atoms.calc.asi.basis_atoms
         self.n_basis = self.atoms.calc.asi.n_basis
-
+        
         # BROADCAST QUANTITIES ONLY CALCULATED FOR THE HEAD NODE TO ALL
-        # OTHER NODES
-        self.atoms.calc.asi.ham_storage = \
-            mpi_bcast_matrix_storage(self.atoms.calc.asi.ham_storage,
-                                     self.atoms.calc.asi.n_basis,
-                                     self.atoms.calc.asi.n_basis)
-        self.atoms.calc.asi.dm_storage = \
-            mpi_bcast_matrix_storage(self.atoms.calc.asi.dm_storage,
-                                     self.atoms.calc.asi.n_basis,
-                                     self.atoms.calc.asi.n_basis)
+        # OTHER NODES - ONLY DO THIS IN SERIAL MODE AS THE NPSCAL ARRAYS
+        # ARE ALREADY DISTRIBUTED TO EACH TASK
+        if not (self.parallel):
+            self.atoms.calc.asi.ham_storage = \
+                mpi_bcast_matrix_storage(self.atoms.calc.asi.ham_storage,
+                                         self.atoms.calc.asi.n_basis,
+                                         self.atoms.calc.asi.n_basis)
+            self.atoms.calc.asi.dm_storage = \
+                mpi_bcast_matrix_storage(self.atoms.calc.asi.dm_storage,
+                                         self.atoms.calc.asi.n_basis,
+                                         self.atoms.calc.asi.n_basis)
 
-        self.atoms.calc.asi.dm_count = mpi_bcast_integer(self.atoms.calc.asi.dm_count)
-        self.atoms.calc.asi.ham_count = mpi_bcast_integer(self.atoms.calc.asi.ham_count)
+            self.atoms.calc.asi.dm_count = mpi_bcast_integer(self.atoms.calc.asi.dm_count)
+            self.atoms.calc.asi.ham_count = mpi_bcast_integer(self.atoms.calc.asi.ham_count)
 
         self.atoms.calc.asi.close()
         MPI.COMM_WORLD.Barrier()
+
+        dm = self.atoms.calc.asi.dm_storage.get((1,1,1))
+        ovlp = self.atoms.calc.asi.overlap_storage.get((1,1,1))
+
+        from npscal.index_utils.npscal_select import diag
 
         self.extract_results()
 
@@ -551,10 +576,10 @@ class AtomsEmbed():
     @density_matrix_in.setter
     def density_matrix_in(self, densmat):
 
-        if (not isinstance(densmat, (list, tuple, np.ndarray)) and
-            (not (densmat is None))):
+        #if (not isinstance(densmat, (list, tuple, np.ndarray)) and
+        #    (not (densmat is None))):
             
-            raise TypeError("Input needs to be np.ndarray of dimensions nbasis*nbasis.")
+        #    raise TypeError("Input needs to be np.ndarray of dimensions nbasis*nbasis.")
 
         # TODO: DIMENSION CHECKING
 
