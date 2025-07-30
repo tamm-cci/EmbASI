@@ -384,6 +384,7 @@ class AtomsEmbed():
             mpi_bcast_matrix_storage(self.atoms.calc.asi.ham_storage,
                                      self.atoms.calc.asi.n_basis,
                                      self.atoms.calc.asi.n_basis)
+
         self.atoms.calc.asi.dm_storage = \
             mpi_bcast_matrix_storage(self.atoms.calc.asi.dm_storage,
                                      self.atoms.calc.asi.n_basis,

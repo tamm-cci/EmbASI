@@ -145,9 +145,12 @@ class EmbeddingBase(ABC):
 
         BasisInfo = Basis_info()
         BasisInfo.full_natoms = np.size(active_atoms)
+        BasisInfo.trunc_natoms = np.size(active_atoms)
         BasisInfo.active_atoms = active_atoms
         BasisInfo.full_basis_atoms = atomsembed.basis_atoms
+        BasisInfo.trunc_basis_atoms = atomsembed.basis_atoms
         BasisInfo.full_nbasis = atomsembed.n_basis
+        BasisInfo.trunc_nbasis = atomsembed.n_basis
 
         return BasisInfo
 
@@ -177,7 +180,7 @@ class EmbeddingBase(ABC):
         # truncated matrix
         active_atoms = np.array([ idx for idx, maskval 
                                   in enumerate(active_atom_mask) 
-                                  if maskval ])
+                                  if (maskval or atomsembed.embed_mask[idx] == 1) ])
 
         # Remove non-active atoms from basis_atoms to form a truncated
         # analogue
@@ -507,10 +510,11 @@ class ProjectionEmbedding(EmbeddingBase):
         rank = sval > 1e-5
         n_bad_vals = np.count_nonzero([not val for val in rank])
 
-        if n_bad_vals > 0:
-            raise Exception("Error in spade_localisation: Non-singular values in overlap matrix - basis likely too large.")
+        #if n_bad_vals > 0:
+        #    raise Exception("Error in spade_localisation: Non-singular values in overlap matrix - basis likely too large.")
 
         mask_val = [val for (val, good_val) in zip(mask_val, rank) if good_val]
+        #mask_val = [val for val in mask_val]
 
         max_occ_state = np.count_nonzero(occ_mat)
         evecs_occ = evecs[:, :max_occ_state]
@@ -630,14 +634,14 @@ class ProjectionEmbedding(EmbeddingBase):
                                                             densmat_A_LL,
                                                             overlap,
                                                             self.truncate_basis_thresh)
-            basis_info = self.set_truncation_defaults(self.AB_LL, basis_mask)
+            self.basis_info = self.set_truncation_defaults(self.AB_LL, basis_mask)
 
             self.AB_LL.truncate = False
             self.A_LL.truncate = True
             self.A_HL.truncate = True
             self.A_HL_PP.truncate = True
         else:
-            basis_info = self.set_basis_info(self.AB_LL)
+            self.basis_info = self.set_basis_info(self.AB_LL)
             self.AB_LL.truncate = False
             self.A_LL.truncate = False
             self.A_HL.truncate = False
@@ -647,10 +651,10 @@ class ProjectionEmbedding(EmbeddingBase):
             self.AB_LL_PP.truncate = False
             self.AB_LL_PP.basis_info = basis_info
 
-        self.AB_LL.basis_info = basis_info
-        self.A_LL.basis_info = basis_info
-        self.A_HL.basis_info = basis_info
-        self.A_HL_PP.basis_info = basis_info
+        self.AB_LL.basis_info = self.basis_info
+        self.A_LL.basis_info = self.basis_info
+        self.A_HL.basis_info = self.basis_info
+        self.A_HL_PP.basis_info = self.basis_info
 
         # Calculates the electron count for the combined (A+B) and separated 
         # subsystems (A and B).
