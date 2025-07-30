@@ -363,11 +363,7 @@ class ProjectionEmbedding(EmbeddingBase):
     def __init__(self, atoms, embed_mask, calc_base_ll, calc_base_hl,
                  total_charge=0, post_scf=None, total_energy_corr="1storder",
                  truncate_basis_thresh=None, localisation='SPADE', projection="level-shift",
-<<<<<<< HEAD
-                 mu_val=1.e+06, run_dir="./EmbASI_calc"):
-=======
                  mu_val=1.e+06, parallel=False, gc=True, run_dir="./EmbASI_calc"):
->>>>>>> origin/SCALAPACK_SPADE
 
         from copy import copy, deepcopy
         from mpi4py import MPI
@@ -382,12 +378,8 @@ class ProjectionEmbedding(EmbeddingBase):
             raise Exception("Invalid entry for total_energy_corr: use '1storder' or 'nonscf' ")
 
         super(ProjectionEmbedding, self).__init__(atoms, embed_mask,
-<<<<<<< HEAD
-                                                  calc_base_ll, calc_base_hl, run_dir=run_dir)
-=======
                                                   calc_base_ll, calc_base_hl,
                                                   run_dir=run_dir)
->>>>>>> origin/SCALAPACK_SPADE
 
         self.localisation = localisation
         if self.localisation == "SPADE":
