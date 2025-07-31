@@ -2,6 +2,9 @@
 from abc import ABC, abstractmethod
 from embasi.parallel_utils import root_print
 import time
+import sys
+sys.path.insert(1,"/home/dchen/Downloads/DChen_EmbASI/")
+from embasi.write_aims import AimsTemplate as AimsTemplateS
 import numpy as np
 
 class EmbeddingBase(ABC):
@@ -70,9 +73,10 @@ class EmbeddingBase(ABC):
         from .atoms_embedding_asi import AtomsEmbed
         import os
 
+
         outdir_name = os.path.join(self.run_dir, layer_name)
 
-        layer = AtomsEmbed(atoms, calc, embed_mask, outdir=outdir_name, 
+        layer = AtomsEmbed(atoms, calc, embed_mask, outdir=outdir_name,
                            ghosts=ghosts, no_scf=no_scf)
         setattr(self, layer_name, layer)
 
