@@ -45,7 +45,7 @@ class EmbeddingBase(ABC):
             root_print(f"Directory {self.run_dir} can not be created")
 
     def set_layer(self, atoms, layer_name, calc, embed_mask, ghosts=0, 
-                      no_scf=False):
+                      no_scf=False, ctxt_tag=None, descr_tag=None):
         """Sets an AtomsEmbed object as an attribute
 
         Creates an AtomsEmbed object as a named attribute (layer_name) of 
@@ -74,7 +74,8 @@ class EmbeddingBase(ABC):
         outdir_name = os.path.join(self.run_dir, layer_name)
 
         layer = AtomsEmbed(atoms, calc, embed_mask, outdir=outdir_name, 
-                           ghosts=ghosts, no_scf=no_scf)
+                           ghosts=ghosts, no_scf=no_scf, descr_tag=descr_tag,
+                           ctxt_tag=ctxt_tag)
         setattr(self, layer_name, layer)
 
     def select_atoms_basis_truncation(self, atomsembed, densmat, overlap, thresh):
@@ -381,6 +382,10 @@ class ProjectionEmbedding(EmbeddingBase):
                                                   calc_base_ll, calc_base_hl,
                                                   run_dir=run_dir)
 
+        # Determines whether arrays will be communicated in parallel
+        self.parallel = parallel
+        self.gc = gc
+
         self.localisation = localisation
         if self.localisation == "SPADE":
             self.calculator_ll.parameters['qm_embedding_mo_localise']=".false."
@@ -410,20 +415,45 @@ class ProjectionEmbedding(EmbeddingBase):
         if self.total_energy_corr == "nonscf":
             low_level_calculator_3 = deepcopy(self.calculator_ll)
 
+        # Determines the BLACS context and descriptors used for the communication
+        # and storage of arrays in the NPScal registry structure
+        if self.parallel:
+            supersys_ctxt_tag = "main"
+            subsys_ctxt_tag = "main"
+            supersys_descr_tag = "supersystem"
+            subsys_descr_tag = "subsystem"
+        else:
+            supersys_ctxt_tag = None
+            subsys_ctxt_tag = None
+            supersys_descr_tag = None
+            subsys_descr_tag = None
+
+        # Add AtomEmbedding objects assigned to each stage of the Projection
+        # embedding workflow, where:
+        # AB_LL:    Low-level supersystem reference
+        # A_LL:     Low-level subsystem reference
+        # A_HL:     High-level subsystem reference, w/ embedding pot
+        # A_HL_PP:  High-level subsystem reference, post-processed w/o embedding pot
         low_level_calculator_1.parameters['qm_embedding_calc'] = 1
         self.set_layer(atoms, "AB_LL", low_level_calculator_1, 
-                       embed_mask, ghosts=0, no_scf=False)
+                       embed_mask, ghosts=0, no_scf=False,
+                       ctxt_tag=supersys_ctxt_tag,
+                       descr_tag=supersys_descr_tag)
         self.AB_LL.input_total_charge = total_charge
 
         low_level_calculator_2.parameters['qm_embedding_calc'] = 2
         low_level_calculator_2.parameters['charge_mix_param'] = 0.
         low_level_calculator_2.parameters['sc_iter_limit'] = 0
         self.set_layer(atoms, "A_LL", low_level_calculator_2,
-                       embed_mask, ghosts=2, no_scf=False)
+                       embed_mask, ghosts=2, no_scf=False,
+                       ctxt_tag=subsys_ctxt_tag,
+                       descr_tag=subsys_descr_tag)
 
         high_level_calculator_1.parameters['qm_embedding_calc'] = 3
         self.set_layer(atoms, "A_HL", high_level_calculator_1,
-                       embed_mask, ghosts=2, no_scf=False)
+                       embed_mask, ghosts=2, no_scf=False,
+                       ctxt_tag=subsys_ctxt_tag,
+                       descr_tag=subsys_descr_tag)
 
         high_level_calculator_2.parameters['qm_embedding_calc'] = 2
         high_level_calculator_2.parameters['charge_mix_param'] = 0.
@@ -431,22 +461,23 @@ class ProjectionEmbedding(EmbeddingBase):
         if "total_energy_method" in high_level_calculator_2.parameters:
             high_level_calculator_2.parameters['total_energy_method'] = high_level_calculator_2.parameters["xc"]
         self.set_layer(atoms, "A_HL_PP", high_level_calculator_2,
-                       embed_mask, ghosts=2, no_scf=False)
+                       embed_mask, ghosts=2, no_scf=False,
+                       ctxt_tag=subsys_ctxt_tag,
+                       descr_tag=subsys_descr_tag)
 
         if self.total_energy_corr == "nonscf":
             low_level_calculator_3.parameters['qm_embedding_calc'] = 2
             low_level_calculator_3.parameters['charge_mix_param'] = 0.
             self.set_layer(atoms, "AB_LL_PP", low_level_calculator_3,
-                           embed_mask, ghosts=0, no_scf=False)
+                           embed_mask, ghosts=0, no_scf=False,
+                           ctxt_tag=supersys_ctxt_tag,
+                           descr_tag=supersys_descr_tag)
             self.AB_LL.input_total_charge = total_charge
 
         self.mu_val = mu_val
         self.rank = MPI.COMM_WORLD.Get_rank()
         self.ntasks = MPI.COMM_WORLD.Get_size()
         self.truncate_basis_thresh = truncate_basis_thresh
-
-        self.parallel = parallel
-        self.gc = gc
 
     def calculate_levelshift_projector(self, densmat, overlap):
         """Calculates level-shift projection operator

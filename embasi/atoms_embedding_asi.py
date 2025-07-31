@@ -41,11 +41,25 @@ class AtomsEmbed():
     """
 
     def __init__(self, atoms, initial_calc, embed_mask, ghosts=0,
-                 outdir='asi.calc', no_scf=False):
+                 outdir='asi.calc', no_scf=False, ctxt_tag=None,
+                 descr_tag=None):
+
         self.atoms = atoms.copy()
         self.initial_embed_mask = embed_mask
         self.outdir = outdir
 
+        # Determines whether arrays are to be communicated in serial,
+        # or as BLACS distributed arrays from a globally stored context
+        # provided by NPScal
+        if (ctxt_tag is None) and (descr_tag is None):
+            self.parallel = True
+            self.blacs_ctxt_tag = ctxt_tag
+            self.blacs_descr_tag = descr_tag
+        else:
+            self.parallel = False
+            self.blacs_ctxt_tag = None
+            self.blacs_descr_tag = None
+            
         if isinstance(embed_mask, int):
             # We hope the user knows what they are doing and
             # their atoms object is ordered accordingly.
@@ -340,7 +354,6 @@ class AtomsEmbed():
         self.atoms.calc.asi.register_hamiltonian_callback(0, 0)
         self.atoms.calc.asi.register_set_hamiltonian_callback(0, 0)
         self.atoms.calc.asi.register_modify_hamiltonian_callback(0, 0)
-        self.parallel = True
 
         # Register the relevant callbacks
         # self.atoms.calc.asi.keep_overlap = True
@@ -348,7 +361,8 @@ class AtomsEmbed():
         self.atoms.calc.asi.register_overlap_callback(ovlp_saving_callback, 
                                                       (self.atoms.calc.asi, 
                                                        self.atoms.calc.asi.overlap_storage,
-                                                       self.parallel,
+                                                       self.blacs_ctxt_tag,
+                                                       self.blacs_descr_tag,
                                                        'Ovlp calc'))
 
 
@@ -359,7 +373,8 @@ class AtomsEmbed():
                                                  (self.atoms.calc.asi, 
                                                   self.atoms.calc.asi.dm_storage, 
                                                   self.atoms.calc.asi.dm_calc_cnt,
-                                                  self.parallel,
+                                                  self.blacs_ctxt_tag,
+                                                  self.blacs_descr_tag,
                                                   'DM calc'))
 
         self.atoms.calc.asi.ham_storage = {}
@@ -369,21 +384,24 @@ class AtomsEmbed():
                                                           (self.atoms.calc.asi,
                                                            self.atoms.calc.asi.ham_storage,
                                                            self.atoms.calc.asi.ham_calc_cnt,
-                                                           self.parallel,
+                                                           self.blacs_ctxt_tag,
+                                                           self.blacs_descr_tag,
                                                            'Ham calc'))
 
         if self.density_matrix_in is not None:
             self.atoms.calc.asi.register_DM_init(matrix_loading_callback,
                                                  (self.atoms.calc.asi,
                                                  {(1,1): self.density_matrix_in},
-                                                 self.parallel,
+                                                 self.blacs_ctxt_tag,
+                                                 self.blacs_descr_tag,
                                                  'DM init'))
 
         if self.fock_embedding_matrix is not None:
             self.atoms.calc.asi.register_modify_hamiltonian_callback(matrix_loading_callback,
                                                                      (self.atoms.calc.asi,
                                                                      {(1,1): self.fock_embedding_matrix},
-                                                                     self.parallel,
+                                                                     self.blacs_ctxt_tag,
+                                                                     self.blacs_descr_tag,
                                                                      'Modify H'))
 
         E0 = self.atoms.get_potential_energy()
