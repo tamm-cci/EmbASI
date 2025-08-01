@@ -1,6 +1,7 @@
 from asi4py.asecalc import ASI_ASE_calculator
 from embasi.parallel_utils import root_print, mpi_bcast_matrix_storage, \
     mpi_bcast_integer
+import npscal.math_utils.operations as op
 import numpy as np
 from mpi4py import MPI
 
@@ -52,13 +53,13 @@ class AtomsEmbed():
         # or as BLACS distributed arrays from a globally stored context
         # provided by NPScal
         if (ctxt_tag is None) and (descr_tag is None):
-            self.parallel = True
-            self.blacs_ctxt_tag = ctxt_tag
-            self.blacs_descr_tag = descr_tag
-        else:
             self.parallel = False
             self.blacs_ctxt_tag = None
             self.blacs_descr_tag = None
+        else:
+            self.parallel = True
+            self.blacs_ctxt_tag = ctxt_tag
+            self.blacs_descr_tag = descr_tag
             
         if isinstance(embed_mask, int):
             # We hope the user knows what they are doing and
@@ -376,7 +377,7 @@ class AtomsEmbed():
                                                   self.blacs_ctxt_tag,
                                                   self.blacs_descr_tag,
                                                   'DM calc'))
-
+        
         self.atoms.calc.asi.ham_storage = {}
         self.atoms.calc.asi.ham_calc_cnt = {}
         self.atoms.calc.asi.ham_count = 0
@@ -434,11 +435,6 @@ class AtomsEmbed():
         self.atoms.calc.asi.close()
         MPI.COMM_WORLD.Barrier()
 
-        dm = self.atoms.calc.asi.dm_storage.get((1,1,1))
-        ovlp = self.atoms.calc.asi.overlap_storage.get((1,1,1))
-
-        from npscal.index_utils.npscal_select import diag
-
         self.extract_results()
 
         # Within the embedding workflow, we often want to calculate the total 
@@ -465,12 +461,12 @@ class AtomsEmbed():
             if self.truncate:
                 # @TODONPSCAL: REPLACE NP DIRECTIVE
                 self.ev_corr_energy = \
-                    27.211384500 * np.trace(self.density_matrix_in @ 
+                    27.211384500 * op.trace(self.density_matrix_in @ 
                                         self.full_mat_to_truncated(self.hamiltonian_total))
             else:
                 # @TODONPSCAL: REPLACE NP DIRECTIVE
                 self.ev_corr_energy = \
-                    27.211384500 * np.trace(self.density_matrix_in @
+                    27.211384500 * op.trace(self.density_matrix_in @
                                             self.hamiltonian_total)
 
             self.ev_corr_total_energy = \
@@ -572,10 +568,11 @@ class AtomsEmbed():
     @fock_embedding_matrix.setter
     def fock_embedding_matrix(self, inp_fock_embedding_mat):
 
-        if (not isinstance(inp_fock_embedding_mat, (np.ndarray)) and 
-            (inp_fock_embedding_mat is not None)):
+        #if (not ( isinstance(inp_fock_embedding_mat, (np.ndarray)) or 
+        #    (inp_fock_embedding_mat is None) or
+        #    (type(inp_fock_embedding_mat) == NPScal))):
 
-            raise TypeError("Input vemb needs to be np.ndarray of dimensions nbasis*nbasis.")
+        #    raise TypeError("Input vemb needs to be np.ndarray of dimensions nbasis*nbasis.")
 
         if ((inp_fock_embedding_mat is not None) and (self.truncate)):
             inp_fock_embedding_mat = self.full_mat_to_truncated(inp_fock_embedding_mat)

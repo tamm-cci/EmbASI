@@ -37,15 +37,14 @@ def dm_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
 
     """
     try:
-        asi, storage_dict, cnt_dict, ctxt_tag, blacs_tag, label = cast(aux, py_object).value
+        asi, storage_dict, cnt_dict, ctxt_tag, descr_tag, label = cast(aux, py_object).value
 
         if asi.is_hamiltonian_real:
             data_shape = (asi.n_basis,asi.n_basis)
         else:
-            data_shape = (asi.n_basis,asi.n_basis, 2)        
-
+            data_shape = (asi.n_basis,asi.n_basis, 2)
         if (matrix_descr_ptr.contents.storage_type not in {1,2}):
-            if ((ctxt_tag is None) and (blacs_tag is None)):
+            if ((ctxt_tag is None) and (descr_tag is None)):
                 data = asi.scalapack.gather_numpy(descr, data, data_shape)
             else:
                 if not(CTXT_Register.check_register(ctxt_tag)):
@@ -115,9 +114,8 @@ def ovlp_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
             data_shape = (asi.n_basis,asi.n_basis)
         else:
             data_shape = (asi.n_basis,asi.n_basis, 2)
-
         if (matrix_descr_ptr.contents.storage_type not in {1,2}):
-            if ((ctxt_tag is None) and (blacs_tag is None)):
+            if ((ctxt_tag is None) and (descr_tag is None)):
                 data = asi.scalapack.gather_numpy(descr, data, data_shape)
             else:
                 if not(CTXT_Register.check_register(ctxt_tag)):
@@ -146,7 +144,7 @@ def ovlp_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
 
         if data is not None:
             #assert len(data.shape) == 2
-            storage_dict[(1, iK, iS)] = data.copy()
+            storage_dict[(iK, iS)] = data.copy()
     except Exception as eee:
         print(f"""Something happened in ASI default_saving_callback 
                   {label}: {eee}\nAborting...""")
@@ -163,7 +161,7 @@ def ham_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
 
     Code derived from the default saving callback from asi4py
 
-    Parameters
+      Parameters
     ----------
     aux: Object
         Auxiliary object passed to callback 
@@ -179,7 +177,6 @@ def ham_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
         Numerical value indexing matrix shape (See: ASI docs)
 
     """
-
     try:
         asi, storage_dict, cnt_dict, ctxt_tag, descr_tag, label = cast(aux, py_object).value
         
@@ -190,7 +187,7 @@ def ham_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
 
         # ASI_STORAGE_TYPE_TRIL,ASI_STORAGE_TYPE_TRIU
         if (matrix_descr_ptr.contents.storage_type not in {1,2}):
-            if ((ctxt_tag is None) and (blacs_tag is None)):
+            if ((ctxt_tag is None) and (descr_tag is None)):
                 data = asi.scalapack.gather_numpy(descr, data, data_shape)
             else:
                 if not(CTXT_Register.check_register(ctxt_tag)):
@@ -267,7 +264,6 @@ def matrix_loading_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
             m = storage_dict[(iK, iS)] if asi.scalapack.is_root(descr) else None
         else:
             m = storage_dict[(iK, iS)]
-
 
         # ASI_STORAGE_TYPE_TRIL,ASI_STORAGE_TYPE_TRIU
         if (matrix_descr_ptr.contents.storage_type not in {1,2}):
