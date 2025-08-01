@@ -5,6 +5,7 @@ import os
 
 def invsqr_overlap_calc(overlap):
 
+    # @TODONPSCAL: REPLACE NP DIRECTIVE
     sigma, U = np.linalg.eigh(overlap)
     sigma_sqrt = np.diag(sigma**(-0.5))
 
@@ -38,6 +39,7 @@ def calculate_densmat(eigenvectors, occ_mat):
     import copy
 
     occ_evecs = copy.deepcopy(eigenvectors)
+    # @TODONPSCAL: FIGURE OUT HOW THIS IS DONE LOCALLY
     for idx in range(np.size(occ_mat)):
         occ_evecs[:,idx] = occ_evecs[:,idx] * np.sqrt(occ_mat[idx])
 
@@ -48,8 +50,10 @@ def overlap_illcondition_check_parallel(overlap, thresh, inv=True, return_mask=F
     from scipy.linalg import eig_banded, eigh
     from embasi.parallel_utils import root_print
 
+    # @TODONPSCAL: REPLACE WITH GLOBAL SHAPE
     n_basis = np.shape(overlap)[0]
 
+    # @TODONPSCAL: REPLACE ARGUMENT WITH NPSCAL
     ovlp_evals, ovlp_evecs = pdsyevx_from_numpy_array(overlap, n_basis, vl=thresh, vu=100000)
 
     # Count non-singular values
@@ -60,6 +64,7 @@ def overlap_illcondition_check_parallel(overlap, thresh, inv=True, return_mask=F
 
     if n_bad > 0:
         # Transform overlap matrix
+        # @TODONPSCAL: FIGURE OUT HOW THIS IS DONE LOCALLY
         ovlp_filtered = ovlp_evecs[:, good_val_mask]
         evals_filtered = ovlp_evals[good_val_mask]
 
@@ -67,14 +72,18 @@ def overlap_illcondition_check_parallel(overlap, thresh, inv=True, return_mask=F
             sqrt_ev = np.sqrt(evals_filtered[idx])
 
             if inv:
+                # @TODONPSCAL: FIGURE OUT HOW THIS IS DONE LOCALLY
                 ovlp_filtered[:, idx] = ovlp_filtered[:, idx]/sqrt_ev
             else:
+                # @TODONPSCAL: FIGURE OUT HOW THIS IS DONE LOCALLY
                 ovlp_filtered[:, idx] = ovlp_filtered[:, idx]*sqrt_ev
 
     else:
         if inv:
+            # @TODONPSCAL: REPLACE NUMPY DIRECTIVE
             sigma_sqrt = np.diag(ovlp_evals**(-0.5))
         else:
+            # @TODONPSCAL: REPLACE NUMPY DIRECTIVE
             sigma_sqrt = np.diag(ovlp_evals**(0.5))
 
         ovlp_filtered = ovlp_evecs @ sigma_sqrt @ ovlp_evecs.T
@@ -88,16 +97,13 @@ def hamiltonian_eigensolv_parallel(hamiltonian, overlap, nelec, return_orthog=Fa
 
     from embasi.parallel_utils import root_print
 
-    overlap_dist = mpi_bcast_matrix(overlap)
-
     thresh = 1e-5
+    # @TODONPSCAL: REPLACE WITH GLOBAL ARRAY INDEXING
     n_basis = np.shape(overlap)[0]
     xform_mat, n_bad = overlap_illcondition_check_parallel(overlap, thresh)
     n_good = n_basis - n_bad
 
     evals, evecs = pdsyevx_from_numpy_array(xform_hamiltonian(hamiltonian, xform_mat), n_good)
-
-    evecs = mpi_bcast_matrix(evecs)
 
     if return_orthog:
         evals, evecs = sort_eigvals_and_evecs(evals, evecs)
@@ -113,20 +119,7 @@ def hamiltonian_eigensolv_parallel(hamiltonian, overlap, nelec, return_orthog=Fa
 
         return evals, evecs, occ_mat
 
-def find_squarest_grid(ntasks):
-
-    factors = []
-    for factor in np.arange(1,int(ntasks/2)):
-        if ntasks%factor == 0:
-            factors.append( [int(factor),int(ntasks/factor)] )
-
-    factors = np.array(factors)
-    diffs = factors[:,0] - factors[:,1]
-
-    idx = np.argwhere(diffs==np.min(np.abs(diffs)))
-    return factors[idx][0][0][0], factors[idx][0][0][1]
-
-def pdsyevx_from_numpy_array(array, global_array_size, vl=None, vu=None):
+def pdsyevx_from_numpy_array(array, vl=None, vu=None):
 
     from scalapack4py import ScaLAPACK4py
     from ctypes import CDLL, POINTER, c_int

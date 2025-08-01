@@ -463,10 +463,12 @@ class AtomsEmbed():
         # set of KS-eigenvectors resulting from the DFT code.
         if ev_corr_scf:
             if self.truncate:
+                # @TODONPSCAL: REPLACE NP DIRECTIVE
                 self.ev_corr_energy = \
                     27.211384500 * np.trace(self.density_matrix_in @ 
                                         self.full_mat_to_truncated(self.hamiltonian_total))
             else:
+                # @TODONPSCAL: REPLACE NP DIRECTIVE
                 self.ev_corr_energy = \
                     27.211384500 * np.trace(self.density_matrix_in @
                                             self.hamiltonian_total)

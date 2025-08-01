@@ -110,6 +110,7 @@ class EmbeddingBase(ABC):
         
         """
 
+        # @TODONPSCAL: REPLACE DIRECTIVE
         basis_charge = np.diag(densmat @ overlap)
         atomic_charge = np.zeros(len(atomsembed.atoms))
 
@@ -241,6 +242,7 @@ class EmbeddingBase(ABC):
 
         """
 
+        # @TODONPSCAL: REPLACE DIRECTIVE
         population = np.trace(overlap_matrix @ (density_matrix))
 
         return population
@@ -551,6 +553,7 @@ class ProjectionEmbedding(EmbeddingBase):
 
         max_occ_state = np.count_nonzero(occ_mat)
         evecs_occ = evecs[:, :max_occ_state]
+        # @TODONPSCAL: FIGURE OUT HOW THIS ACTUALLY WORKS
         evecs_occ_a = evecs_occ[mask_val, :]
 
         if self.parallel:
@@ -565,11 +568,17 @@ class ProjectionEmbedding(EmbeddingBase):
 
         evecs_occ_a = xform_mat @ evecs_occ @ v.T[:, :max_sval_change_idx]
         evecs_occ_ab = xform_mat @ evecs_occ
+        # @TODOSPIN: Need to redefine occupancies
+        density_matrix_supersystem = 2.0 * (evecs_occ_ab @ evecs_occ_ab.T)
+        density_matrix_subsys_a = 2.0 * (evecs_occ_a @ evecs_occ_a.T)
 
-        density_matrix_supersystem = mpi_bcast_matrix(2.0 * (evecs_occ_ab @ evecs_occ_ab.T))
-        density_matrix_subsys_a = mpi_bcast_matrix(2.0 * (evecs_occ_a @ evecs_occ_a.T))
+        if self.parallel:
+            density_matrix_supersystem = mpi_bcast_matrix(density_matrix_supersystem)
+            density_matrix_subsys_a = mpi_bcast_matrix(density_matrix_subsys_a)
+
         density_matrix_subsys_b = density_matrix_supersystem - density_matrix_subsys_a
 
+        # @TODONPSCAL: REPLACE DIRECTIVE
         root_print(f'SPADE total supersystem A+B charge: {np.trace(overlap @ density_matrix_supersystem)}')
         root_print(f'SPADE localised subsystem A charge: {np.trace(overlap @ density_matrix_subsys_a)}')
         root_print(f'SPADE localised subsystem B charge: {np.trace(overlap @ density_matrix_subsys_b)}')
@@ -626,7 +635,6 @@ class ProjectionEmbedding(EmbeddingBase):
         import numpy as np
         import tracemalloc
         tracemalloc.start(50)
-
 
         root_print("Embedding calculation begun...")
 
@@ -806,6 +814,7 @@ class ProjectionEmbedding(EmbeddingBase):
             self.time_ab_lowlevel_pp = end - start
 
         # Calculate projected density correction to total energy
+        # @TODONPSCAL: REPLACE DIRECTIVE
         self.PB_corr = \
             (np.trace(self.P_b @ densmat_A_HL) * 27.211384500)
 
@@ -814,6 +823,7 @@ class ProjectionEmbedding(EmbeddingBase):
                 self.A_HL.post_scf_corr_energy - self.A_HL.dft_energy
 
         if self.total_energy_corr == "1storder":
+            # @TODONPSCAL: REPLACE DIRECTIVE
             self.order_1_embedding_corr = np.trace((densmat_A_HL - densmat_A_LL) @ \
                                         (self.vemb)) * 27.211384500
 
