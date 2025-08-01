@@ -39,21 +39,10 @@ try:
 except:
     pass
 
+#/home/dchen/Software/FHIaims/species_defaults/defaults_2020/light/00_Emptium_default
+os.environ["FHI_AIMS_PATH"] = "/home/dchen/Software/FHIaims"
+
 v_unit = Ang / (1000.0 * fs)
-
-class MultipoleAtoms:
-    def __init__(self):
-        self.coordinates = []
-        self.charge = [2,1,2,2,2,1,2,1,2,2,2,1]
-
-    def add_coordinates(self, coordinates):
-        self.coordinates.append(coordinates)
-
-    def write_aims(self):
-        pass
-
-    def _amend_attributes(self, key, value):
-        setattr(MultipoleAtoms, self.key, self.value)
 
 def write_species(control_file_descriptor, species_basis_dict, parameters):
     """Write species for the calculation depending on basis set size.
@@ -321,22 +310,11 @@ def write_aims_embasi(fd,atoms, cycle, scaled=False,geo_constrain=False,write_ve
 
         MultipoleAtoms = atoms.info["multipole-charges"]
 
-        fd2 = open(fd,"r")
-        s3 = fd2.readlines()
-        fd2.close()
-        s3 = s3[6:]
-
         fd = open(fd, "a")
-        s = 0
 
-        for item in s3:
-            item = item.split()
-            if item[0] == "atom" or item[0] == "empty":
-                fd.write(f"multipole {item[1]} {item[2]} {item[3]} {MultipoleAtoms.charge[s]}\n")
-                fd.write(f"empty {item[1]} {item[2]} {item[3]} Emptium\n")
-                s += 1
-
-
+        for item,v in zip(MultipoleAtoms.coordinates,MultipoleAtoms.charge):
+            fd.write(f"multipole {item[0]} {item[1]} {item[2]} 0 {v}\n")
+            fd.write(f"empty {item[0]} {item[1]} {item[2]} Emptium\n")
         fd.close()
 
 
@@ -488,8 +466,22 @@ class AimsTemplate(CalculatorTemplate):
         ):
             parameters['species_dir'] = profile.default_species_directory
 
-        print(atoms.symbols)
         write_control(control, atoms, parameters)
+
+        try:
+            dir = os.environ["FHI_AIMS_PATH"] + "/species_defaults/defaults_2020/light/00_Emptium_default"
+            atoms.info["multipole-charges"]
+            with open(control, "a") as f:
+                with open(dir,"r") as f2:
+                    f23 = f2.read()
+                    f2.close()
+                f.write(f23)
+            f.close()
+        except:
+            import traceback
+            print(traceback.format_exc())
+
+
 
 
 
