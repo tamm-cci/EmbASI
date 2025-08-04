@@ -350,6 +350,7 @@ class AtomsEmbed():
         # Explicitly set function pointers to NULL to avoid
         # previously set function pointers from passing into
         # the present calculation.
+        self.atoms.calc.asi.register_overlap_callback(0, 0)
         self.atoms.calc.asi.register_dm_callback(0, 0)
         self.atoms.calc.asi.register_DM_init(0, 0)
         self.atoms.calc.asi.register_hamiltonian_callback(0, 0)
@@ -638,7 +639,7 @@ class AtomsEmbed():
         """Overlap matrix of nbasisxnbasis
 
         """
-        return self.atoms.calc.asi.overlap_storage[1,1]
+        return self.atoms.calc.asi.overlap_storage.get((1,1))
 
     @property
     def basis_atoms(self):

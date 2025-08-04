@@ -398,8 +398,8 @@ class ProjectionEmbedding(EmbeddingBase):
             self.calculator_hl.parameters['qm_embedding_mo_localise']=".true."
         else:
             raise Exception("Invalid entry for localisation: use 'SPADE' or 'qmcode' ")
-        self.calculator_ll.parameters['override_default_empty_basis_order']=".true."
-        self.calculator_hl.parameters['override_default_empty_basis_order']=".true."
+        #self.calculator_ll.parameters['override_default_empty_basis_order']=".true."
+        #self.calculator_hl.parameters['override_default_empty_basis_order']=".true."
 
         self.projection = projection
         if self.projection == "level-shift":
@@ -512,12 +512,12 @@ class ProjectionEmbedding(EmbeddingBase):
 
         """
         from embasi.roothan_hall_eigensolver import hamiltonian_eigensolv, calculate_densmat, overlap_illcondition_check
-        from embasi.roothan_hall_eigensolver_scalapack import hamiltonian_eigensolv_parallel, pdgesvd_from_numpy_array, overlap_illcondition_check_parallel, pdsyevx_from_numpy_array
+        from embasi.roothan_hall_eigensolver_scalapack import hamiltonian_eigensolv_parallel, overlap_illcondition_check_parallel
+        from npscal.math_utils.npscal2npscal import eig, svd
         from embasi.parallel_utils import mpi_bcast_matrix
         import copy
 
         root_print('Starting SPADE localisation...')
-
         nelecs = atomsembed.free_atom_nelectrons - atomsembed.input_total_charge
         if self.parallel:
             evals, evecs, occ_mat, xform_mat = hamiltonian_eigensolv_parallel(hamiltonian, \
@@ -536,30 +536,29 @@ class ProjectionEmbedding(EmbeddingBase):
                 mask_val.append(True)
             else:
                 mask_val.append(False)
-        
+
         mask_val = np.array(mask_val)
 
-        if self.parallel:
-            u, sval, v = pdgesvd_from_numpy_array(overlap)
-        else:
-            u, sval, v = np.linalg.svd(overlap, full_matrices=True)
+        #if self.parallel:
+        #    u, sval, v = svd(overlap)
+        #else:
+        #    u, sval, v = np.linalg.svd(overlap, full_matrices=True)
 
-        rank = sval > 1e-5
-        n_bad_vals = np.count_nonzero([not val for val in rank])
+        #rank = sval > 1e-5
+        #n_bad_vals = np.count_nonzero([not val for val in rank])
 
         #if n_bad_vals > 0:
         #    raise Exception("Error in spade_localisation: Non-singular values in overlap matrix - basis likely too large.")
 
-        mask_val = [val for (val, good_val) in zip(mask_val, rank) if good_val]
+        #mask_val = [val for (val, good_val) in zip(mask_val, rank) if good_val]
         #mask_val = [val for val in mask_val]
 
         max_occ_state = np.count_nonzero(occ_mat)
         evecs_occ = evecs[:, :max_occ_state]
-        # @TODONPSCAL: FIGURE OUT HOW THIS ACTUALLY WORKS
         evecs_occ_a = evecs_occ[mask_val, :]
 
         if self.parallel:
-            u, svals, v = pdgesvd_from_numpy_array(evecs_occ_a)
+            u, svals, v = svd(evecs_occ_a)
         else:
             u, svals, v = np.linalg.svd(evecs_occ_a, full_matrices=True)
 
@@ -567,19 +566,18 @@ class ProjectionEmbedding(EmbeddingBase):
         max_sval_change_idx = np.argmax(np.abs(svals_diff)) + 1
 
         root_print(f'Maximum SPADE state for subsystem A: {max_sval_change_idx}')
-
-        evecs_occ_a = xform_mat @ evecs_occ @ v.T[:, :max_sval_change_idx]
+        evecs_occ_a = xform_mat @ evecs_occ @ v[:max_sval_change_idx, :].T
         evecs_occ_ab = xform_mat @ evecs_occ
-        # @TODOSPIN: Need to redefine occupancies
-        density_matrix_supersystem = 2.0 * (evecs_occ_ab @ evecs_occ_ab.T)
-        density_matrix_subsys_a = 2.0 * (evecs_occ_a @ evecs_occ_a.T)
 
-        if self.parallel:
+        # @TODOSPIN: Need to redefine occupancies
+        density_matrix_supersystem = 2.0 * (evecs_occ_ab @ evecs_occ_ab.copy().T)
+        density_matrix_subsys_a = 2.0 * (evecs_occ_a @ evecs_occ_a.copy().T)
+
+        if not(self.parallel):
             density_matrix_supersystem = mpi_bcast_matrix(density_matrix_supersystem)
             density_matrix_subsys_a = mpi_bcast_matrix(density_matrix_subsys_a)
 
         density_matrix_subsys_b = density_matrix_supersystem - density_matrix_subsys_a
-
         # @TODONPSCAL: REPLACE DIRECTIVE
         root_print(f'SPADE total supersystem A+B charge: {op.trace(overlap @ density_matrix_supersystem)}')
         root_print(f'SPADE localised subsystem A charge: {op.trace(overlap @ density_matrix_subsys_a)}')
@@ -650,9 +648,12 @@ class ProjectionEmbedding(EmbeddingBase):
         end = time.time()
         self.time_ab_lowlevel = end - start
 
-        overlap = copy.copy(self.AB_LL.overlap)
-        hamiltonian_AB_total = copy.copy(self.AB_LL.hamiltonian_total)
-        AB_hamiltonian_estat_plus_xc = copy.copy(self.AB_LL.hamiltonian_estat_plus_xc)
+        #overlap = copy.copy(self.AB_LL.overlap)
+        #hamiltonian_AB_total = copy.copy(self.AB_LL.hamiltonian_total)
+        #AB_hamiltonian_estat_plus_xc = copy.copy(self.AB_LL.hamiltonian_estat_plus_xc)
+        overlap = self.AB_LL.overlap
+        hamiltonian_AB_total = self.AB_LL.hamiltonian_total
+        AB_hamiltonian_estat_plus_xc = self.AB_LL.hamiltonian_estat_plus_xc
 
         # Read the localised density matrices output by the QM code or
         # perform SPADE localisation on the wrapper level.
@@ -662,7 +663,10 @@ class ProjectionEmbedding(EmbeddingBase):
             if self.gc:
                 root_print(f"Pre-GC AB_LL: {tracemalloc.get_traced_memory()}")
                 self.AB_LL.garbage_collect()
+            start = time.time()
             densmat_A_LL, densmat_B_LL = self.spade_localisation(self.AB_LL, hamiltonian_AB_total, overlap)
+            end = time.time()
+            self.time_spade = end - start
         else:
             densmat_A_LL = self.AB_LL.density_matrices_out[0]
             densmat_B_LL = self.AB_LL.density_matrices_out[1]
@@ -843,6 +847,13 @@ class ProjectionEmbedding(EmbeddingBase):
         root_print(f" Population of Subsystem A: {self.A_pop}")
         root_print(f" Population of Subsystem B: {self.B_pop}")
         root_print(f" ")
+        root_print( f" ----------- TIMING    INFORMATION --------- " )
+        if self.localisation == "SPADE":
+            root_print(f" Total time: {self.time_a_lowlevel + self.time_ab_lowlevel + self.time_a_highlevel + self.time_a_highlevel_pp + self.time_spade} s")
+        else:
+            root_print(f" Total time: {self.time_a_lowlevel + self.time_ab_lowlevel + self.time_a_highlevel + self.time_a_highlevel_pp} s")
+        root_print(f" Peak memory usage: {tracemalloc.get_traced_memory()[1]/(1024*1024)} MB")        
+        root_print( f" ------------------------------------------- " )
         root_print(f" Intermediate Information:")
         root_print(f" WARNING: These are not faithful, ground-state KS total energies - ")
         root_print(f" In the case of low-level references, they are calculated using the ")
@@ -862,3 +873,9 @@ class ProjectionEmbedding(EmbeddingBase):
         root_print(f" " )
         root_print(f" -----------======================--------- " )
         root_print(f" " )
+
+        # And finally, now all the work is done, clear the ScaLAPACK
+        # registers in case another calculation is ran.
+        from npscal.blacs_ctxt_management import CTXT_Register, DESCR_Register
+        CTXT_Register.clear_register()
+        DESCR_Register.clear_register()

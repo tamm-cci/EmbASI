@@ -73,8 +73,7 @@ def dm_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
             
         if data is not None:
             asi.dm_count += 1
-            #assert len(data.shape) == 2
-            storage_dict[(asi.dm_count, iK, iS)] = data.copy()
+            storage_dict[(asi.dm_count, iK, iS)] = data
     except Exception as eee:
         print(f"""Something happened in ASI default_saving_callback 
                   {label}: {eee}\nAborting...""")
@@ -144,7 +143,7 @@ def ovlp_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
 
         if data is not None:
             #assert len(data.shape) == 2
-            storage_dict[(iK, iS)] = data.copy()
+            storage_dict[(iK, iS)] = data
     except Exception as eee:
         print(f"""Something happened in ASI default_saving_callback 
                   {label}: {eee}\nAborting...""")
@@ -217,12 +216,12 @@ def ham_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
             #assert len(data.shape) == 2
             if asi.ham_count < 3:
                 asi.ham_count = asi.ham_count + 1
-                storage_dict[(asi.ham_count, iK, iS)] = data.copy()
+                storage_dict[(asi.ham_count, iK, iS)] = data
             else:
                 storage_dict.pop((1, iK, iS))
                 storage_dict[(1, iK, iS)] = storage_dict[(2, iK, iS)].copy()
                 storage_dict[(2, iK, iS)] = storage_dict[(3, iK, iS)].copy()
-                storage_dict[(3, iK, iS)] = data.copy()            
+                storage_dict[(3, iK, iS)] = data
 
     except Exception as eee:
         print(f"""Something happened in ASI default_saving_callback {label}: 
@@ -261,7 +260,7 @@ def matrix_loading_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
         asi, storage_dict, ctxt_tag, descr_tag, label = cast(aux, py_object).value
 
         if ((ctxt_tag is None) and (descr_tag is None)):
-            m = storage_dict[(iK, iS)] if asi.scalapack.is_root(descr) else None
+            m = np.asfortranarray(storage_dict[(iK, iS)]) if asi.scalapack.is_root(descr) else None
         else:
             m = storage_dict[(iK, iS)]
 
