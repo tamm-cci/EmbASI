@@ -1,4 +1,5 @@
 from ase.calculators.aims import Aims, AimsProfile
+import numpy as np
 
 try:
     from embasi import ProjectionEmbedding
@@ -7,7 +8,7 @@ except (ModuleNotFoundError, ValueError):
 
 class ChemShellInterface(ProjectionEmbedding):
 
-    def __init__(self, atoms, embed_mask, mu_val=1.e+6, ll_calc_config=None, hl_calc_config=None, multipoles=None, **kwargs):
+    def __init__(self, frag, embed_mask, mu_val=1.e+6, ll_calc_config=None, hl_calc_config=None, multipoles=None, **kwargs):
 
         self.embed_mask = embed_mask
         self.mu_val = mu_val
@@ -34,11 +35,9 @@ class ChemShellInterface(ProjectionEmbedding):
 
         self.calc_ll = Aims(**self.ll_calc_config) if ll_calc_config else Aims()
         self.calc_hl = Aims(**self.hl_calc_config) if hl_calc_config else Aims()
-
+        
         self._multipoles = multipoles if multipoles else MultipoleAtoms()
-        print(self._multipoles)
-        print(self._multipoles.coords, self._multipoles.charges)
-        super().__init__(atoms=atoms, embed_mask=embed_mask,
+        super().__init__(frag, embed_mask=self.embed_mask,
             calc_base_ll=self.calc_ll, calc_base_hl=self.calc_hl, mu_val=mu_val, **kwargs)
 
     @property
@@ -101,7 +100,5 @@ class MultipoleAtoms():
                         f.write(
                         f"multipole {x:16.9f} {y:16.9f} {z:16.9f} "
                         f"{mp['order']:2d} {mp['charge']:12.8f}\n")
-                        if mp.get('region'):
-                            f.write(f"qm_embedding_region {mp['region']}\n")
             except Exception as e:
                 print(f"Error writing to {geometry_path}: {str(e)}")
