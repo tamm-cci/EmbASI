@@ -1,0 +1,127 @@
+import os,sys,typing
+from argparse import ArgumentError
+try:
+    from embasi.embedding import ProjectionEmbedding
+except ImportError:
+    current_dir = os.path.dirname(os.path.abspath(__file__))# Get the parent directory by going one level up
+    parent_dir = os.path.dirname(current_dir)
+    parent_dir2 = os.path.dirname(parent_dir)
+    sys.path.append(parent_dir2)
+    from embasi.embedding import ProjectionEmbedding
+
+#os.environ["ASI_LIB_PATH"] = "/home/dchen/Software/FHIaims/_build_lib/libaims.250711.scalapack.mpi.so"
+
+class Extrapolation:
+    """
+
+
+    Parameters
+    ----------
+    file1: str
+        Name of file which contains the first basis set
+    file2: str
+        Name of file which contains the second basis set
+    path: str
+        Name of directory which contain the basis set
+    atom: ASE Atom
+        Object of an atom, which contains information about the atom
+    embed_mask: list[int] or int
+        Assigns either the first in atoms to region 1, or an index of
+        int values 1 and 2 to each embedding layer. WARNING: The atoms
+        object will be reordered such that embedding layer 1 appear
+        first
+    calc_ll: ASE FileIOCalculator
+        Calculator object for layer 1
+    calc_hl: ASE FileIOCalculator
+        Calculator object for layer 2
+    asi_path: str
+        Name of directory where ASI (Atomic Simulation Interface) is installed
+    projection1_param: dict
+        Additional parameters for the first projection
+    projection2_param: dict
+        Additional parameters for the second projection
+    d: float
+        Value used for the formula E(∞)
+    alpha: float
+        Value used for the formula E(∞)
+
+    """
+    def __init__(self, file1, file2, path, atom, embed_mask, calc_ll, calc_hl, asi_path, projection1_param = {} , projection2_param = {} , d=2.65, alpha = 4.51):
+        self.asi_path = asi_path
+        os.environ["ASI_LIB_PATH"] = self.asi_path
+        self.file1:str= file1
+        self.file2:str = file2
+        self.path:str = path
+        self.atom:object = atom
+        self.embed_mask: typing.List[int] = embed_mask
+        self.calc_ll = calc_ll
+        self.calc_hl = calc_hl
+        self.mu_val: float = 1.e+6
+        self.options: typing.List[str] = [file1,file2]
+        self.results = []
+        self.projection1_param = projection1_param
+        self.projection2_param = projection2_param
+        self.d = d
+        self.alpha = alpha
+
+    def checkInParam(self, item, default, cycle):
+        if cycle == 0:
+            app_Dict = self.projection1_param.items()
+        else:
+            app_Dict = self.projection2_param.items()
+        for key, val in app_Dict:
+            if key == item:
+                return val
+
+        return default
+
+    @property
+    def extrapolate(self) -> float:
+        cycle: int = 0
+        try:
+            conv1 = int(self.file1)
+            conv2 = int(self.file2)
+
+            if conv1 > conv2:
+                pass
+            else:
+                raise ArgumentError(
+                    "File1 should be bigger than File2."
+                )
+        except:
+            raise ArgumentError(
+                "File1: int\nFile2: int"
+            )
+
+        for item in self.options:
+            os.environ["AIMS_SPECIES_DIR"] = f"{self.path}{item}Z"
+            dimer = self.atom
+
+            projection = ProjectionEmbedding(
+                dimer,
+                embed_mask=self.embed_mask,
+                calc_base_hl=self.calc_hl,
+                calc_base_ll=self.calc_ll,
+                mu_val=self.mu_val,
+                total_energy_corr= self.checkInParam("total_energy_corr","1storder", cycle),
+                localisation = self.checkInParam("localisation","SPADE", cycle),
+                projection = self.checkInParam("projection","level-shift", cycle)
+            )
+
+            if cycle == 0:
+                for key, val in self.projection1_param.items():
+                    setattr(projection, key, val)
+            else:
+                for key, val in self.projection2_param.items():
+                    setattr(projection, key, val)
+
+            projection.run()
+
+            energy = projection.DFT_AinB_total_energy
+
+            self.results.append(energy)
+            cycle +=1
+
+        return (self.results[0]*(int(self.file1)+self.d)**self.alpha - self.results[1]*(int(self.file2)+self.d)**self.alpha)/((int(self.file1) + self.d)**self.alpha-(int(self.file2)+self.d)**self.alpha)
+
+

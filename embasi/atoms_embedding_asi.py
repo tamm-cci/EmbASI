@@ -1,22 +1,22 @@
-from asi4py.asecalc import ASI_ASE_calculator
 from embasi.parallel_utils import root_print, mpi_bcast_matrix_storage, \
     mpi_bcast_integer
 import numpy as np
 from mpi4py import MPI
+from embasi.write_aims import AimsTemplate
 
 class AtomsEmbed():
     """A wrapper around an ASE atoms objects for ASI library calls
 
     The wrapper controls a number of functions needed for embedding:
     1) Passes the parameters necessary for the execution of the QM code
-       for each step in the calculation. This includes the number of 
-       atoms in each embedding layer, the level of theory, and the 
+       for each step in the calculation. This includes the number of
+       atoms in each embedding layer, the level of theory, and the
        atoms assigned as ghost species in a given step.
     2) Stores matrices (i.e., density matrices and hamiltonians) output
        by a given system call
     3) Assigns which matrices are passed to the QM code for initialization
        (e.g., the density matrix)
-    
+
     Parameters
     ----------
     atoms: ASE Atoms Object
@@ -24,18 +24,18 @@ class AtomsEmbed():
     initial_calc: ASE FileIOCalculator
         Calculator object for a QM code supported by ASE and ASI
     embed_mask: int or list
-        Assigns either the first in atoms to region 1, or an index of 
+        Assigns either the first in atoms to region 1, or an index of
         int values 1 and 2 to each embedding layer. WARNING: The atoms
-        object will be reordered such that embedding layer 1 appear 
+        object will be reordered such that embedding layer 1 appear
         first.
     ghosts: int
         Assigns atoms to be evaluated as ghost species for the purposes
-        of embedding. If ghosts are needed for BSSE, they must be 
+        of embedding. If ghosts are needed for BSSE, they must be
         set in dictionary atoms.info['ghosts'] as a mask.
     outdir: str
         Name of directory output files are saved to
     no_scf: bool
-        Old control flow for terminating the QM code at the first SCF 
+        Old control flow for terminating the QM code at the first SCF
         step.
 
     """
@@ -49,11 +49,11 @@ class AtomsEmbed():
         if isinstance(embed_mask, int):
             # We hope the user knows what they are doing and
             # their atoms object is ordered accordingly.
-            self.embed_mask = [1]*embed_mask
-            self.embed_mask += [2]*(len(atoms)-embed_mask)
+            self.embed_mask = [1] * embed_mask
+            self.embed_mask += [2] * (len(atoms) - embed_mask)
         elif isinstance(embed_mask, list):
             self.embed_mask = embed_mask
-            assert len(atoms)==len(embed_mask), \
+            assert len(atoms) == len(embed_mask), \
                 "Length of embedding mask does not match number of atoms"
         elif embed_mask is None:
             self.embed_mask = None
@@ -75,23 +75,36 @@ class AtomsEmbed():
                 ghosts = [ghosts]
             self.ghost_list = [(at in [ghosts]) for at in self.embed_mask]
         else:
-            self.ghost_list = [False]*len(atoms)
+            self.ghost_list = [False] * len(atoms)
+
+    def write_inputfiles(self, calc, atoms, properties, cycle):
+        calc.directory.mkdir(exist_ok=True, parents=True)
+        AimsTemplate.write_input(
+            calc,
+            profile=calc.profile,
+            atoms=atoms,
+            parameters=calc.parameters,
+            properties=properties,
+            directory=calc.directory,
+            cycle=cycle
+
+    )
 
     def calc_initializer(self, asi):
 
         calc = self.initial_calc
 
         if self.truncate:
-            self.ghost_list = [ 
+            self.ghost_list = [
                 ghst for (idx, ghst) in enumerate(self.ghost_list)
-                           if idx in self.basis_info.active_atoms ]
+                if idx in self.basis_info.active_atoms]
         else:
             self.ghost_list = self.ghost_list
 
         # Before passing into the main input writer, we may
         # have extra ghosts needed for the CP correction to the
         # BSSE
-        #if "ghosts" in self.atoms.info.keys():
+        # if "ghosts" in self.atoms.info.keys():
         #    for idx, ghost in enumerate(self.atoms.info["ghosts"]):
         #        if ghost:
         #            ghost_list[idx] = True
@@ -102,17 +115,20 @@ class AtomsEmbed():
             total_charge = self.fragment_total_charge
         else:
             total_charge = 0.
-        
+
         calc.parameters['charge'] = -float(total_charge)
 
         # Ensure the Aims template shares the input parameters of the calculator object
         calc.parameters["ghosts"] = self.ghost_list
         calc.template.parameters = calc.parameters
 
-        calc.write_inputfiles(asi.atoms, properties=['energy'])
+        self.write_inputfiles(calc, asi.atoms, properties=['energy'], cycle = 0)
 
         if self.embed_mask is not None:
             self._insert_embedding_region_aims()
+
+        self.write_inputfiles(calc, asi.atoms, properties=['energy'], cycle = 1)
+
 
     def reorder_atoms_from_embed_mask(self):
         """ Re-orders atoms to push those in embedding region 1 to the beginning
@@ -131,13 +147,13 @@ class AtomsEmbed():
         self.atoms = self.atoms[idx_list]
 
         if "ghosts" in self.atoms.info.keys():
-            self.atoms.info["ghosts"] = [ 
-                self.atoms.info["ghosts"][idx] for idx in idx_list ]
+            self.atoms.info["ghosts"] = [
+                self.atoms.info["ghosts"][idx] for idx in idx_list]
 
     def _insert_embedding_region_aims(self):
         """Places embedding regions in input file
 
-        This functionality would require ASE support of the 
+        This functionality would require ASE support of the
         qm_embedding_region, so instead we handle this in a rather ad hoc
         way and inserts the qm_embedding_region variable for each atom
         in the geometry.in file.
@@ -154,7 +170,7 @@ class AtomsEmbed():
         shift = 0
         for idx, maskval in enumerate(mask):
             if maskval:
-                embedding = self.atoms.info['embedding_mask'][shift]
+                embedding = self.atoms.info['embedding_mask'][shift-1]
                 shift += 1
                 lines.insert(idx + shift, f'qm_embedding_region {embedding}\n')
 
@@ -188,7 +204,7 @@ class AtomsEmbed():
         full_nbasis = self.basis_info.full_nbasis
         active_atoms = self.basis_info.active_atoms
 
-        basis_mask = [True]*full_nbasis
+        basis_mask = [True] * full_nbasis
 
         for bas_idx, atom in enumerate(full_basis_atoms):
             if atom not in active_atoms:
@@ -196,10 +212,10 @@ class AtomsEmbed():
 
         trunc_mat = copy.deepcopy(full_mat)
 
-        # Delete Rows and Cols corresponding to inactive atoms 
+        # Delete Rows and Cols corresponding to inactive atoms
         # (ie., inactive atom AOs).
-        trunc_mat = np.compress( basis_mask, trunc_mat, axis=0 )
-        trunc_mat = np.compress( basis_mask, trunc_mat, axis=1 )
+        trunc_mat = np.compress(basis_mask, trunc_mat, axis=0)
+        trunc_mat = np.compress(basis_mask, trunc_mat, axis=1)
 
         return trunc_mat
 
@@ -245,8 +261,8 @@ class AtomsEmbed():
                 # Skip core active atom blocks - they are already
                 # correctly placed.
 
-                atom2_trunc = np.min(np.where(active_atoms==atom2))
-                atom1_trunc = np.min(np.where(active_atoms==atom1))
+                atom2_trunc = np.min(np.where(active_atoms == atom2))
+                atom1_trunc = np.min(np.where(active_atoms == atom1))
 
                 trunc_row_min = trunc_basis_min_idx[atom2_trunc]
                 trunc_row_max = trunc_basis_max_idx[atom2_trunc]
@@ -258,23 +274,23 @@ class AtomsEmbed():
                 full_col_min = full_basis_min_idx[atom1]
                 full_col_max = full_basis_max_idx[atom1]
 
-                full_mat[full_row_min:full_row_max, 
-                         full_col_min:full_col_max] = \
-                    trunc_mat[trunc_row_min:trunc_row_max, 
-                              trunc_col_min:trunc_col_max]
+                full_mat[full_row_min:full_row_max,
+                full_col_min:full_col_max] = \
+                    trunc_mat[trunc_row_min:trunc_row_max,
+                    trunc_col_min:trunc_col_max]
 
         return full_mat
 
     def extract_results(self):
         """Extracts quantities not currently supported by ASI
 
-        An ad hoc solution to extract values unsupported by ASI for 
+        An ad hoc solution to extract values unsupported by ASI for
         FHI-aims. Currently reads values such as the kinetic energy,
         electrostatic energy, sum of eigenvalues etc,
 
         """
 
-        with open(self.outdir+'/asi.log', 'r') as output:
+        with open(self.outdir + '/asi.log', 'r') as output:
 
             lines = output.readlines()
 
@@ -305,7 +321,7 @@ class AtomsEmbed():
         Driver routine which executes the QM code and controls which
         callbacks are registered, which matrix quantities are exported,
         and initialises relevant properties from previous calculations.
-        
+
         Parameters
         ----------
         ev_corr_scf: bool
@@ -317,7 +333,7 @@ class AtomsEmbed():
         import numpy as np
         from asi4py.asecalc import ASI_ASE_calculator
         from embasi.asi_default_callbacks import dm_saving_callback, \
-                                                        ham_saving_callback
+            ham_saving_callback
 
         root_print(f'Calculation {self.outdir}...')
 
@@ -325,10 +341,10 @@ class AtomsEmbed():
             self.atoms = self.atoms[self.basis_info.active_atoms]
 
         self.atoms.calc = ASI_ASE_calculator(os.environ['ASI_LIB_PATH'],
-                                        self.calc_initializer,
-                                        MPI.COMM_WORLD,
-                                        self.atoms,
-                                        work_dir=self.outdir)
+                                             self.calc_initializer,
+                                             MPI.COMM_WORLD,
+                                             self.atoms,
+                                             work_dir=self.outdir)
 
         # Explicitly set function pointers to NULL to avoid
         # previosly set function pointers from passing into
@@ -344,16 +360,16 @@ class AtomsEmbed():
         self.atoms.calc.asi.dm_storage = {}
         self.atoms.calc.asi.dm_calc_cnt = {}
         self.atoms.calc.asi.dm_count = 0
-        self.atoms.calc.asi.register_dm_callback(dm_saving_callback, 
-                                                 (self.atoms.calc.asi, 
-                                                  self.atoms.calc.asi.dm_storage, 
-                                                  self.atoms.calc.asi.dm_calc_cnt, 
+        self.atoms.calc.asi.register_dm_callback(dm_saving_callback,
+                                                 (self.atoms.calc.asi,
+                                                  self.atoms.calc.asi.dm_storage,
+                                                  self.atoms.calc.asi.dm_calc_cnt,
                                                   'DM calc'))
 
         self.atoms.calc.asi.ham_storage = {}
         self.atoms.calc.asi.ham_calc_cnt = {}
         self.atoms.calc.asi.ham_count = 0
-        self.atoms.calc.asi.register_hamiltonian_callback(ham_saving_callback, 
+        self.atoms.calc.asi.register_hamiltonian_callback(ham_saving_callback,
                                                           (self.atoms.calc.asi,
                                                            self.atoms.calc.asi.ham_storage,
                                                            self.atoms.calc.asi.ham_calc_cnt,
@@ -362,10 +378,10 @@ class AtomsEmbed():
         if self.density_matrix_in is not None:
             'TODO: Actual type enforcement and error handling'
             self.atoms.calc.asi.init_density_matrix = \
-                {(1,1): np.asfortranarray(self.density_matrix_in)}
+                {(1, 1): np.asfortranarray(self.density_matrix_in)}
         if self.fock_embedding_matrix is not None:
             self.atoms.calc.asi.modify_hamiltonian = \
-                {(1,1): np.asfortranarray(self.fock_embedding_matrix)}
+                {(1, 1): np.asfortranarray(self.fock_embedding_matrix)}
 
         E0 = self.atoms.get_potential_energy()
 
@@ -392,32 +408,32 @@ class AtomsEmbed():
 
         self.extract_results()
 
-        # Within the embedding workflow, we often want to calculate the total 
-        # energy for a given density matrix without performing any SCF steps. 
-        # Often, this includes using an input electron density constructed from 
-        # a localised set of MOs for a fragment of a supermolecule. This 
+        # Within the embedding workflow, we often want to calculate the total
+        # energy for a given density matrix without performing any SCF steps.
+        # Often, this includes using an input electron density constructed from
+        # a localised set of MOs for a fragment of a supermolecule. This
         # density will be far from the ground-state density for the fragment,
-        # meaning the output eigenvalues significantly deviate from those of a 
+        # meaning the output eigenvalues significantly deviate from those of a
         # fully converged density.
         #
         # As the vast majority of DFT codes with the KS-eigenvalues to determine
-        # the total energy, the total energies due to the eigenvalues do not 
-        # formally reflect the density matrix of the initial input for 
+        # the total energy, the total energies due to the eigenvalues do not
+        # formally reflect the density matrix of the initial input for
         # iteration, n=0:
         #
         #    \gamma^{n+1} * H^{total}[\gamma^{n}] \= \gamma^{n} * H^{total}[\gamma^{n}],
         #
-        # For TE-only calculations, we do not care about the SCF process - we 
-        # are using the DFT code to integrate XC and electrostatic energies. As 
+        # For TE-only calculations, we do not care about the SCF process - we
+        # are using the DFT code to integrate XC and electrostatic energies. As
         # such, we 'correct' the eigenvalue portion of the total energy to reflect
-        # the interaction of the input density matrix, as opposed to the first 
+        # the interaction of the input density matrix, as opposed to the first
         # set of KS-eigenvectors resulting from the DFT code.
         if ev_corr_scf:
 
             if self.truncate:
                 self.ev_corr_energy = \
-                    27.211384500 * np.trace(self.density_matrix_in @ 
-                                        self.full_mat_to_truncated(self.hamiltonian_total))
+                    27.211384500 * np.trace(self.density_matrix_in @
+                                            self.full_mat_to_truncated(self.hamiltonian_total))
             else:
                 self.ev_corr_energy = \
                     27.211384500 * np.trace(self.density_matrix_in @
@@ -430,25 +446,25 @@ class AtomsEmbed():
     def hamiltonian_core(self):
         core_idx = 1
         if self.truncate:
-            return self.truncated_mat_to_full(self.atoms.calc.asi.ham_storage.get((core_idx,1,1)))
+            return self.truncated_mat_to_full(self.atoms.calc.asi.ham_storage.get((core_idx, 1, 1)))
         else:
-            return self.atoms.calc.asi.ham_storage.get((core_idx,1,1))
+            return self.atoms.calc.asi.ham_storage.get((core_idx, 1, 1))
 
     @property
     def hamiltonian_kinetic(self):
         core_idx = 2
         if self.truncate:
-            return self.truncated_mat_to_full(self.atoms.calc.asi.ham_storage.get((core_idx,1,1)))
+            return self.truncated_mat_to_full(self.atoms.calc.asi.ham_storage.get((core_idx, 1, 1)))
         else:
-            return self.atoms.calc.asi.ham_storage.get((core_idx,1,1))
+            return self.atoms.calc.asi.ham_storage.get((core_idx, 1, 1))
 
     @property
     def hamiltonian_total(self):
         tot_idx = 3
         if self.truncate:
-            return self.truncated_mat_to_full(self.atoms.calc.asi.ham_storage.get((tot_idx,1,1)))
+            return self.truncated_mat_to_full(self.atoms.calc.asi.ham_storage.get((tot_idx, 1, 1)))
         else:
-            return self.atoms.calc.asi.ham_storage.get((tot_idx,1,1))
+            return self.atoms.calc.asi.ham_storage.get((tot_idx, 1, 1))
 
     @property
     def hamiltonian_electrostatic(self):
@@ -506,13 +522,13 @@ class AtomsEmbed():
 
         Parameters
         ----------
-        vemb, np.ndarray: 
+        vemb, np.ndarray:
             Embedding potential of environment at calculation at
-            low level of theory (ie., first four terms of equation (2)). 
-        projection_matrix, np.ndarray: 
+            low level of theory (ie., first four terms of equation (2)).
+        projection_matrix, np.ndarray:
             Projection matrix to level shift P_B components of the environment
             upwards relative to the active subsystem (nbasis,nbasis)
-        
+
         Returns
         -------
         fock_embedding_matrix, np.ndarray: fock_embedding_matrix(nbasis,nbasis)
@@ -522,9 +538,8 @@ class AtomsEmbed():
     @fock_embedding_matrix.setter
     def fock_embedding_matrix(self, inp_fock_embedding_mat):
 
-        if (not isinstance(inp_fock_embedding_mat, (np.ndarray)) and 
-            (inp_fock_embedding_mat is not None)):
-
+        if (not isinstance(inp_fock_embedding_mat, (np.ndarray)) and
+                (inp_fock_embedding_mat is not None)):
             raise TypeError("Input vemb needs to be np.ndarray of dimensions nbasis*nbasis.")
 
         if ((inp_fock_embedding_mat is None)):
@@ -552,8 +567,7 @@ class AtomsEmbed():
     def density_matrix_in(self, densmat):
 
         if (not isinstance(densmat, (list, tuple, np.ndarray)) and
-            (not (densmat is None))):
-            
+                (not (densmat is None))):
             raise TypeError("Input needs to be np.ndarray of dimensions nbasis*nbasis.")
 
         # TODO: DIMENSION CHECKING
@@ -566,11 +580,11 @@ class AtomsEmbed():
     @property
     def density_matrices_out(self):
         """Output density matrix
-        
+
         Returns a list of all density matrices within the dictionary,
         self.atoms.calc.asi.dm_storage, which stores all the matrices
         return from the calculation via ASI Callbacks.
-        
+
         Returns
         -------
         out_mats: list of np.ndarrays
@@ -581,8 +595,8 @@ class AtomsEmbed():
         except:
             raise NameError("dm_count = 0: No density matrices stored!")
 
-        out_mats = [ self.atoms.calc.asi.dm_storage.get((dm_num+1,1,1)) \
-                     for dm_num in range(num_densmat) ]
+        out_mats = [self.atoms.calc.asi.dm_storage.get((dm_num + 1, 1, 1)) \
+                    for dm_num in range(num_densmat)]
 
         if self.truncate:
             for idx, trunc_mat in enumerate(out_mats):
@@ -595,7 +609,7 @@ class AtomsEmbed():
         """Overlap matrix of nbasisxnbasis
 
         """
-        return self.atoms.calc.asi.overlap_storage[1,1]
+        return self.atoms.calc.asi.overlap_storage[1, 1]
 
     @property
     def basis_atoms(self):
@@ -633,7 +647,7 @@ class AtomsEmbed():
     @property
     def basis_info(self):
         """Basisinfo object defining indices of basis elements
-        
+
         """
         return self._basis_info
 
@@ -643,7 +657,7 @@ class AtomsEmbed():
 
     @property
     def free_atom_nelectrons(self):
-        
+
         tot_nelec = np.sum(self.atoms.numbers)
         ghost_nelec = np.sum(self.atoms.numbers[self.ghost_list])
 
