@@ -24,7 +24,7 @@ class FHIaims_projection_embedding_test():
                        )
         
         for key, val in calc_ll_param_dict.items():
-            self.calculator_ll.parameters[key]=val
+            self.calc_ll.parameters[key]=val
 
         self.calc_hl = Aims(xc='PBE', profile=AimsProfile(command="asi-doesnt-need-command"),
                        KS_method="parallel",
@@ -37,7 +37,7 @@ class FHIaims_projection_embedding_test():
                        )
 
         for key, val in calc_hl_param_dict.items():
-            self.calculator_hl.parameters[key]=val
+            self.calc_hl.parameters[key]=val
 
         self.localisation = localisation
         self.projection = projection
