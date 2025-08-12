@@ -535,7 +535,7 @@ try:
     from os import PathLike
     from pathlib import Path
     from typing import Any, Iterable, List, Mapping, Optional, Set
-
+    from chemsh.interfaces.EmbASI import EmbASI
     from ase.calculators.abc import GetOutputsMixin
     from ase.calculators.calculator import (
         BadConfiguration,
@@ -547,9 +547,7 @@ try:
 except:
     pass
 
-#/home/dchen/Software/FHIaims/species_defaults/defaults_2020/light/00_Emptium_default
-os.environ["FHI_EMPTIUM"] = "/home/dchen/Software/FHIaims"
-
+AIMS_SPECIES_DIR = os.environ.get('AIMS_SPECIES_DIR')
 v_unit = Ang / (1000.0 * fs)
 
 def write_species(control_file_descriptor, species_basis_dict, parameters):
@@ -685,11 +683,12 @@ def write_control(fd, atoms, parameters, verbose_header=False):
 
     if cubes:
         cubes.write(fd)
-
+   
     fd.write(lim + "\n\n")
-
+ 
+    write_species(fd, species_basis_dict, parameters)
     # Get the species directory
-    species_dir = get_species_directory
+    species_dir = get_species_directorys
     # dicts are ordered as of python 3.7
     species_array = np.array(list(dict.fromkeys(atoms.symbols)))
     # Grab the tier specification from the parameters. THis may either
@@ -700,7 +699,6 @@ def write_control(fd, atoms, parameters, verbose_header=False):
     tier_array = np.full(len(species_array), tier)
     # Path to species files for FHI-aims. In this files are specifications
     # for the basis set sizes depending on which basis set tier is used.
-    species_dir = get_species_directory(parameters.get("species_dir"))
     # Parse the species files for each species present in the calculation
     # according to the tier of each species.
     species_basis_dict = parse_species_path(
@@ -710,6 +708,22 @@ def write_control(fd, atoms, parameters, verbose_header=False):
     # calculation into the control.in file (fd).
     write_species(fd, species_basis_dict, parameters)
 
+    if hasattr(atoms, 'info') and 'multipole-charges' in atoms.info:
+        multipoles = atoms.info['multipole-charges']
+        if len(multipoles.charge) > 0:  
+            aims_species_dir = os.environ.get("AIMS_SPECIES_DIR")
+            if not aims_species_dir:
+                print("Warning: AIMS_SPECIES_DIR not set in environment. Skipping Emptium species.")
+            else:
+                emptium_path = os.path.join(aims_species_dir, "00_Emptium_default")
+                if os.path.exists(emptium_path):
+                    try:
+                        with open(emptium_path, "r") as f_emptium:
+                            fd.write(f_emptium.read())
+                    except Exception as e:
+                        print(f"Warning: Failed to read Emptium species: {str(e)}")
+                else:
+                    print(f"Warning: Emptium species file not found at {emptium_path}")
 
 def write_aims_embasi(fd,atoms, cycle, scaled=False,geo_constrain=False,write_velocities=False,velocities=False,ghosts=None,info_str=None,wrap=False):
     the = []
@@ -976,18 +990,6 @@ class AimsTemplate(CalculatorTemplate):
 
         write_control(control, atoms, parameters)
 
-        try:
-            dir = os.environ["FHI_AIMS_PATH"] + "/species_defaults/defaults_2020/light/00_Emptium_default"
-            atoms.info["multipole-charges"]
-            with open(control, "a") as f:
-                with open(dir,"r") as f2:
-                    f23 = f2.read()
-                    f2.close()
-                f.write(f23)
-            f.close()
-        except:
-            import traceback
-            print(traceback.format_exc())
 
 
 
