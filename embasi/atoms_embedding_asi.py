@@ -112,11 +112,11 @@ class AtomsEmbed():
         if hasattr(self, "input_total_charge"):
             total_charge = self.input_total_charge
         elif hasattr(self, "input_fragment_nelectrons"):
-            total_charge = self.fragment_total_charge
+            total_charge = -self.fragment_total_charge
         else:
             total_charge = 0.
 
-        calc.parameters['charge'] = -float(total_charge)
+        calc.parameters['charge'] = float(total_charge)
 
         # Ensure the Aims template shares the input parameters of the calculator object
         calc.parameters["ghosts"] = self.ghost_list
