@@ -589,6 +589,7 @@ def write_species(control_file_descriptor, species_basis_dict, parameters):
                 control_file_descriptor.write(
                     f"plus_u {parameters.plus_u[species_symbol]} \n")
 
+@writer
 def write_control(fd, atoms, parameters, verbose_header=False):
     """Write the control.in file for FHI-aims
     Parameters
@@ -603,7 +604,6 @@ def write_control(fd, atoms, parameters, verbose_header=False):
         If True then explcitly list the paramters used to generate the
          control.in file inside the header
     """
-
     parameters = dict(parameters)
     lim = "#" + "=" * 79
 
@@ -683,12 +683,9 @@ def write_control(fd, atoms, parameters, verbose_header=False):
 
     if cubes:
         cubes.write(fd)
-   
     fd.write(lim + "\n\n")
- 
-    write_species(fd, species_basis_dict, parameters)
     # Get the species directory
-    species_dir = get_species_directorys
+    species_dir = get_species_directory
     # dicts are ordered as of python 3.7
     species_array = np.array(list(dict.fromkeys(atoms.symbols)))
     # Grab the tier specification from the parameters. THis may either
@@ -699,6 +696,7 @@ def write_control(fd, atoms, parameters, verbose_header=False):
     tier_array = np.full(len(species_array), tier)
     # Path to species files for FHI-aims. In this files are specifications
     # for the basis set sizes depending on which basis set tier is used.
+    species_dir = get_species_directory(parameters.get("species_dir"))
     # Parse the species files for each species present in the calculation
     # according to the tier of each species.
     species_basis_dict = parse_species_path(
@@ -708,22 +706,19 @@ def write_control(fd, atoms, parameters, verbose_header=False):
     # calculation into the control.in file (fd).
     write_species(fd, species_basis_dict, parameters)
 
-    if hasattr(atoms, 'info') and 'multipole-charges' in atoms.info:
-        multipoles = atoms.info['multipole-charges']
-        if len(multipoles.charge) > 0:  
-            aims_species_dir = os.environ.get("AIMS_SPECIES_DIR")
-            if not aims_species_dir:
-                print("Warning: AIMS_SPECIES_DIR not set in environment. Skipping Emptium species.")
-            else:
-                emptium_path = os.path.join(aims_species_dir, "00_Emptium_default")
-                if os.path.exists(emptium_path):
-                    try:
-                        with open(emptium_path, "r") as f_emptium:
-                            fd.write(f_emptium.read())
-                    except Exception as e:
-                        print(f"Warning: Failed to read Emptium species: {str(e)}")
-                else:
-                    print(f"Warning: Emptium species file not found at {emptium_path}")
+    needs_emptium = (hasattr(atoms, 'info') and 
+        (atoms.info.get('_embasi_embedding_type') == 'electrostatic'))
+    
+    if needs_emptium:
+        aims_species_dir = os.environ.get("AIMS_SPECIES_DIR")
+        emptium_path = os.path.join(aims_species_dir, "00_Emptium_default")
+        try:
+            with open(emptium_path, 'r') as f_emptium:
+                fd.write(f_emptium.read())
+        except FileNotFoundError:
+            raise RuntimeError(
+                f"Emptium species file missing at {emptium_path}. "
+                "Required for electrostatic embedding.")
 
 def write_aims_embasi(fd,atoms, cycle, scaled=False,geo_constrain=False,write_velocities=False,velocities=False,ghosts=None,info_str=None,wrap=False):
     the = []
@@ -851,8 +846,6 @@ from ase.calculators.genericfileio import (
     GenericFileIOCalculator,
     read_stdout,
 )
-from ase.io.aims import write_aims, write_control
-
 
 def get_aims_version(string):
     match = re.search(r'\s*FHI-aims version\s*:\s*(\S+)', string, re.M)
@@ -989,7 +982,6 @@ class AimsTemplate(CalculatorTemplate):
             parameters['species_dir'] = profile.default_species_directory
 
         write_control(control, atoms, parameters)
-
 
 
 
