@@ -1,4 +1,4 @@
-import os,sys,typing
+import os, typing
 from argparse import ArgumentError
 from embasi.embedding import ProjectionEmbedding
 
@@ -67,6 +67,7 @@ class Extrapolation:
             app_Dict = self.projection1_param.items()
         else:
             app_Dict = self.projection2_param.items()
+
         for key, val in app_Dict:
             if key == item:
                 return val
@@ -75,7 +76,6 @@ class Extrapolation:
 
     @property
     def extrapolate(self) -> float:
-        cycle: int = 0
         try:
             conv1 = int(self.file1)
             conv2 = int(self.file2)
@@ -91,33 +91,27 @@ class Extrapolation:
                 "File1: int\nFile2: int"
             )
 
-        for item in self.options:
+        for index, (item, projection_parameters) in enumerate(zip(self.options, [self.projection1_param, self.projection2_param])):
             os.environ["AIMS_SPECIES_DIR"] = f"{self.path}{item}Z"
-            dimer = self.atom
 
             projection = ProjectionEmbedding(
-                dimer,
+                self.atom,
                 embed_mask=self.embed_mask,
                 calc_base_hl=self.calc_hl,
                 calc_base_ll=self.calc_ll,
                 mu_val=self.mu_val,
-                total_energy_corr= self.checkInParam("total_energy_corr","1storder", cycle),
-                localisation = self.checkInParam("localisation","SPADE", cycle),
-                projection = self.checkInParam("projection","level-shift", cycle)
+                total_energy_corr= self.checkInParam("total_energy_corr","1storder", index),
+                localisation = self.checkInParam("localisation","SPADE", index),
+                projection = self.checkInParam("projection","level-shift", index)
             )
 
-            if cycle == 0:
-                for key, val in self.projection1_param.items():
-                    setattr(projection, key, val)
-            else:
-                for key, val in self.projection2_param.items():
-                    setattr(projection, key, val)
+            for key, val in projection_parameters.items():
+                setattr(projection, key, val)
 
             projection.run()
 
             energy = projection.DFT_AinB_total_energy
 
             self.results.append(energy)
-            cycle +=1
 
         return (self.results[0]*(int(self.file1)+self.d)**self.alpha - self.results[1]*(int(self.file2)+self.d)**self.alpha)/((int(self.file1) + self.d)**self.alpha-(int(self.file2)+self.d)**self.alpha)

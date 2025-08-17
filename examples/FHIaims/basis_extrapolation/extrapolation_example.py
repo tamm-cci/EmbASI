@@ -1,6 +1,4 @@
-import os,sys
 from embasi.workflows.extrapolation import Extrapolation
-
 from ase.data.s22 import s26,create_s22_system
 from ase.calculators.aims import Aims, AimsProfile
 '''
