@@ -52,7 +52,7 @@ class Extrapolation:
 
     """
     def __init__(self, file1, file2, path, atom, embed_mask, calc_ll, calc_hl, asi_path, projection1_param = {} , projection2_param = {} , d=2.85, alpha = 4.49):
-        self.asi_path = asi_path
+        self.asi_path:str = asi_path
         os.environ["ASI_LIB_PATH"] = self.asi_path
         self.file1:str= file1
         self.file2:str = file2
