@@ -1,13 +1,6 @@
 import os,sys,typing
 from argparse import ArgumentError
-try:
-    from embasi.embedding import ProjectionEmbedding
-except ImportError:
-    current_dir = os.path.dirname(os.path.abspath(__file__))# Get the parent directory by going one level up
-    parent_dir = os.path.dirname(current_dir)
-    parent_dir2 = os.path.dirname(parent_dir)
-    sys.path.append(parent_dir2)
-    from embasi.embedding import ProjectionEmbedding
+from embasi.embedding import ProjectionEmbedding
 
 #os.environ["ASI_LIB_PATH"] = "/home/dchen/Software/FHIaims/_build_lib/libaims.250711.scalapack.mpi.so"
 
@@ -90,7 +83,7 @@ class Extrapolation:
             if conv1 > conv2:
                 pass
             else:
-                raise ArgumentError(
+                raise ValueError(
                     "File1 should be bigger than File2."
                 )
         except:

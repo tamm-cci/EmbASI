@@ -1,14 +1,8 @@
-
 from ase.data.s22 import s22, s26, create_s22_system
 import os,sys
 from ase.calculators.aims import Aims, AimsProfile
+from embasi.workflows.extrapolation import Extrapolation
 
-try:
-    from embasi.workflows.extrapolation import Extrapolation
-except ImportError:
-    sys.path.insert(1,"/home/dchen/Downloads/DChen_EmbASI/")
-
-    from embasi.workflows.extrapolation import Extrapolation
 
 class FHIaims_projection_embedding_extrpolate_test():
     def __init__(self, localisation="SPADE", projection="huzinaga", parallel=False, gc=False,

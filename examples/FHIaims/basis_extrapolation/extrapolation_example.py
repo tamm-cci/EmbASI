@@ -1,12 +1,5 @@
 import os,sys
-
-try:
-    from embasi.workflows.extrapolation import Extrapolation
-except ImportError:
-    sys.path.insert(1,"/home/dchen/Downloads/DChen_EmbASI/")
-
-
-    from embasi.workflows.extrapolation import Extrapolation
+from embasi.workflows.extrapolation import Extrapolation
 
 from ase.data.s22 import s26,create_s22_system
 from ase.calculators.aims import Aims, AimsProfile
@@ -19,8 +12,6 @@ of a methanol and a methanol dimer to calculate the end dissociation energy.
 # os.environ["ASI_LIB_PATH"] = "/home/dchen/Software/FHIaims/_build_lib/libaims.250711.scalapack.mpi.so"
 # os.environ['AIMS_SPECIES_DIR'] = "/home/dchen/Software/FHIaims/species_defaults/NAO-VCC-nZ/NAO-VCC-
 # The 'AIMS_SPECIES_DIR' and 'ASI_LIB_PATH' are passed into the class to allow for easier retrieval.
-
-types = ["light","intermediate","tight","really_tight"]
 
 calc_ll = Aims(
     xc='PBE',
