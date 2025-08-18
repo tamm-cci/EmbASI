@@ -1,5 +1,4 @@
 import os, typing
-from argparse import ArgumentError
 from embasi.embedding import ProjectionEmbedding
 
 #os.environ["ASI_LIB_PATH"] = "/home/dchen/Software/FHIaims/_build_lib/libaims.250711.scalapack.mpi.so"
@@ -87,7 +86,7 @@ class Extrapolation:
                     "File1 should be bigger than File2."
                 )
         except:
-            raise ArgumentError(
+            raise TypeError(
                 "File1: int\nFile2: int"
             )
 
