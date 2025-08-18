@@ -1,15 +1,20 @@
 from ase.data.s22 import s22, s26, create_s22_system
-import os,sys
 from ase.calculators.aims import Aims, AimsProfile
 from embasi.workflows.extrapolation import Extrapolation
+import os
 
 
-class FHIaims_projection_embedding_extrpolate_test():
+class FHIaims_projection_embedding_extrapolate_test():
     def __init__(self, localisation="SPADE", projection="huzinaga", parallel=False, gc=False,
-                 calc_ll_param_dict={}, calc_hl_param_dict={}, test_dir=None, basis_dir="defaults_2020/light"):
+                 calc_ll_param_dict=None, calc_hl_param_dict=None, test_dir=None, basis_dir="defaults_2020/light"):
         # Set-up calculator parameters (similar to FHIaims Calculator for
         # ASE) for low-level and high-level calculations. Below are the
         # absolute minimum parameters required for normal operation.
+
+        if calc_hl_param_dict is None:
+            calc_hl_param_dict = {}
+        if calc_ll_param_dict is None:
+            calc_ll_param_dict = {}
 
         self.calc_ll = Aims(
             xc='PBE',
@@ -24,7 +29,7 @@ class FHIaims_projection_embedding_extrpolate_test():
         )
 
         for key, val in calc_ll_param_dict.items():
-            self.calculator_ll.parameters[key] = val
+            self.calc_ll.parameters[key] = val
 
         self.calc_hl = Aims(
             xc='PBE',
@@ -38,7 +43,8 @@ class FHIaims_projection_embedding_extrpolate_test():
             override_initial_charge_check=True,
         )
         for key, val in calc_hl_param_dict.items():
-            self.calculator_hl.parameters[key] = val
+            self.calc_hl.parameters[key] = val
+
         self.localisation = localisation
         self.projection = projection
         self.parallel = False
@@ -56,9 +62,9 @@ class FHIaims_projection_embedding_extrpolate_test():
         energy = Extrapolation(
             file1="3",
             file2="2",
-            path="/home/dchen/Software/FHIaims/species_defaults/NAO-VCC-nZ/NAO-VCC-",
-            asi_path="/home/dchen/Software/FHIaims/_build_lib/libaims.250711.scalapack.mpi.so",
-            atom= methanol_dimer,
+            path=os.environ["AIMS_ROOT_DIR"] + "/species_defaults/NAO-VCC-nZ/NAO-VCC-",
+            asi_path=os.environ["AIMS_LIB_PATH"],
+            atom=methanol_dimer,
             embed_mask=[2, 1, 2, 2, 2, 1, 2, 1, 2, 2, 2, 1],
             calc_ll=self.calc_ll,
             calc_hl=self.calc_hl,
@@ -67,8 +73,8 @@ class FHIaims_projection_embedding_extrpolate_test():
         energy2 = Extrapolation(
             file1="3",
             file2="2",
-            path="/home/dchen/Software/FHIaims/species_defaults/NAO-VCC-nZ/NAO-VCC-",
-            asi_path="/home/dchen/Software/FHIaims/_build_lib/libaims.250711.scalapack.mpi.so",
+            path=os.environ["AIMS_ROOT_DIR"] + "/species_defaults/NAO-VCC-nZ/NAO-VCC-",
+            asi_path=os.environ["AIMS_LIB_PATH"],
             atom=methanol_dimer[:6],
             embed_mask=[2,1,2,2,2,1],
             calc_ll=self.calc_ll,
@@ -78,7 +84,7 @@ class FHIaims_projection_embedding_extrpolate_test():
         energy = energy.extrapolate  # Finds the monomer energy of the methanol
         self.energy = energy  # Stores the energy
 
-        energy2 = energy2.extrapolate  # FInds the monomer energy of the methanol dimer
+        energy2 = energy2.extrapolate  # Finds the monomer energy of the methanol dimer
         self.energy2 = energy2
 
         self.diff_energy = energy - 2 * energy2 # Calculates the dissociation energy: diss_energy = energy2 - 2(energy1)
