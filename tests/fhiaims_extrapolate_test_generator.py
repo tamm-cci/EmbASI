@@ -5,7 +5,7 @@ import os
 
 
 class FHIaims_projection_embedding_extrapolate_test():
-    def __init__(self, localisation="SPADE", projection="huzinaga", parallel=False, gc=False,
+    def __init__(self, localisation="SPADE", projection="level-shift", total_energy_corr="1storder", parallel=False, gc=False,
                  calc_ll_param_dict=None, calc_hl_param_dict=None, test_dir=None, basis_dir="defaults_2020/light"):
         # Set-up calculator parameters (similar to FHIaims Calculator for
         # ASE) for low-level and high-level calculations. Below are the
@@ -47,6 +47,7 @@ class FHIaims_projection_embedding_extrapolate_test():
 
         self.localisation = localisation
         self.projection = projection
+        self.total_energy_corr = total_energy_corr
         self.parallel = False
         self.gc = False
         self.test_dir = test_dir
@@ -68,6 +69,20 @@ class FHIaims_projection_embedding_extrapolate_test():
             embed_mask=[2, 1, 2, 2, 2, 1, 2, 1, 2, 2, 2, 1],
             calc_ll=self.calc_ll,
             calc_hl=self.calc_hl,
+            projection1_param={
+                "localisation": self.localisation,
+                "projection": self.projection,
+                "total_energy_corr": self.total_energy_corr,
+                "parallel" : self.parallel,
+                "gc" : self.gc,
+            },
+            projection2_param={
+                "localisation": self.localisation,
+                "projection": self.projection,
+                "total_energy_corr": self.total_energy_corr,
+                "parallel": self.parallel,
+                "gc": self.gc,
+            }
         )
 
         energy2 = Extrapolation(
@@ -79,6 +94,20 @@ class FHIaims_projection_embedding_extrapolate_test():
             embed_mask=[2,1,2,2,2,1],
             calc_ll=self.calc_ll,
             calc_hl=self.calc_hl,
+            projection1_param={
+                "localisation": self.localisation,
+                "projection": self.projection,
+                "total_energy_corr": self.total_energy_corr,
+                "parallel": self.parallel,
+                "gc": self.gc,
+            },
+            projection2_param={
+                "localisation": self.localisation,
+                "projection": self.projection,
+                "total_energy_corr": self.total_energy_corr,
+                "parallel": self.parallel,
+                "gc": self.gc,
+            }
         )
 
         energy = energy.extrapolate  # Finds the monomer energy of the methanol
