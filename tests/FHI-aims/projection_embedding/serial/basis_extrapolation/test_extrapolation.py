@@ -8,7 +8,7 @@ sys.path.append(os.getcwd() + "/../../../")
 print(sys.path)
 from fhiaims_extrapolate_test_generator import FHIaims_projection_embedding_extrapolate_test
 
-
+@pytest.mark.mpi
 def test_basis_extrapolation_serial(num_regression: NumericRegressionFixture, tmp_path):
     test = FHIaims_projection_embedding_extrapolate_test(test_dir=tmp_path)
     test.run_test()

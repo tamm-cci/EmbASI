@@ -6,7 +6,7 @@ import os
 
 class FHIaims_projection_embedding_extrapolate_test():
     def __init__(self, localisation="SPADE", projection="level-shift", total_energy_corr="1storder", parallel=False, gc=False,
-                 calc_ll_param_dict=None, calc_hl_param_dict=None, test_dir=None, basis_dir="defaults_2020/light"):
+                 calc_ll_param_dict=None, calc_hl_param_dict=None, test_dir=None, basis_dir1="3", basis_dir2="2"):
         # Set-up calculator parameters (similar to FHIaims Calculator for
         # ASE) for low-level and high-level calculations. Below are the
         # absolute minimum parameters required for normal operation.
@@ -51,6 +51,8 @@ class FHIaims_projection_embedding_extrapolate_test():
         self.parallel = False
         self.gc = False
         self.test_dir = test_dir
+        self.basis_dir1 = basis_dir1
+        self.basis_dir2 = basis_dir2
         #os.environ["AIMS_SPECIES_DIR"] = os.environ["AIMS_ROOT_DIR"] + "/species_defaults/" + basis_dir
         self.energy = None
         self.energy2 = None
@@ -61,8 +63,8 @@ class FHIaims_projection_embedding_extrapolate_test():
         # Creates a S22 system s26[22], with 22 being the ID from ASE
         methanol_dimer = create_s22_system(s26[22])
         energy = Extrapolation(
-            file1="3",
-            file2="2",
+            file1=self.basis_dir1,
+            file2=self.basis_dir2,
             path=os.environ["AIMS_ROOT_DIR"] + "/species_defaults/NAO-VCC-nZ/NAO-VCC-",
             asi_path=os.environ["AIMS_LIB_PATH"],
             atom=methanol_dimer,
@@ -86,8 +88,8 @@ class FHIaims_projection_embedding_extrapolate_test():
         )
 
         energy2 = Extrapolation(
-            file1="3",
-            file2="2",
+            file1=self.basis_dir1,
+            file2=self.basis_dir2,
             path=os.environ["AIMS_ROOT_DIR"] + "/species_defaults/NAO-VCC-nZ/NAO-VCC-",
             asi_path=os.environ["AIMS_LIB_PATH"],
             atom=methanol_dimer[:6],
