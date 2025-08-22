@@ -6,7 +6,7 @@ from pytest_regressions.num_regression import NumericRegressionFixture
 
 sys.path.append(os.getcwd()+"/../../../")
 print(sys.path)
-from tests.fhiaims_meoh_test_generator import FHIaims_projection_embedding_test
+from fhiaims_meoh_test_generator import FHIaims_projection_embedding_test
 
 def test_qmcode_localisation_serial(num_regression: NumericRegressionFixture, tmp_path):
 
