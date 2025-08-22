@@ -6,6 +6,7 @@ from pytest_regressions.num_regression import NumericRegressionFixture
 
 sys.path.append(os.getcwd()+"/../../../")
 print(sys.path)
+from fhiaims_meoh_test_generator import FHIaims_projection_embedding_test
 
 def test_level_shift_projection_serial(num_regression: NumericRegressionFixture, tmp_path):
 
