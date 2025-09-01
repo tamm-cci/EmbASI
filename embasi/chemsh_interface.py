@@ -58,7 +58,7 @@ class ChemShellInterface(ProjectionEmbedding):
         'qmmm': True,
         'override_initial_charge_check': True,}
 
-        # Overrides custom configurations for LL and HL
+        # Overrides custom configurations for LL and HL calculators
         if ll_calc_config is not None:
             for key, val in ll_calc_config.items():
                 self.ll_calc_config[key] = val
@@ -98,6 +98,8 @@ class MultipoleAtoms():
         order: int, multipole order
             (0=charge, 1=dipole, etc.)
         moments: list, optional high order moments
+        needs_ghost: bool, optional
+            Whether this multipole needs a ghost atom
     '''
 
     def __init__(self, symbols=None, positions=None, **kwargs):
@@ -105,7 +107,7 @@ class MultipoleAtoms():
         self.coordinates = []
         self.charge = []
 
-    def add_multipole(self, coord, charge, order=0, moments=None):
+    def add_multipole(self, coord, charge, order=0, moments=None, needs_ghost=False):
         '''
         Add a multipole to list, to be written into the geometry.in file.
 
@@ -117,9 +119,12 @@ class MultipoleAtoms():
         order: int
         moments: list[float], optional
             Higher order moments for multipole expansion 
+        needs_ghost: bool, optional
+            Whether this multipole needs a ghost atom
         '''
         self._multipoles.append({'coord': np.array(coord), 'charge': float(charge),
-                                'order': int(order), 'moments': list(moments) if moments else[]})
+                                'order': int(order), 'moments': list(moments) if moments else[],
+                                'needs_ghost': bool(needs_ghost)})
         self.coordinates.append(coord)
         self.charge.append(charge)
         return self._multipoles
