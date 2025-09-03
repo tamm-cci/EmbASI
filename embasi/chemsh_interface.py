@@ -14,7 +14,7 @@ class ChemShellInterface(ProjectionEmbedding):
     Parameters
     ----------
     embed_mask: list[int].
-        Region assignment for the low level QM (1), and high level QM (2) for 
+        Region assignment for the high level QM (1), and low level QM (2) for 
         each atom. (i.e., [1,1,1,2,2,2])
     mu_val: float
     ll_calc_config: dict, optional.
