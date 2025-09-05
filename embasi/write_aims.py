@@ -826,12 +826,18 @@ def write_aims_embasi(fd,atoms, cycle, scaled=False,geo_constrain=False,write_ve
             return
 
         MultipoleAtoms = atoms.info["multipole-charges"]
+        needs_ghost_list = atoms.info.get('needs_ghost_list', [])
 
         fd = open(fd, "a")
 
+        i = 0
         for item,v in zip(MultipoleAtoms.coordinates,MultipoleAtoms.charge):
             fd.write(f"multipole {item[0]} {item[1]} {item[2]} 0 {v}\n")
-            fd.write(f"empty {item[0]} {item[1]} {item[2]} Emptium\n")
+
+            if needs_ghost_list[i]:
+                fd.write(f"empty {item[0]} {item[1]} {item[2]} Emptium\n")
+            i = i+1
+
         fd.close()
 
 
