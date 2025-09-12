@@ -42,7 +42,7 @@ class AtomsEmbed():
 
     def __init__(self, atoms, initial_calc, embed_mask, ghosts=0,
                  outdir='asi.calc', no_scf=False):
-        self.atoms = atoms
+        self.atoms = atoms.copy()
         self.initial_embed_mask = embed_mask
         self.outdir = outdir
 

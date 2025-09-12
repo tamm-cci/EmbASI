@@ -788,14 +788,14 @@ def write_aims_embasi(fd,atoms, cycle, scaled=False,geo_constrain=False,write_ve
             fd.write(atomstring)
             if scaled:
                 for pos in scaled_positions[i]:
-                    fd.write(f"{pos:16.16f} ")
+                    fd.write(f"{pos:16.9f} ")
             else:
                 for pos in atom.position:
-                    fd.write(f"{pos:16.16f} ")
+                    fd.write(f"{pos:16.9f} ")
             fd.write(atom.symbol)
             fd.write("\n")
             the.append(atomstring + " ".join(
-                [f"{float(atom.position[i]):16.16f}" for i in range(len(atom.position))]) + " " + atom.symbol)
+                [f"{float(atom.position[i]):16.9f}" for i in range(len(atom.position))]) + " " + atom.symbol)
             # (1) all coords are constrained:
             if fix_cart[i].all():
                 fd.write("    constrain_relaxation .true.\n")
