@@ -366,7 +366,8 @@ class ProjectionEmbedding(EmbeddingBase):
 
     def __init__(self, atoms, embed_mask, calc_base_ll, calc_base_hl,
                  total_charge=0, post_scf=None, total_energy_corr="1storder",
-                 truncate_basis_thresh=None, localisation='SPADE', projection="level-shift",
+                 truncate_basis_thresh=None, truncate_basis_atoms=None,
+                 localisation='SPADE', projection="level-shift",
                  mu_val=1.e+06, parallel=False, gc=True, run_dir="./EmbASI_calc"):
 
         from copy import copy, deepcopy
@@ -424,7 +425,7 @@ class ProjectionEmbedding(EmbeddingBase):
             supersys_ctxt_tag = "main"
             subsys_ctxt_tag = "main"
             supersys_descr_tag = "supersystem"
-            subsys_descr_tag = "supersystem"
+            subsys_descr_tag = "subsystem"
         else:
             supersys_ctxt_tag = None
             subsys_ctxt_tag = None
@@ -480,7 +481,16 @@ class ProjectionEmbedding(EmbeddingBase):
         self.mu_val = mu_val
         self.rank = MPI.COMM_WORLD.Get_rank()
         self.ntasks = MPI.COMM_WORLD.Get_size()
+
+        self.truncate = False
+        if (truncate_basis_thresh is not None) and (truncate_basis_atoms is not None):
+            raise Exception("Please only specific truncate_basis_thresh OR truncate_basis_atoms")
+        
+        if (truncate_basis_thresh is not None) or (truncate_basis_atoms is not None):
+            self.truncate = True
+
         self.truncate_basis_thresh = truncate_basis_thresh
+        self.truncate_basis_atoms = truncate_basis_atoms
 
     def calculate_levelshift_projector(self, densmat, overlap):
         """Calculates level-shift projection operator
@@ -676,12 +686,20 @@ class ProjectionEmbedding(EmbeddingBase):
 
         # Initialises the density matrix for subsystem A, and calculates the
         # hamiltonian components for subsystem A at the low-level reference.
-        if self.truncate_basis_thresh is not None:
-            basis_mask = self.select_atoms_basis_truncation(self.AB_LL,
-                                                            densmat_A_LL,
-                                                            overlap,
-                                                            self.truncate_basis_thresh)
-            self.basis_info = self.set_truncation_defaults(self.AB_LL, basis_mask)
+        if self.truncate:
+
+            if (self.truncate_basis_thresh is not None):
+                self.basis_mask = self.select_atoms_basis_truncation(self.AB_LL,
+                                                                densmat_A_LL,
+                                                                overlap,
+                                                                self.truncate_basis_thresh)
+            elif (self.truncate_basis_atoms is not None):
+                self.basis_mask = [ x in self.truncate_basis_atoms for x in np.arange(len(self.AB_LL.atoms)) ]
+            else:
+                raise Exception("self.truncate is True, but neither self.truncate_basis_thresh or self.truncate_basis_atoms are set")
+
+            self.basis_info = self.set_truncation_defaults(self.AB_LL, self.basis_mask)
+            self.trunc_basis_atoms = self.basis_info.trunc_basis_atoms
 
             self.AB_LL.truncate = False
             self.A_LL.truncate = True
@@ -715,9 +733,11 @@ class ProjectionEmbedding(EmbeddingBase):
         root_print(f" Population of Subsystem AB: {self.AB_pop}")
         root_print(f" Population of Subsystem A: {self.A_pop}")
         root_print(f" Population of Subsystem B: {self.B_pop}")
-
         # Calculate the energy for subsystem A with the lower level of theory
         self.A_LL.density_matrix_in = densmat_A_LL
+        if self.truncate:
+            trunc_densmat_A_LL = self.A_LL.full_mat_to_truncated(densmat_A_LL)
+
         self.A_LL.input_fragment_nelectrons = self.A_pop
         start = time.time()
         self.A_LL.run(ev_corr_scf=True)
@@ -752,7 +772,7 @@ class ProjectionEmbedding(EmbeddingBase):
         # at every SCF iteration.
         self.A_HL.density_matrix_in = densmat_A_LL
         self.A_HL.input_fragment_nelectrons = self.A_pop
-        self.vemb = AB_hamiltonian_estat_plus_xc - self.A_LL.hamiltonian_estat_plus_xc
+        self.vemb = AB_hamiltonian_estat_plus_xc - self.A_LL.hamiltonian_estat_plus_xc        
         self.A_HL.fock_embedding_matrix = self.vemb + self.P_b
 
         if self.gc:
@@ -766,6 +786,12 @@ class ProjectionEmbedding(EmbeddingBase):
         self.time_a_highlevel = end - start
 
         densmat_A_HL = copy.copy(self.A_HL.density_matrices_out[0])
+
+        if self.truncate:
+            trunc_vemb = self.A_HL.full_mat_to_truncated(self.vemb)
+            trunc_P_b = self.A_HL.full_mat_to_truncated(self.P_b)
+            trunc_densmat_A_HL = self.A_HL.full_mat_to_truncated(densmat_A_HL)
+        
         if self.gc:
             root_print(f"Pre-GC A_HL: {tracemalloc.get_traced_memory()}")
             self.A_HL.garbage_collect()
@@ -819,18 +845,24 @@ class ProjectionEmbedding(EmbeddingBase):
             self.time_ab_lowlevel_pp = end - start
 
         # Calculate projected density correction to total energy
-        # @TODONPSCAL: REPLACE DIRECTIVE
-        self.PB_corr = \
-            (op.trace(self.P_b @ densmat_A_HL) * 27.211384500)
+        if self.truncate:
+            self.PB_corr = \
+                (op.trace(trunc_P_b @ trunc_densmat_A_HL) * 27.211384500)
+        else:
+            self.PB_corr = \
+                (op.trace(self.P_b @ densmat_A_HL) * 27.211384500)
 
         if "total_energy_method" in self.A_HL.initial_calc.parameters:
             self.subsys_A_highlvl_totalen = self.subsys_A_highlvl_totalen + \
                 self.A_HL.post_scf_corr_energy - self.A_HL.dft_energy
 
         if self.total_energy_corr == "1storder":
-            # @TODONPSCAL: REPLACE DIRECTIVE
-            self.order_1_embedding_corr = op.trace((densmat_A_HL - densmat_A_LL) @ \
-                                        (self.vemb)) * 27.211384500
+            if self.truncate:
+                self.order_1_embedding_corr = op.trace((trunc_densmat_A_HL - trunc_densmat_A_LL) @ \
+                                                       (trunc_vemb)) * 27.211384500
+            else:
+                self.order_1_embedding_corr = op.trace((densmat_A_HL - densmat_A_LL) @ \
+                                                       (self.vemb)) * 27.211384500
 
             self.DFT_AinB_total_energy = self.subsys_A_highlvl_totalen - \
                                        self.subsys_A_lowlvl_totalen + self.subsys_AB_lowlvl_totalen + \

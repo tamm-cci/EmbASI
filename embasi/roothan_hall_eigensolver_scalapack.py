@@ -75,12 +75,9 @@ def overlap_illcondition_check_parallel(overlap, thresh, inv=True, return_mask=F
     else:
         if inv:
             # @TODONPSCAL: REPLACE NUMPY DIRECTIVE
-            sigma_sqrt = op.diag(ovlp_evals**(-0.5))
+            ovlp_filtered = ovlp_evecs @ ovlp_evals**(-0.5) @ ovlp_evecs.T
         else:
-            # @TODONPSCAL: REPLACE NUMPY DIRECTIVE
-            sigma_sqrt = op.diag(ovlp_evals**(0.5))
-
-        ovlp_filtered = ovlp_evecs @ sigma_sqrt @ ovlp_evecs.T
+            ovlp_filtered = ovlp_evecs @ ovlp_evals**(0.5) @ ovlp_evecs.T
 
     if return_mask:
         return ovlp_filtered, n_bad, good_val_mask

@@ -14,7 +14,7 @@ class AtomsEmbed():
        atoms in each embedding layer, the level of theory, and the 
        atoms assigned as ghost species in a given step.
     2) Stores matrices (i.e., density matrices and hamiltonians) output
-       by a given system call
+       by a given system callo
     3) Assigns which matrices are passed to the QM code for initialization
        (e.g., the density matrix)
     
@@ -197,24 +197,66 @@ class AtomsEmbed():
         """
 
         import copy
+        import os
 
-        # TODO: Set-up for upper-triangular matrices.
-        full_basis_atoms = self.basis_info.full_basis_atoms
-        full_nbasis = self.basis_info.full_nbasis
+        # Set to local variables to improve readability
         active_atoms = self.basis_info.active_atoms
 
-        basis_mask = [True]*full_nbasis
+        # TODO: Set-up for upper-triangular matrices.
+        trunc_basis_min_idx = self.basis_info.trunc_basis_min_idx
+        trunc_basis_max_idx = self.basis_info.trunc_basis_max_idx
+        full_basis_min_idx = self.basis_info.full_basis_min_idx
+        full_basis_max_idx = self.basis_info.full_basis_max_idx
 
-        for bas_idx, atom in enumerate(full_basis_atoms):
-            if atom not in active_atoms:
-                basis_mask[bas_idx] = False
+        # Set-up empty matrix to read into
+        full_nbasis = self.basis_info.full_nbasis
+        trunc_nbasis = self.basis_info.trunc_nbasis
 
-        trunc_mat = copy.deepcopy(full_mat)
+        if self.parallel:
+            from npscal.distarray import NPScal
+            from npscal.blacs_ctxt_management import DESCR_Register, BLACSDESCRManager
+            from ctypes import cdll, CDLL, RTLD_GLOBAL
 
-        # Delete Rows and Cols corresponding to inactive atoms 
-        # (ie., inactive atom AOs).
-        trunc_mat = np.compress( basis_mask, trunc_mat, axis=0 )
-        trunc_mat = np.compress( basis_mask, trunc_mat, axis=1 )
+            lib = os.environ['ASI_LIB_PATH']
+            
+            if not(DESCR_Register.check_register(self.blacs_descr_tag)):
+                descr = BLACSDESCRManager(self.blacs_ctxt_tag, self.blacs_descr_tag,
+                                          lib, trunc_nbasis, trunc_nbasis,
+                                          16, 16)
+            else:
+                descr = DESCR_Register.get_register(self.blacs_descr_tag)
+
+            trunc_mat = descr.alloc_zeros(np.float64)
+            trunc_mat = NPScal(loc_array=trunc_mat, ctxt_tag=self.blacs_ctxt_tag, descr_tag=self.blacs_descr_tag, lib=lib)
+        else:
+            trunc_mat = np.zeros(shape=(full_nbasis, full_nbasis))
+
+        for atom1 in active_atoms:
+
+            # Skip atoms belonging to region A (or 1) as their basis
+            # functions are already included
+
+            for atom2 in active_atoms:
+                # Skip core active atom blocks - they are already
+                # correctly placed.
+
+                atom2_trunc = np.min(np.where(active_atoms==atom2))
+                atom1_trunc = np.min(np.where(active_atoms==atom1))
+
+                trunc_row_min = trunc_basis_min_idx[atom2_trunc]
+                trunc_row_max = trunc_basis_max_idx[atom2_trunc]
+                trunc_col_min = trunc_basis_min_idx[atom1_trunc]
+                trunc_col_max = trunc_basis_max_idx[atom1_trunc]
+
+                full_row_min = full_basis_min_idx[atom2]
+                full_row_max = full_basis_max_idx[atom2]
+                full_col_min = full_basis_min_idx[atom1]
+                full_col_max = full_basis_max_idx[atom1]
+
+                trunc_mat[trunc_row_min:trunc_row_max, 
+                          trunc_col_min:trunc_col_max] = \
+                        full_mat[full_row_min:full_row_max, 
+                                 full_col_min:full_col_max]
 
         return trunc_mat
 
@@ -237,6 +279,7 @@ class AtomsEmbed():
         """
 
         import copy
+        import os
 
         # Set to local variables to improve readability
         active_atoms = self.basis_info.active_atoms
@@ -249,7 +292,26 @@ class AtomsEmbed():
 
         # Set-up empty matrix to read into
         full_nbasis = self.basis_info.full_nbasis
-        full_mat = np.zeros(shape=(full_nbasis, full_nbasis))
+        if self.parallel:
+            from npscal.distarray import NPScal
+            from npscal.blacs_ctxt_management import DESCR_Register, BLACSDESCRManager
+            from ctypes import cdll, CDLL, RTLD_GLOBAL
+
+            lib = os.environ['ASI_LIB_PATH']
+            new_descr_tag = "supersystem"
+
+            if not(DESCR_Register.check_register(new_descr_tag)):
+                descr = BLACSDESCRManager(self.blacs_ctxt_tag, new_descr_tag,
+                                          lib, full_nbasis, full_nbasis,
+                                          16, 16)
+            else:
+                descr = DESCR_Register.get_register(new_descr_tag)
+
+            full_mat = descr.alloc_zeros(np.float64)
+            full_mat = NPScal(loc_array=full_mat, ctxt_tag=self.blacs_ctxt_tag, descr_tag=new_descr_tag, lib=lib)
+
+        else:
+            full_mat = np.zeros(shape=(full_nbasis, full_nbasis))
 
         for atom1 in active_atoms:
 
@@ -486,7 +548,7 @@ class AtomsEmbed():
             
     @property
     def hamiltonian_total(self):
-        tot_idx = 1
+        tot_idx = 3
         if self.truncate:
             return self.truncated_mat_to_full(self.atoms.calc.asi.ham_storage.get((tot_idx,1,1)))
         else:
@@ -505,7 +567,7 @@ class AtomsEmbed():
 
     @property
     def hamiltonian_kinetic(self):
-        kin_idx = 3
+        kin_idx = 1
         if self.truncate:
             return self.truncated_mat_to_full(self.atoms.calc.asi.ham_storage.get((kin_idx,1,1)))
         else:

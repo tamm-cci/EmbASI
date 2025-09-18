@@ -2,11 +2,13 @@ from ctypes import POINTER, byref, c_int, c_int64, c_int32, c_bool, \
                    c_char_p, c_double, c_void_p, CFUNCTYPE, py_object, \
                    cast, byref, Structure
 from asi4py.pyasi import triang2herm_inplace, triang_packed2full_hermit
+from embasi.parallel_utils import root_print
 from mpi4py import MPI
 from npscal.distarray import NPScal
 from npscal.blacs_ctxt_management import DESCR_Register, CTXT_Register
 from npscal.blacs_ctxt_management import BLACSContextManager, BLACSDESCRManager
 from scalapack4py.array_types import nullable_ndpointer, ctypes2ndarray
+import tracemalloc
 import numpy as np
 import traceback, sys
 
@@ -72,6 +74,8 @@ def dm_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
                                              asi.is_hamiltonian_real, uplo)
             
         if data is not None:
+            root_print("DM")
+            root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
             asi.dm_count += 1
             storage_dict[(asi.dm_count, iK, iS)] = data
     except Exception as eee:
@@ -144,6 +148,8 @@ def ovlp_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
         if data is not None:
             #assert len(data.shape) == 2
             storage_dict[(iK, iS)] = data
+            root_print("OVLP")
+            root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
     except Exception as eee:
         print(f"""Something happened in ASI default_saving_callback 
                   {label}: {eee}\nAborting...""")
@@ -217,18 +223,23 @@ def ham_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
             if asi.ham_count < 3:
                 asi.ham_count = asi.ham_count + 1
                 storage_dict[(asi.ham_count, iK, iS)] = data
+                root_print("HAM")
+                root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
             else:
                 storage_dict.pop((1, iK, iS))
-                storage_dict[(1, iK, iS)] = storage_dict[(2, iK, iS)].copy()
-                storage_dict[(2, iK, iS)] = storage_dict[(3, iK, iS)].copy()
+                root_print("HAM")
+                root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
+                storage_dict[(1, iK, iS)] = storage_dict[(2, iK, iS)]
+                root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
+                storage_dict[(2, iK, iS)] = storage_dict[(3, iK, iS)]
+                root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
                 storage_dict[(3, iK, iS)] = data
-
+                root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
     except Exception as eee:
         print(f"""Something happened in ASI default_saving_callback {label}: 
                   {eee}\nAborting...""")
         traceback.print_tb(eee.__traceback__, limit=5, file=sys.stdout)
         MPI.COMM_WORLD.Abort(1)
-
 
 def matrix_loading_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
     """Default callback for loading matrices
