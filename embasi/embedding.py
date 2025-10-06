@@ -109,7 +109,9 @@ class EmbeddingBase(ABC):
         -------
         active_atom_mask: bool list
             Atoms considered active (True), or truncated (False).
-        
+
+
+        !! just testing oct 6 if i still have dev rights
         """
 
         basis_charge = np.diag(densmat @ atomsembed.overlap)
