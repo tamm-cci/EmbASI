@@ -36,6 +36,10 @@ class AtomsEmbed():
         Assigns atoms to be evaluated as ghost species for the purposes
         of embedding. If ghosts are needed for BSSE, they must be 
         set in dictionary atoms.info['ghosts'] as a mask.
+    grids: int
+        Assigns atoms to be evaluated as ghost species for the purposes
+        of embedding. If ghosts are needed for BSSE, they must be 
+        set in dictionary atoms.info['ghosts'] as a mask.
     outdir: str
         Name of directory output files are saved to
     no_scf: bool

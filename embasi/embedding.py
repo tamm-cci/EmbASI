@@ -69,6 +69,8 @@ class EmbeddingBase(ABC):
             assigned to each atom (i.e., [1,1,1,2,2,2])
         ghosts: int
             Layer to be considered as ghost atoms. If 0, no ghosts assigned.
+        grids: int
+            Layer to be considered as grid only atoms. If 0, no grid only species assigned.
         no_scf: bool
             Terminate SCF cycle at the first step
 
@@ -963,38 +965,24 @@ class FrozenDensityEmbedding(EmbeddingBase):
         low_level_calculator  = deepcopy(self.calculator_ll)
         high_level_calculator = deepcopy(self.calculator_hl)
 
-        self.Test_RI = True
-        self.Test_NonAdd = True  
-        self.Test_Embed = False
-        self.qmlayer = 1
         self.run_dir =  run_dir
 
-        if self.Test_RI:
-            initial_calculator.parameters['ri_potential_restart'] = 'write'
-            low_level_calculator.parameters['ri_potential_restart'] = 'read_and_write'
-            high_level_calculator.parameters['ri_potential_restart'] = 'read_and_write'
-
-        if self.Test_NonAdd:
-            low_level_calculator.parameters['qm_embedding_type'] = 'frozendensity'
-            high_level_calculator.parameters['qm_embedding_type'] = 'frozendensity'
-
-        if self.Test_Embed:
-            initial_calculator.parameters['qm_embedding_calc'] = self.qmlayer
-            low_level_calculator.parameters['qm_embedding_calc'] = self.qmlayer
-            high_level_calculator.parameters['qm_embedding_calc'] = self.qmlayer
+        low_level_calculator.parameters['qm_embedding_type'] = 'frozendensity  write'
+        low_level_calculator.parameters['qm_embedding_type'] = 'frozendensity  read_and_write'
+        high_level_calculator.parameters['qm_embedding_type'] = 'frozendensity  read_and_write'
 
         initial_calculator.parameters["aims_output"] = "rho_and_derivs_on_grid"
         low_level_calculator.parameters['aims_output'] = "rho_and_derivs_on_grid"
         high_level_calculator.parameters['aims_output'] = "rho_and_derivs_on_grid"
 
         self.set_layer(atoms, "MU0", initial_calculator, 
-                       embed_mask, ghosts=2, no_scf=False)
+                       embed_mask, grids=2, no_scf=False)
 
         self.set_layer(atoms, "F2A1", low_level_calculator, 
-                       embed_mask, ghosts=2, no_scf=False)
+                       embed_mask, grids=2, no_scf=False)
 
         self.set_layer(atoms, "F1A2", high_level_calculator,
-                       embed_mask, ghosts=1, no_scf=False)
+                       embed_mask, grids=1, no_scf=False)
 
         self.rank = MPI.COMM_WORLD.Get_rank()
         self.ntasks = MPI.COMM_WORLD.Get_size()
