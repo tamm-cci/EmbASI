@@ -48,7 +48,7 @@ class EmbeddingBase(ABC):
             root_print(f"Directory {self.run_dir} can not be created")
 
     def set_layer(self, atoms, layer_name, calc, embed_mask, ghosts=0, 
-                      no_scf=False):
+                       no_scf=False):
         """Sets an AtomsEmbed object as an attribute
 
         Creates an AtomsEmbed object as a named attribute (layer_name) of 
@@ -79,7 +79,7 @@ class EmbeddingBase(ABC):
         outdir_name = os.path.join(self.run_dir, layer_name)
 
         layer = AtomsEmbed(atoms, calc, embed_mask, outdir=outdir_name, 
-                           ghosts=ghosts, grids=grids, no_scf=no_scf)
+                           ghosts=ghosts,  no_scf=no_scf)
         setattr(self, layer_name, layer)
 
     def select_atoms_basis_truncation(self, atomsembed, densmat, thresh):
@@ -829,13 +829,13 @@ class FrozenDensityEmbedding(EmbeddingBase):
         high_level_calculator.parameters['aims_output'] = "rho_and_derivs_on_grid"
 
         self.set_layer(atoms, "MU0", initial_calculator, 
-                       embed_mask, grids=2, no_scf=False)
+                       embed_mask, ghosts=2, no_scf=False)
 
         self.set_layer(atoms, "F2A1", low_level_calculator, 
-                       embed_mask, grids=2, no_scf=False)
+                       embed_mask, ghosts=2, no_scf=False)
 
         self.set_layer(atoms, "F1A2", high_level_calculator,
-                       embed_mask, grids=1, no_scf=False)
+                       embed_mask, ghosts=1, no_scf=False)
 
         self.rank = MPI.COMM_WORLD.Get_rank()
         self.ntasks = MPI.COMM_WORLD.Get_size()
