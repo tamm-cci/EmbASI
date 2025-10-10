@@ -4,9 +4,9 @@ from ctypes import POINTER, byref, c_int, c_int64, c_int32, c_bool, \
 from asi4py.pyasi import triang2herm_inplace, triang_packed2full_hermit
 from embasi.parallel_utils import root_print
 from mpi4py import MPI
-from npscal.distarray import NPScal
-from npscal.blacs_ctxt_management import DESCR_Register, CTXT_Register
-from npscal.blacs_ctxt_management import BLACSContextManager, BLACSDESCRManager
+from scalapack4py.npscal import NPScal
+from scalapack4py.npscal.blacs_ctxt_management import DESCR_Register, CTXT_Register
+from scalapack4py.npscal.blacs_ctxt_management import BLACSContextManager, BLACSDESCRManager
 from scalapack4py.array_types import nullable_ndpointer, ctypes2ndarray
 import tracemalloc
 import numpy as np
@@ -61,7 +61,9 @@ def dm_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
                     rsrc, csrc, lld = descr_cast.rsrc, descr_cast.csrc, descr_cast.lld
                     descr = BLACSDESCRManager(ctxt_tag, descr_tag, asi.scalapack, m, n,
                                               mb, nb, rsrc, csrc, lld)
+
                 data = NPScal(loc_array=data, ctxt_tag=ctxt_tag, descr_tag=descr_tag, lib=asi.scalapack)
+                print(f"OUTPUT DATA SHAPE: {data.loc_array.shape}")
 
         elif (matrix_descr_ptr.contents.storage_type in {1,2}):
             assert not descr, """default_saving_callback supports only dense full 
@@ -74,8 +76,7 @@ def dm_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
                                              asi.is_hamiltonian_real, uplo)
             
         if data is not None:
-            root_print("DM")
-            root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
+            #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
             asi.dm_count += 1
             storage_dict[(asi.dm_count, iK, iS)] = data
     except Exception as eee:
@@ -148,8 +149,7 @@ def ovlp_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
         if data is not None:
             #assert len(data.shape) == 2
             storage_dict[(iK, iS)] = data
-            root_print("OVLP")
-            root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
+            #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
     except Exception as eee:
         print(f"""Something happened in ASI default_saving_callback 
                   {label}: {eee}\nAborting...""")
@@ -223,18 +223,16 @@ def ham_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
             if asi.ham_count < 3:
                 asi.ham_count = asi.ham_count + 1
                 storage_dict[(asi.ham_count, iK, iS)] = data
-                root_print("HAM")
-                root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
+                #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
             else:
                 storage_dict.pop((1, iK, iS))
-                root_print("HAM")
-                root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
+                #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
                 storage_dict[(1, iK, iS)] = storage_dict[(2, iK, iS)]
-                root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
+                #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
                 storage_dict[(2, iK, iS)] = storage_dict[(3, iK, iS)]
-                root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
+                #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
                 storage_dict[(3, iK, iS)] = data
-                root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
+                #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
     except Exception as eee:
         print(f"""Something happened in ASI default_saving_callback {label}: 
                   {eee}\nAborting...""")
@@ -288,7 +286,14 @@ def matrix_loading_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
 
                 src_descr = DESCR_Register.get_register(descr_tag)
                 dest_descr = asi.scalapack.wrap_blacs_desc(descr)
-                data = ctypes2ndarray(data, (dest_descr.locrow, dest_descr.loccol)).T
+
+                data = ctypes2ndarray(data, shape=(dest_descr.locrow, dest_descr.loccol)).T
+
+                print(f"sorc descr: {src_descr}")
+                print(f"dest descr: {dest_descr}")
+
+                print(f"data shape: {data.shape}")
+                print(f"m shape: {m.loc_array.shape}")
 
                 asi.scalapack.pdgemr2d(asi.n_basis, asi.n_basis,
                                        m.loc_array, 1, 1, src_descr,

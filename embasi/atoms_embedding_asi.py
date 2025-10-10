@@ -1,7 +1,7 @@
 from asi4py.asecalc import ASI_ASE_calculator
 from embasi.parallel_utils import root_print, mpi_bcast_matrix_storage, \
     mpi_bcast_integer
-import npscal.math_utils.operations as op
+import scalapack4py.npscal.math_utils.operations as op
 import numpy as np
 from mpi4py import MPI
 
@@ -213,8 +213,8 @@ class AtomsEmbed():
         trunc_nbasis = self.basis_info.trunc_nbasis
 
         if self.parallel:
-            from npscal.distarray import NPScal
-            from npscal.blacs_ctxt_management import DESCR_Register, BLACSDESCRManager
+            from scalapack4py.npscal import NPScal
+            from scalapack4py.npscal.blacs_ctxt_management import DESCR_Register, BLACSDESCRManager
             from ctypes import cdll, CDLL, RTLD_GLOBAL
 
             lib = os.environ['ASI_LIB_PATH']
@@ -293,8 +293,8 @@ class AtomsEmbed():
         # Set-up empty matrix to read into
         full_nbasis = self.basis_info.full_nbasis
         if self.parallel:
-            from npscal.distarray import NPScal
-            from npscal.blacs_ctxt_management import DESCR_Register, BLACSDESCRManager
+            from scalapack4py.npscal import NPScal
+            from scalapack4py.npscal.blacs_ctxt_management import DESCR_Register, BLACSDESCRManager
             from ctypes import cdll, CDLL, RTLD_GLOBAL
 
             lib = os.environ['ASI_LIB_PATH']

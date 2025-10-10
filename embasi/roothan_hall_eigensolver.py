@@ -51,6 +51,8 @@ def overlap_illcondition_check(overlap, thresh, inv=True, return_mask=False):
     n_bad = (ovlp_evals < thresh).sum()
     n_good = np.shape(overlap)[0] - n_bad
 
+    print(f"ovlp evals: {ovlp_evals}")
+
     good_val_mask = (ovlp_evals > thresh)
 
     if n_bad > 0:
@@ -90,6 +92,7 @@ def hamiltonian_eigensolv(hamiltonian, overlap, nelec, return_orthog=False):
 
     evals, evecs = np.linalg.eig(xform_hamiltonian(hamiltonian, xform_mat))
     #evecs = back_xform_evecs(evecs, xform_mat)
+    print(f"ham evals: {evals}")
 
     if return_orthog:
         evals, evecs = sort_eigvals_and_evecs(evals, evecs)
