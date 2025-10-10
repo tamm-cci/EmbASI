@@ -1,7 +1,7 @@
 import numpy as np
 from ctypes import RTLD_GLOBAL, CDLL, POINTER, byref, c_int, c_int64, c_int32, c_bool, c_double
 from embasi.parallel_utils import root_print, mpi_bcast_matrix
-import npscal.math_utils.operations as op
+import scalapack4py.npscal.math_utils.operations as op
 import os
 
 def xform_hamiltonian(hamiltonian, xform_mat):
@@ -42,20 +42,20 @@ def overlap_illcondition_check_parallel(overlap, thresh, inv=True, return_mask=F
 
     from scipy.linalg import eig_banded, eigh
     from embasi.parallel_utils import root_print
-    from npscal.math_utils.npscal2npscal import eig
+    from scalapack4py.npscal.math_utils.npscal2npscal import eig
 
     # @TODONPSCAL: REPLACE WITH GLOBAL SHAPE
     n_basis = overlap.gl_m
 
     # @TODONPSCAL: REPLACE ARGUMENT WITH NPSCAL
     ovlp_evals, ovlp_evecs = eig(overlap, vl=thresh, vu=100000)
-    
+    print("I BREAK HERE Ba")
     # Count non-singular values
     n_bad = (ovlp_evals < thresh).sum()
     n_good = overlap.gl_m - n_bad
-
+    print("I BREAK HERE Bb")
     good_val_mask = (ovlp_evals > thresh)
-
+    print("I BREAK HERE Bc")
     if n_bad > 0:
         # Transform overlap matrix
         # @TODONPSCAL: FIGURE OUT HOW THIS IS DONE LOCALLY
@@ -74,10 +74,14 @@ def overlap_illcondition_check_parallel(overlap, thresh, inv=True, return_mask=F
 
     else:
         if inv:
+            print("I BREAK HERE Bc")
             # @TODONPSCAL: REPLACE NUMPY DIRECTIVE
-            ovlp_filtered = ovlp_evecs @ ovlp_evals**(-0.5) @ ovlp_evecs.T
+            ovlp_filtered = ovlp_evecs @ op.diag(ovlp_evals**(-0.5), ctxt_tag=overlap.ctxt_tag, descr_tag="main", lib=overlap.sl) @ ovlp_evecs.T
+            print("I BREAK HERE Bd")
         else:
-            ovlp_filtered = ovlp_evecs @ ovlp_evals**(0.5) @ ovlp_evecs.T
+            print("I BREAK HERE Bc")
+            ovlp_filtered = ovlp_evecs @ op.diag(ovlp_evals**(0.5), ctxt_tag=overlap.ctxt_tag, descr_tag="main", lib=overlap.sl) @ ovlp_evecs.T
+            print("I BREAK HERE Bd")
 
     if return_mask:
         return ovlp_filtered, n_bad, good_val_mask
@@ -87,16 +91,18 @@ def overlap_illcondition_check_parallel(overlap, thresh, inv=True, return_mask=F
 def hamiltonian_eigensolv_parallel(hamiltonian, overlap, nelec, return_orthog=False):
 
     from embasi.parallel_utils import root_print
-    from npscal.math_utils.npscal2npscal import eig    
+    from scalapack4py.npscal.math_utils.npscal2npscal import eig    
 
+    print("I BREAK HERE A")
     thresh = 1e-5
 
     n_basis = overlap.gl_m
+    print("I BREAK HERE B")
     xform_mat, n_bad = overlap_illcondition_check_parallel(overlap, thresh)
     n_good = n_basis - n_bad
-
+    print("I BREAK HERE C")
     evals, evecs = eig(xform_hamiltonian(hamiltonian, xform_mat))
-
+    print("I BREAK HERE D")
     if return_orthog:
         #evals, evecs = sort_eigvals_and_evecs(evals, evecs)
         occ_mat = calculate_occ_mat(evals, nelec)
