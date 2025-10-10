@@ -976,13 +976,13 @@ class FrozenDensityEmbedding(EmbeddingBase):
         high_level_calculator.parameters['aims_output'] = "rho_and_derivs_on_grid"
 
         self.set_layer(atoms, "MU0", initial_calculator, 
-                       embed_mask, grids=2, no_scf=False)
+                       embed_mask, ghosts=2, no_scf=False)
 
         self.set_layer(atoms, "F2A1", low_level_calculator, 
-                       embed_mask, grids=2, no_scf=False)
+                       embed_mask, ghosts=2, no_scf=False)
 
         self.set_layer(atoms, "F1A2", high_level_calculator,
-                       embed_mask, grids=1, no_scf=False)
+                       embed_mask, ghosts=1, no_scf=False)
 
         self.rank = MPI.COMM_WORLD.Get_rank()
         self.ntasks = MPI.COMM_WORLD.Get_size()
