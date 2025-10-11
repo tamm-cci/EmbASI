@@ -63,7 +63,6 @@ def dm_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
                                               mb, nb, rsrc, csrc, lld)
 
                 data = NPScal(loc_array=data, ctxt_tag=ctxt_tag, descr_tag=descr_tag, lib=asi.scalapack)
-                print(f"OUTPUT DATA SHAPE: {data.loc_array.shape}")
 
         elif (matrix_descr_ptr.contents.storage_type in {1,2}):
             assert not descr, """default_saving_callback supports only dense full 
@@ -288,12 +287,6 @@ def matrix_loading_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
                 dest_descr = asi.scalapack.wrap_blacs_desc(descr)
 
                 data = ctypes2ndarray(data, shape=(dest_descr.locrow, dest_descr.loccol)).T
-
-                print(f"sorc descr: {src_descr}")
-                print(f"dest descr: {dest_descr}")
-
-                print(f"data shape: {data.shape}")
-                print(f"m shape: {m.loc_array.shape}")
 
                 asi.scalapack.pdgemr2d(asi.n_basis, asi.n_basis,
                                        m.loc_array, 1, 1, src_descr,

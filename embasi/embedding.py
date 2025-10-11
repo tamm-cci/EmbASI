@@ -527,8 +527,7 @@ class ProjectionEmbedding(EmbeddingBase):
         from embasi.parallel_utils import mpi_bcast_matrix
         import copy
 
-        #root_print('Starting SPADE localisation...')
-        print(f"{self.rank}: Starting SPADE localisation...", flush=True)
+        root_print('Starting SPADE localisation...')
         nelecs = atomsembed.free_atom_nelectrons - atomsembed.input_total_charge
         if self.parallel:
             evals, evecs, occ_mat, xform_mat = hamiltonian_eigensolv_parallel(hamiltonian, \
@@ -569,46 +568,21 @@ class ProjectionEmbedding(EmbeddingBase):
         evecs_occ_a = evecs_occ[mask_val, :]
         
         if self.parallel:
-            #root_print(f"evecs_occ: {evecs_occ.gather_to_global().shape}")
-            #root_print(f"evecs_occ: {evecs_occ.gather_to_global()}")
-            #root_print(f"evecs_occ_a: {evecs_occ_a.gather_to_global().shape}")
-            #root_print(f"evecs_occ_a: {evecs_occ_a.gather_to_global()}")
             u, svals, v = svd(evecs_occ_a)
-            #root_print(f"v: {v.gather_to_global()}")
-            #root_print(f"v: {v.gather_to_global().shape}")
         else:
-            #root_print(f"evecs_occ: {evecs_occ}")
-            #root_print(f"evecs_occ: {evecs_occ}")
-            #root_print(f"evecs_occ_a: {evecs_occ_a}")
-            #root_print(f"evecs_occ_a: {evecs_occ_a.shape}")
             u, svals, v = np.linalg.svd(evecs_occ_a, full_matrices=True)
-            #root_print(f"v: {v}")
-            #root_print(f"v: {v.shape}")
 
         svals_diff = np.ediff1d(svals**2.0)
         max_sval_change_idx = np.argmax(np.abs(svals_diff)) + 1
 
-        print(f'Maximum SPADE state for subsystem A: {max_sval_change_idx}', flush=True)
+        root_print(f'Maximum SPADE state for subsystem A: {max_sval_change_idx}')
 
         evecs_occ_a = xform_mat @ evecs_occ @ v[:max_sval_change_idx, :].T
         evecs_occ_ab = xform_mat @ evecs_occ
 
         # @TODOSPIN: Need to redefine occupancies
-        #print(f"evecs_occ_ab diag: {op.diag(evecs_occ_ab)}")
-        #print(f"evecs_occ_a diag: {op.diag(evecs_occ_a)}")
         density_matrix_supersystem = 2.0 * (evecs_occ_ab @ evecs_occ_ab.copy().T)
         density_matrix_subsys_a = 2.0 * (evecs_occ_a @ evecs_occ_a.copy().T)
-
-        if self.parallel:
-            print(f"DM AB: {density_matrix_supersystem.gather_to_global()}")
-            print(f"DM A: {density_matrix_subsys_a.gather_to_global()}")
-            print(f"DM AB SHAPE: {density_matrix_supersystem.gather_to_global().shape}")
-            print(f"DM A SHAPE: {density_matrix_subsys_a.gather_to_global().shape}")
-        else:
-            print(f"DM AB: {density_matrix_supersystem}")
-            print(f"DM A: {density_matrix_subsys_a}")
-            print(f"DM AB SHAPE: {density_matrix_supersystem.shape}")
-            print(f"DM A SHAPE: {density_matrix_subsys_a.shape}")
         
         if not(self.parallel):
             density_matrix_supersystem = mpi_bcast_matrix(density_matrix_supersystem)
@@ -684,9 +658,6 @@ class ProjectionEmbedding(EmbeddingBase):
         end = time.time()
         self.time_ab_lowlevel = end - start
 
-        #overlap = copy.copy(self.AB_LL.overlap)
-        #hamiltonian_AB_total = copy.copy(self.AB_LL.hamiltonian_total)
-        #AB_hamiltonian_estat_plus_xc = copy.copy(self.AB_LL.hamiltonian_estat_plus_xc)
         overlap = self.AB_LL.overlap.copy()
         hamiltonian_AB_total = self.AB_LL.hamiltonian_total.copy()
         AB_hamiltonian_estat_plus_xc = self.AB_LL.hamiltonian_estat_plus_xc.copy()
@@ -761,8 +732,6 @@ class ProjectionEmbedding(EmbeddingBase):
         root_print(f" Population of Subsystem B: {self.B_pop}")
 
         # Calculate the energy for subsystem A with the lower level of theory
-        print(f"A_LL DM COL: {densmat_A_LL[1,0]}")
-        print(f"A_LL DM ROW: {densmat_A_LL[0,1]}")
         self.A_LL.density_matrix_in = densmat_A_LL
         if self.truncate:
             trunc_densmat_A_LL = self.A_LL.full_mat_to_truncated(densmat_A_LL)
@@ -801,13 +770,7 @@ class ProjectionEmbedding(EmbeddingBase):
         # at every SCF iteration.
         self.A_HL.density_matrix_in = densmat_A_LL
         self.A_HL.input_fragment_nelectrons = self.A_pop
-        print(f"A_LL DENSMAT TRACE: {op.trace(densmat_A_LL)}")
-        print(f"B_LL DENSMAT TRACE: {op.trace(densmat_B_LL)}")
-        print(f"AB HAM ESTAT: {op.trace(AB_hamiltonian_estat_plus_xc)}")
-        print(f"A HAM ESTAT: {op.trace(self.A_LL.hamiltonian_estat_plus_xc)}")
         self.vemb = AB_hamiltonian_estat_plus_xc - self.A_LL.hamiltonian_estat_plus_xc
-        print(f"vemb: {op.trace(self.vemb)}")
-        print(f"Pb: {op.trace(self.P_b)}")
         self.A_HL.fock_embedding_matrix = self.vemb + self.P_b
 
         if self.gc:
