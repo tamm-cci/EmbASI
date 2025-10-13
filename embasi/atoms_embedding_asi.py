@@ -218,16 +218,9 @@ class AtomsEmbed():
             from ctypes import cdll, CDLL, RTLD_GLOBAL
 
             lib = os.environ['ASI_LIB_PATH']
-            
-            if not(DESCR_Register.check_register(self.blacs_descr_tag)):
-                descr = BLACSDESCRManager(self.blacs_ctxt_tag, self.blacs_descr_tag,
-                                          lib, trunc_nbasis, trunc_nbasis,
-                                          16, 16)
-            else:
-                descr = DESCR_Register.get_register(self.blacs_descr_tag)
 
-            trunc_mat = descr.alloc_zeros(np.float64)
-            trunc_mat = NPScal(loc_array=trunc_mat, ctxt_tag=self.blacs_ctxt_tag, descr_tag=self.blacs_descr_tag, lib=lib)
+            trunc_mat = NPScal(ctxt_tag=self.blacs_ctxt_tag, descr_tag=self.blacs_descr_tag, lib=lib,
+                               gl_m=trunc_nbasis, gl_n=trunc_nbasis, dmb=16, dnb=16)
         else:
             trunc_mat = np.zeros(shape=(full_nbasis, full_nbasis))
 
@@ -294,22 +287,14 @@ class AtomsEmbed():
         full_nbasis = self.basis_info.full_nbasis
         if self.parallel:
             from scalapack4py.npscal import NPScal
-            from scalapack4py.npscal.blacs_ctxt_management import DESCR_Register, BLACSDESCRManager
+            from scalapack4py.npscal.blacs_ctxt_management import DESCR_Register
             from ctypes import cdll, CDLL, RTLD_GLOBAL
 
             lib = os.environ['ASI_LIB_PATH']
+            print(f"DESCR REGISTER {DESCR_Register}")
             new_descr_tag = "supersystem"
 
-            if not(DESCR_Register.check_register(new_descr_tag)):
-                descr = BLACSDESCRManager(self.blacs_ctxt_tag, new_descr_tag,
-                                          lib, full_nbasis, full_nbasis,
-                                          16, 16)
-            else:
-                descr = DESCR_Register.get_register(new_descr_tag)
-
-            full_mat = descr.alloc_zeros(np.float64)
-            full_mat = NPScal(loc_array=full_mat, ctxt_tag=self.blacs_ctxt_tag, descr_tag=new_descr_tag, lib=lib)
-
+            full_mat = NPScal(ctxt_tag=self.blacs_ctxt_tag, descr_tag=new_descr_tag, lib=lib)
         else:
             full_mat = np.zeros(shape=(full_nbasis, full_nbasis))
 
