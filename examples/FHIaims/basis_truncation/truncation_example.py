@@ -81,12 +81,6 @@ embed_mask = len(nonanol)*[2]
 embed_mask[0], embed_mask[32] = 1, 1
 #embed_mask[23], embed_mask[0] = 1, 1
 
-# Set-up directories
-os.makedirs('decanol_truncated', exist_ok=True)
-os.makedirs('decanol_fullbasis', exist_ok=True)
-
-os.chdir('decanol_truncated')
-
 # Set up ProjectionEmbedding, with:
 # - Embedding mask (1=Highlevel (PBE0), 2=Low-level (PBE))
 # - Assigned higher and lower level calculators
@@ -99,7 +93,8 @@ Projection = ProjectionEmbedding(nonanol,
                                  mu_val=1.e+6,
                                  truncate_basis_thresh=0.01,
                                  projection="huzinaga",
-                                 localisation="SPADE",)
+                                 localisation="SPADE",
+                                 parallel=True)
 
 root_print('\nRunning truncated basis decanol \n')
 start = time.time()
@@ -116,14 +111,14 @@ root_print('Finished running truncated basis decanol  \n')
 # It is advised to check whether basis truncation introduces
 # significant changes in total energy
 
-os.chdir('../decanol_fullbasis')
 Projection = ProjectionEmbedding(nonanol,
                                  embed_mask=embed_mask,
                                  calc_base_ll=calc_ll,
                                  calc_base_hl=calc_hl,
                                  mu_val=1.e+6,
                                  projection="huzinaga",
-                                 localisation="SPADE")
+                                 localisation="SPADE",
+                                 parallel=True)
 
 root_print('\nRunning full basis decanol \n')
 start = time.time()
@@ -135,8 +130,6 @@ end = time.time()
 fullbasis_walltime = end - start
 fullbasis_energy = Projection.DFT_AinB_total_energy
 root_print('Finished running full basis decanol  \n')
-
-os.chdir('..')
 
 
 root_print('---------------------------------')

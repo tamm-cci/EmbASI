@@ -2,3 +2,4 @@ pytest
 pytest-regressions
 pytest-mpi
 pytest-order
+pandas

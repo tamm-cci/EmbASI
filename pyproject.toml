@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "embasi"
-version = "0.2.0"
+version = "0.4.0"
 authors = [
         {name="Gabriel Bramley", email="BramleyG@cardiff.ac.uk"},
 ]
@@ -19,7 +19,7 @@ classifiers = [
 ]
 dependencies = [
              "ase==3.24.0",
-	     "asi4py>=1.4.1",
+	     "asi4py>=1.4.5",
 ]
 
 

@@ -1,6 +1,7 @@
 from asi4py.asecalc import ASI_ASE_calculator
 from embasi.parallel_utils import root_print, mpi_bcast_matrix_storage, \
     mpi_bcast_integer
+import scalapack4py.npscal.math_utils.operations as op
 import numpy as np
 from mpi4py import MPI
 
@@ -13,7 +14,7 @@ class AtomsEmbed():
        atoms in each embedding layer, the level of theory, and the 
        atoms assigned as ghost species in a given step.
     2) Stores matrices (i.e., density matrices and hamiltonians) output
-       by a given system call
+       by a given system callo
     3) Assigns which matrices are passed to the QM code for initialization
        (e.g., the density matrix)
     
@@ -41,11 +42,25 @@ class AtomsEmbed():
     """
 
     def __init__(self, atoms, initial_calc, embed_mask, ghosts=0,
-                 outdir='asi.calc', no_scf=False):
-        self.atoms = atoms
+                 outdir='asi.calc', no_scf=False, ctxt_tag=None,
+                 descr_tag=None):
+
+        self.atoms = atoms.copy()
         self.initial_embed_mask = embed_mask
         self.outdir = outdir
 
+        # Determines whether arrays are to be communicated in serial,
+        # or as BLACS distributed arrays from a globally stored context
+        # provided by NPScal
+        if (ctxt_tag is None) and (descr_tag is None):
+            self.parallel = False
+            self.blacs_ctxt_tag = None
+            self.blacs_descr_tag = None
+        else:
+            self.parallel = True
+            self.blacs_ctxt_tag = ctxt_tag
+            self.blacs_descr_tag = descr_tag
+            
         if isinstance(embed_mask, int):
             # We hope the user knows what they are doing and
             # their atoms object is ordered accordingly.
@@ -182,24 +197,59 @@ class AtomsEmbed():
         """
 
         import copy
+        import os
 
-        # TODO: Set-up for upper-triangular matrices.
-        full_basis_atoms = self.basis_info.full_basis_atoms
-        full_nbasis = self.basis_info.full_nbasis
+        # Set to local variables to improve readability
         active_atoms = self.basis_info.active_atoms
 
-        basis_mask = [True]*full_nbasis
+        # TODO: Set-up for upper-triangular matrices.
+        trunc_basis_min_idx = self.basis_info.trunc_basis_min_idx
+        trunc_basis_max_idx = self.basis_info.trunc_basis_max_idx
+        full_basis_min_idx = self.basis_info.full_basis_min_idx
+        full_basis_max_idx = self.basis_info.full_basis_max_idx
 
-        for bas_idx, atom in enumerate(full_basis_atoms):
-            if atom not in active_atoms:
-                basis_mask[bas_idx] = False
+        # Set-up empty matrix to read into
+        full_nbasis = self.basis_info.full_nbasis
+        trunc_nbasis = self.basis_info.trunc_nbasis
 
-        trunc_mat = copy.deepcopy(full_mat)
+        if self.parallel:
+            from scalapack4py.npscal import NPScal
+            from scalapack4py.npscal.blacs_ctxt_management import DESCR_Register, BLACSDESCRManager
+            from ctypes import cdll, CDLL, RTLD_GLOBAL
 
-        # Delete Rows and Cols corresponding to inactive atoms 
-        # (ie., inactive atom AOs).
-        trunc_mat = np.compress( basis_mask, trunc_mat, axis=0 )
-        trunc_mat = np.compress( basis_mask, trunc_mat, axis=1 )
+            lib = os.environ['ASI_LIB_PATH']
+
+            trunc_mat = NPScal(ctxt_tag=self.blacs_ctxt_tag, descr_tag=self.blacs_descr_tag, lib=lib,
+                               gl_m=trunc_nbasis, gl_n=trunc_nbasis, dmb=16, dnb=16)
+        else:
+            trunc_mat = np.zeros(shape=(full_nbasis, full_nbasis))
+
+        for atom1 in active_atoms:
+
+            # Skip atoms belonging to region A (or 1) as their basis
+            # functions are already included
+
+            for atom2 in active_atoms:
+                # Skip core active atom blocks - they are already
+                # correctly placed.
+
+                atom2_trunc = np.min(np.where(active_atoms==atom2))
+                atom1_trunc = np.min(np.where(active_atoms==atom1))
+
+                trunc_row_min = trunc_basis_min_idx[atom2_trunc]
+                trunc_row_max = trunc_basis_max_idx[atom2_trunc]
+                trunc_col_min = trunc_basis_min_idx[atom1_trunc]
+                trunc_col_max = trunc_basis_max_idx[atom1_trunc]
+
+                full_row_min = full_basis_min_idx[atom2]
+                full_row_max = full_basis_max_idx[atom2]
+                full_col_min = full_basis_min_idx[atom1]
+                full_col_max = full_basis_max_idx[atom1]
+
+                trunc_mat[trunc_row_min:trunc_row_max, 
+                          trunc_col_min:trunc_col_max] = \
+                        full_mat[full_row_min:full_row_max, 
+                                 full_col_min:full_col_max]
 
         return trunc_mat
 
@@ -222,6 +272,7 @@ class AtomsEmbed():
         """
 
         import copy
+        import os
 
         # Set to local variables to improve readability
         active_atoms = self.basis_info.active_atoms
@@ -234,7 +285,18 @@ class AtomsEmbed():
 
         # Set-up empty matrix to read into
         full_nbasis = self.basis_info.full_nbasis
-        full_mat = np.zeros(shape=(full_nbasis, full_nbasis))
+        if self.parallel:
+            from scalapack4py.npscal import NPScal
+            from scalapack4py.npscal.blacs_ctxt_management import DESCR_Register
+            from ctypes import cdll, CDLL, RTLD_GLOBAL
+
+            lib = os.environ['ASI_LIB_PATH']
+            print(f"DESCR REGISTER {DESCR_Register}")
+            new_descr_tag = "supersystem"
+
+            full_mat = NPScal(ctxt_tag=self.blacs_ctxt_tag, descr_tag=new_descr_tag, lib=lib)
+        else:
+            full_mat = np.zeros(shape=(full_nbasis, full_nbasis))
 
         for atom1 in active_atoms:
 
@@ -317,7 +379,9 @@ class AtomsEmbed():
         import numpy as np
         from asi4py.asecalc import ASI_ASE_calculator
         from embasi.asi_default_callbacks import dm_saving_callback, \
-                                                        ham_saving_callback
+                                                        ham_saving_callback, \
+                                                        ovlp_saving_callback, \
+                                                        matrix_loading_callback
 
         root_print(f'Calculation {self.outdir}...')
 
@@ -331,15 +395,25 @@ class AtomsEmbed():
                                         work_dir=self.outdir)
 
         # Explicitly set function pointers to NULL to avoid
-        # previosly set function pointers from passing into
+        # previously set function pointers from passing into
         # the present calculation.
+        self.atoms.calc.asi.register_overlap_callback(0, 0)
         self.atoms.calc.asi.register_dm_callback(0, 0)
         self.atoms.calc.asi.register_DM_init(0, 0)
         self.atoms.calc.asi.register_hamiltonian_callback(0, 0)
+        self.atoms.calc.asi.register_set_hamiltonian_callback(0, 0)
         self.atoms.calc.asi.register_modify_hamiltonian_callback(0, 0)
 
         # Register the relevant callbacks
-        self.atoms.calc.asi.keep_overlap = True
+        # self.atoms.calc.asi.keep_overlap = True
+        self.atoms.calc.asi.overlap_storage = {}
+        self.atoms.calc.asi.register_overlap_callback(ovlp_saving_callback, 
+                                                      (self.atoms.calc.asi, 
+                                                       self.atoms.calc.asi.overlap_storage,
+                                                       self.blacs_ctxt_tag,
+                                                       self.blacs_descr_tag,
+                                                       'Ovlp calc'))
+
 
         self.atoms.calc.asi.dm_storage = {}
         self.atoms.calc.asi.dm_calc_cnt = {}
@@ -347,9 +421,11 @@ class AtomsEmbed():
         self.atoms.calc.asi.register_dm_callback(dm_saving_callback, 
                                                  (self.atoms.calc.asi, 
                                                   self.atoms.calc.asi.dm_storage, 
-                                                  self.atoms.calc.asi.dm_calc_cnt, 
+                                                  self.atoms.calc.asi.dm_calc_cnt,
+                                                  self.blacs_ctxt_tag,
+                                                  self.blacs_descr_tag,
                                                   'DM calc'))
-
+        
         self.atoms.calc.asi.ham_storage = {}
         self.atoms.calc.asi.ham_calc_cnt = {}
         self.atoms.calc.asi.ham_count = 0
@@ -357,35 +433,52 @@ class AtomsEmbed():
                                                           (self.atoms.calc.asi,
                                                            self.atoms.calc.asi.ham_storage,
                                                            self.atoms.calc.asi.ham_calc_cnt,
+                                                           self.blacs_ctxt_tag,
+                                                           self.blacs_descr_tag,
                                                            'Ham calc'))
 
         if self.density_matrix_in is not None:
-            'TODO: Actual type enforcement and error handling'
-            self.atoms.calc.asi.init_density_matrix = \
-                {(1,1): np.asfortranarray(self.density_matrix_in)}
+            self.atoms.calc.asi.register_DM_init(matrix_loading_callback,
+                                                 (self.atoms.calc.asi,
+                                                 {(1,1): self.density_matrix_in},
+                                                 self.blacs_ctxt_tag,
+                                                 self.blacs_descr_tag,
+                                                 'DM init'))
+
         if self.fock_embedding_matrix is not None:
-            self.atoms.calc.asi.modify_hamiltonian = \
-                {(1,1): np.asfortranarray(self.fock_embedding_matrix)}
+            self.atoms.calc.asi.register_modify_hamiltonian_callback(matrix_loading_callback,
+                                                                     (self.atoms.calc.asi,
+                                                                     {(1,1): self.fock_embedding_matrix},
+                                                                     self.blacs_ctxt_tag,
+                                                                     self.blacs_descr_tag,
+                                                                     'Modify H'))
 
         E0 = self.atoms.get_potential_energy()
 
         self.total_energy = E0
         self.basis_atoms = self.atoms.calc.asi.basis_atoms
         self.n_basis = self.atoms.calc.asi.n_basis
-
+        
         # BROADCAST QUANTITIES ONLY CALCULATED FOR THE HEAD NODE TO ALL
-        # OTHER NODES
-        self.atoms.calc.asi.ham_storage = \
-            mpi_bcast_matrix_storage(self.atoms.calc.asi.ham_storage,
-                                     self.atoms.calc.asi.n_basis,
-                                     self.atoms.calc.asi.n_basis)
-        self.atoms.calc.asi.dm_storage = \
-            mpi_bcast_matrix_storage(self.atoms.calc.asi.dm_storage,
+        # OTHER NODES - ONLY DO THIS IN SERIAL MODE AS THE NPSCAL ARRAYS
+        # ARE ALREADY DISTRIBUTED TO EACH TASK
+        if not (self.parallel):
+            self.atoms.calc.asi.ham_storage = \
+                mpi_bcast_matrix_storage(self.atoms.calc.asi.ham_storage,
+                                         self.atoms.calc.asi.n_basis,
+                                         self.atoms.calc.asi.n_basis)
+            self.atoms.calc.asi.dm_storage = \
+                mpi_bcast_matrix_storage(self.atoms.calc.asi.dm_storage,
+                                         self.atoms.calc.asi.n_basis,
+                                         self.atoms.calc.asi.n_basis)
+
+            self.atoms.calc.asi.overlap_storage = \
+                mpi_bcast_matrix_storage(self.atoms.calc.asi.overlap_storage,
                                      self.atoms.calc.asi.n_basis,
                                      self.atoms.calc.asi.n_basis)
 
-        self.atoms.calc.asi.dm_count = mpi_bcast_integer(self.atoms.calc.asi.dm_count)
-        self.atoms.calc.asi.ham_count = mpi_bcast_integer(self.atoms.calc.asi.ham_count)
+            self.atoms.calc.asi.dm_count = mpi_bcast_integer(self.atoms.calc.asi.dm_count)
+            self.atoms.calc.asi.ham_count = mpi_bcast_integer(self.atoms.calc.asi.ham_count)
 
         self.atoms.calc.asi.close()
         MPI.COMM_WORLD.Barrier()
@@ -413,35 +506,31 @@ class AtomsEmbed():
         # the interaction of the input density matrix, as opposed to the first 
         # set of KS-eigenvectors resulting from the DFT code.
         if ev_corr_scf:
-
             if self.truncate:
+                # @TODONPSCAL: REPLACE NP DIRECTIVE
                 self.ev_corr_energy = \
-                    27.211384500 * np.trace(self.density_matrix_in @ 
+                    27.211384500 * op.trace(self.density_matrix_in @ 
                                         self.full_mat_to_truncated(self.hamiltonian_total))
             else:
+                # @TODONPSCAL: REPLACE NP DIRECTIVE
                 self.ev_corr_energy = \
-                    27.211384500 * np.trace(self.density_matrix_in @
+                    27.211384500 * op.trace(self.density_matrix_in @
                                             self.hamiltonian_total)
 
             self.ev_corr_total_energy = \
                 self.total_energy - self.ev_sum + self.ev_corr_energy
 
-    @property
-    def hamiltonian_core(self):
-        core_idx = 1
-        if self.truncate:
-            return self.truncated_mat_to_full(self.atoms.calc.asi.ham_storage.get((core_idx,1,1)))
-        else:
-            return self.atoms.calc.asi.ham_storage.get((core_idx,1,1))
+    def garbage_collect(self):
+        """Removes all stored matrices from memory
 
-    @property
-    def hamiltonian_kinetic(self):
-        core_idx = 2
-        if self.truncate:
-            return self.truncated_mat_to_full(self.atoms.calc.asi.ham_storage.get((core_idx,1,1)))
-        else:
-            return self.atoms.calc.asi.ham_storage.get((core_idx,1,1))
+        """
+        import gc
 
+        del self.atoms.calc.asi
+        self.density_matrix_in = None
+        self.fock_embedding_matrix = None
+        gc.collect()
+            
     @property
     def hamiltonian_total(self):
         tot_idx = 3
@@ -451,18 +540,23 @@ class AtomsEmbed():
             return self.atoms.calc.asi.ham_storage.get((tot_idx,1,1))
 
     @property
-    def hamiltonian_electrostatic(self):
+    def hamiltonian_estat_plus_xc(self):
         """_summary_
         Generates
         """
-        return self.hamiltonian_total - self.hamiltonian_kinetic
+        estat_idx = 2
+        if self.truncate:
+            return self.truncated_mat_to_full(self.atoms.calc.asi.ham_storage.get((estat_idx,1,1)))
+        else:
+            return self.atoms.calc.asi.ham_storage.get((estat_idx,1,1))
 
     @property
-    def hamiltonian_electrostatic_v2(self):
-        """_summary_
-        Generates
-        """
-        return self.hamiltonian_total - self.hamiltonian_core
+    def hamiltonian_kinetic(self):
+        kin_idx = 1
+        if self.truncate:
+            return self.truncated_mat_to_full(self.atoms.calc.asi.ham_storage.get((kin_idx,1,1)))
+        else:
+            return self.atoms.calc.asi.ham_storage.get((kin_idx,1,1))
 
     @property
     def fock_embedding_matrix(self):
@@ -522,15 +616,13 @@ class AtomsEmbed():
     @fock_embedding_matrix.setter
     def fock_embedding_matrix(self, inp_fock_embedding_mat):
 
-        if (not isinstance(inp_fock_embedding_mat, (np.ndarray)) and 
-            (inp_fock_embedding_mat is not None)):
+        #if (not ( isinstance(inp_fock_embedding_mat, (np.ndarray)) or 
+        #    (inp_fock_embedding_mat is None) or
+        #    (type(inp_fock_embedding_mat) == NPScal))):
 
-            raise TypeError("Input vemb needs to be np.ndarray of dimensions nbasis*nbasis.")
+        #    raise TypeError("Input vemb needs to be np.ndarray of dimensions nbasis*nbasis.")
 
-        if ((inp_fock_embedding_mat is None)):
-            self._fock_embedding_matrix = None
-
-        if self.truncate:
+        if ((inp_fock_embedding_mat is not None) and (self.truncate)):
             inp_fock_embedding_mat = self.full_mat_to_truncated(inp_fock_embedding_mat)
 
         self._fock_embedding_matrix = inp_fock_embedding_mat
@@ -551,14 +643,13 @@ class AtomsEmbed():
     @density_matrix_in.setter
     def density_matrix_in(self, densmat):
 
-        if (not isinstance(densmat, (list, tuple, np.ndarray)) and
-            (not (densmat is None))):
+        #if (not isinstance(densmat, (list, tuple, np.ndarray)) and
+        #    (not (densmat is None))):
             
-            raise TypeError("Input needs to be np.ndarray of dimensions nbasis*nbasis.")
+        #    raise TypeError("Input needs to be np.ndarray of dimensions nbasis*nbasis.")
 
         # TODO: DIMENSION CHECKING
-
-        if self.truncate:
+        if ((densmat is not None) and (self.truncate)):
             densmat = self.full_mat_to_truncated(densmat)
 
         self._density_matrix_in = densmat
@@ -595,7 +686,7 @@ class AtomsEmbed():
         """Overlap matrix of nbasisxnbasis
 
         """
-        return self.atoms.calc.asi.overlap_storage[1,1]
+        return self.atoms.calc.asi.overlap_storage.get((1,1))
 
     @property
     def basis_atoms(self):

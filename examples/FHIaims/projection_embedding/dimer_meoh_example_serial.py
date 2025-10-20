@@ -19,8 +19,8 @@ The script should calculate the dimer dissociation energy of MeOH.
 '''
 
 # One may also use an environmental variable to achieve this
-#os.environ['ASI_LIB_PATH'] = "/home/gabrielbramley/Software/FHIaims/_build_embasi/libaims.250320.scalapack.mpi.so"
-#os.environ['AIMS_SPECIES_DIR'] = "/home/gabrielbramley/Software/FHIaims/species_defaults/defaults_2020/light/"
+os.environ['ASI_LIB_PATH'] = "/home/gabrielbramley/Software/FHIaims/_build_embasi_lib/libaims.250918.scalapack.mpi.so"
+os.environ['AIMS_SPECIES_DIR'] = "/home/gabrielbramley/Software/FHIaims/species_defaults/defaults_2020/light/"
 
 # root_print ensures only head node prints
 try:
@@ -41,23 +41,23 @@ except:
 calc_ll = Aims(xc='PBE', profile=AimsProfile(command="asi-doesnt-need-command"),
     KS_method="parallel",
     RI_method="LVL",
-    collect_eigenvectors=True,
     density_update_method='density_matrix', # for DM export
     atomic_solver_xc="PBE",
 #    lmo_init_guess="random",
-    compute_kinetic=True,
     override_initial_charge_check=True,
+    use_local_index=True,
+    load_balancing=True,
   )
 
 calc_hl = Aims(xc='PBE', profile=AimsProfile(command="asi-doesnt-need-command"),
     KS_method="parallel",
     RI_method="LVL",
-    collect_eigenvectors=True,
     density_update_method='density_matrix', # for DM export
     atomic_solver_xc="PBE",
 #    lmo_init_guess="random",
-    compute_kinetic=True,
     override_initial_charge_check=True,
+    use_local_index=True,
+    load_balancing=True,
   )
 
 # Set-up directories
@@ -78,7 +78,8 @@ Projection = ProjectionEmbedding(methanol_dimer,
                                  embed_mask=[2,1,2,2,2,1,2,1,2,2,2,1],
                                  calc_base_ll=calc_ll,
                                  calc_base_hl=calc_hl,
-                                 mu_val=1.e+6)
+                                 mu_val=1.e+6,
+                                 parallel=False)
 
 # Now run the simulation!
 root_print('\nRunning MeOH dimer \n')
@@ -88,31 +89,3 @@ root_print('Finished running MeOH dimer \n')
 # Total energy for the embedded fragment may be accessed:
 meoh_dimer_pbe0inpbe_energy = Projection.DFT_AinB_total_energy
 
-# Great! Now let's calculate the monomer total energy and calculate
-# the dimer dissociation energy
-os.chdir('../MeOH_monomer')
-methanol = methanol_dimer[:6]
-
-Projection = ProjectionEmbedding(methanol,
-                                 embed_mask=[2,1,2,2,2,1],
-                                 calc_base_ll=calc_ll,
-                                 calc_base_hl=calc_hl,
-                                 mu_val=1.e+6)
-
-root_print('\nRunning MeOH monomer \n')
-Projection.run()
-root_print('Finished running MeOH monomer \n')
-
-meoh_pbe0inpbe_energy = Projection.DFT_AinB_total_energy
-os.chdir('..')
-
-# Calculate dimer dissociation energy in the usual way
-dissoc_en = meoh_dimer_pbe0inpbe_energy - (2 * meoh_pbe0inpbe_energy)
-
-root_print('---------------------------------')
-root_print('--------  FINAL ENERGY  ---------')
-root_print('---------------------------------')
-root_print(f'Dimer energy: {meoh_dimer_pbe0inpbe_energy} eV')
-root_print(f'Monomer energy: {meoh_dimer_pbe0inpbe_energy} eV')
-root_print(f'Dissociation energy: {dissoc_en} eV')
-root_print('---------------------------------')
