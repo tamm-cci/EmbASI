@@ -315,7 +315,7 @@ class StandardDFT(EmbeddingBase):
         low_level_calculator_1 = deepcopy(self.calculator_ll)
 
         self.set_layer(atoms, self.calc_names[0], low_level_calculator_1, 
-                       embed_mask, ghosts=0, no_scf=False, run_dir=run_dir)
+                       embed_mask, ghosts=0, no_scf=False)
 
     def run(self):
 
@@ -512,7 +512,7 @@ class ProjectionEmbedding(EmbeddingBase):
 
         #self.P_b = -0.5*( (hamiltonian @ densmat @ overlap.T) + (overlap @ densmat @ hamiltonian.T) )
         self.P_b = -0.5*( (hamiltonian @ densmat @ overlap) + (overlap @ densmat @ hamiltonian) )
-
+        
     def spade_localisation(self, atomsembed, hamiltonian, overlap):
         """Calculate the localised density matrix with the SPADE method
 
@@ -530,15 +530,15 @@ class ProjectionEmbedding(EmbeddingBase):
         root_print('Starting SPADE localisation...')
         nelecs = atomsembed.free_atom_nelectrons - atomsembed.input_total_charge
         if self.parallel:
-            evals, evecs, occ_mat, xform_mat = hamiltonian_eigensolv_parallel(hamiltonian, \
-                                                                              overlap, \
-                                                                              nelecs, \
-                                                                              return_orthog=True)
+            evals, evecs, occ_mat = hamiltonian_eigensolv_parallel(hamiltonian, \
+                                                                   overlap, \
+                                                                   nelecs, \
+                                                                   return_orthog=False)
         else:
-            evals, evecs, occ_mat, xform_mat = hamiltonian_eigensolv(hamiltonian, \
-                                                           overlap, \
-                                                           nelecs,
-                                                           return_orthog=True)
+            evals, evecs, occ_mat = hamiltonian_eigensolv(hamiltonian, \
+                                                          overlap, \
+                                                          nelecs,
+                                                          return_orthog=False)
 
         mask_val = []
 
@@ -566,7 +566,7 @@ class ProjectionEmbedding(EmbeddingBase):
         max_occ_state = np.count_nonzero(occ_mat)
         evecs_occ = evecs[:, :max_occ_state]
         evecs_occ_a = evecs_occ[mask_val, :]
-        
+
         if self.parallel:
             u, svals, v = svd(evecs_occ_a)
         else:
@@ -577,10 +577,12 @@ class ProjectionEmbedding(EmbeddingBase):
 
         root_print(f'Maximum SPADE state for subsystem A: {max_sval_change_idx}')
 
-        evecs_occ_a = xform_mat @ evecs_occ @ v[:max_sval_change_idx, :].T
-        evecs_occ_ab = xform_mat @ evecs_occ
+        evecs_occ_a = evecs_occ @ v[:max_sval_change_idx, :].T
+        evecs_occ_ab = evecs_occ
 
         # @TODOSPIN: Need to redefine occupancies
+        #density_matrix_subsys_a = calculate_densmat(evecs_occ, occ_mat[:max_occ_state])
+        #density_matrix_subsys_b = density_matrix_supersystem - density_matrix_subsys_a
         density_matrix_supersystem = 2.0 * (evecs_occ_ab @ evecs_occ_ab.copy().T)
         density_matrix_subsys_a = 2.0 * (evecs_occ_a @ evecs_occ_a.copy().T)
         
