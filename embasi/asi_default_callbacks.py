@@ -1,7 +1,7 @@
 from ctypes import POINTER, byref, c_int, c_int64, c_int32, c_bool, \
                    c_char_p, c_double, c_void_p, CFUNCTYPE, py_object, \
                    cast, byref, Structure
-from asi4py.pyasi import triang2herm_inplace, triang_packed2full_hermit
+from asi4py.pyasi import triang2herm_inplace, triang_packed2full_hermit, matrix_asi_to_numpy
 from embasi.parallel_utils import root_print
 from mpi4py import MPI
 from scalapack4py.npscal import NPScal
@@ -45,9 +45,10 @@ def dm_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
             data_shape = (asi.n_basis,asi.n_basis)
         else:
             data_shape = (asi.n_basis,asi.n_basis, 2)
+
         if (matrix_descr_ptr.contents.storage_type not in {1,2}):
             if ((ctxt_tag is None) and (descr_tag is None)):
-                data = asi.scalapack.gather_numpy(descr, data, data_shape)
+                data = matrix_asi_to_numpy(asi, descr, data, matrix_descr_ptr).copy()
             else:
                 if not(CTXT_Register.check_register(ctxt_tag)):
                     descr_cast = asi.scalapack.wrap_blacs_desc(descr)
@@ -69,11 +70,14 @@ def dm_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
                                  ScaLAPACK arrays"""
             assert matrix_descr_ptr.contents.matrix_type == 1, \
                 "Triangular packed storage is supported only for hermitian matrices"
+            data = asi.scalapack.gather_numpy(descr, data, asi.matrix_shape)
+
+            data = matrix_asi_to_numpy(asi, descr, data, matrix_descr_ptr)
 
             uplo = {1:'L',2:'U'}[matrix_descr_ptr.contents.storage_type]
             data = triang_packed2full_hermit(data, asi.n_basis,
                                              asi.is_hamiltonian_real, uplo)
-            
+
         if data is not None:
             #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
             asi.dm_count += 1
@@ -117,9 +121,10 @@ def ovlp_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
             data_shape = (asi.n_basis,asi.n_basis)
         else:
             data_shape = (asi.n_basis,asi.n_basis, 2)
+
         if (matrix_descr_ptr.contents.storage_type not in {1,2}):
             if ((ctxt_tag is None) and (descr_tag is None)):
-                data = asi.scalapack.gather_numpy(descr, data, data_shape)
+                data = matrix_asi_to_numpy(asi, descr, data, matrix_descr_ptr).copy()
             else:
                 if not(CTXT_Register.check_register(ctxt_tag)):
                     descr_cast = asi.scalapack.wrap_blacs_desc(descr)
@@ -192,7 +197,7 @@ def ham_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
         # ASI_STORAGE_TYPE_TRIL,ASI_STORAGE_TYPE_TRIU
         if (matrix_descr_ptr.contents.storage_type not in {1,2}):
             if ((ctxt_tag is None) and (descr_tag is None)):
-                data = asi.scalapack.gather_numpy(descr, data, data_shape)
+                data = matrix_asi_to_numpy(asi, descr, data, matrix_descr_ptr).copy()
             else:
                 if not(CTXT_Register.check_register(ctxt_tag)):
                     descr_cast = asi.scalapack.wrap_blacs_desc(descr)

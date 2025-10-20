@@ -660,9 +660,14 @@ class ProjectionEmbedding(EmbeddingBase):
         end = time.time()
         self.time_ab_lowlevel = end - start
 
-        overlap = self.AB_LL.overlap.copy()
-        hamiltonian_AB_total = self.AB_LL.hamiltonian_total.copy()
-        AB_hamiltonian_estat_plus_xc = self.AB_LL.hamiltonian_estat_plus_xc.copy()
+        if self.parallel:
+            overlap = self.AB_LL.overlap.copy()
+            hamiltonian_AB_total = self.AB_LL.hamiltonian_total.copy()
+            AB_hamiltonian_estat_plus_xc = self.AB_LL.hamiltonian_estat_plus_xc.copy()
+        else:
+            overlap = copy.deepcopy(self.AB_LL.overlap)
+            hamiltonian_AB_total = copy.deepcopy(self.AB_LL.hamiltonian_total)
+            AB_hamiltonian_estat_plus_xc = copy.deepcopy(self.AB_LL.hamiltonian_estat_plus_xc)
 
         # Read the localised density matrices output by the QM code or
         # perform SPADE localisation on the wrapper level.
