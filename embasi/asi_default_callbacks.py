@@ -299,6 +299,10 @@ def matrix_loading_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
                                        dest_descr.ctxt)
 
             return 1
+        else:
+            asi.scalapack.scatter_numpy(m, descr, data, asi.hamiltonian_dtype)
+            return 1 # signal that  matrix has been loaded
+
 
     except Exception as eee:
         print(f"""Something happened in ASI default_saving_callback {label}: 
