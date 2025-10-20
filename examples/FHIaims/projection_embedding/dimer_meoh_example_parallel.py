@@ -14,13 +14,11 @@ To run this example you will need to:
   the FHIaims shared object library
 - Set environmental variable 'AIM_SPECIES_DIR' to the location of
   your desired basis set
-
-The script should calculate the dimer dissociation energy of MeOH.
 '''
 
 # One may also use an environmental variable to achieve this
-os.environ['ASI_LIB_PATH'] = "/home/gabrielbramley/Software/FHIaims/_build_embasi_lib/libaims.250918.scalapack.mpi.so"
-os.environ['AIMS_SPECIES_DIR'] = "/home/gabrielbramley/Software/FHIaims/species_defaults/defaults_2020/light/"
+#os.environ['ASI_LIB_PATH'] = "/home/gabrielbramley/Software/FHIaims/_build_embasi_lib/libaims.250918.scalapack.mpi.so"
+#os.environ['AIMS_SPECIES_DIR'] = "/home/gabrielbramley/Software/FHIaims/species_defaults/defaults_2020/light/"
 
 # root_print ensures only head node prints
 try:
@@ -44,8 +42,6 @@ calc_ll = Aims(xc='PBE', profile=AimsProfile(command="asi-doesnt-need-command"),
     density_update_method='density_matrix', # for DM export
     atomic_solver_xc="PBE",
     override_initial_charge_check=True,
-    use_local_index=True,
-    load_balancing=True,
   )
 
 calc_hl = Aims(xc='PBE', profile=AimsProfile(command="asi-doesnt-need-command"),
@@ -54,13 +50,7 @@ calc_hl = Aims(xc='PBE', profile=AimsProfile(command="asi-doesnt-need-command"),
     density_update_method='density_matrix', # for DM export
     atomic_solver_xc="PBE",
     override_initial_charge_check=True,
-    use_local_index=True,
-    load_balancing=True,
   )
-
-# Set-up directories
-os.makedirs('MeOH_dimer', exist_ok=True)
-os.makedirs('MeOH_monomer', exist_ok=True)
 
 # Import dimer from s26 test set
 os.chdir('MeOH_dimer')
@@ -78,8 +68,7 @@ Projection = ProjectionEmbedding(methanol_dimer,
                                  calc_base_hl=calc_hl,
                                  mu_val=1.e+6,
                                  projection="huzinaga",
-                                 parallel=True,
-                                 truncate_basis_thresh=0.001)
+                                 parallel=True)
 
 # Now run the simulation!
 root_print('\nRunning MeOH dimer \n')
