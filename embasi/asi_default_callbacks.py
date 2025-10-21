@@ -48,7 +48,9 @@ def dm_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
 
         if (matrix_descr_ptr.contents.storage_type not in {1,2}):
             if ((ctxt_tag is None) and (descr_tag is None)):
-                data = matrix_asi_to_numpy(asi, descr, data, matrix_descr_ptr).copy()
+                data = matrix_asi_to_numpy(asi, descr, data, matrix_descr_ptr)
+                if MPI.COMM_WORLD.Get_rank() == 0:
+                    data = data.copy()
             else:
                 if not(CTXT_Register.check_register(ctxt_tag)):
                     descr_cast = asi.scalapack.wrap_blacs_desc(descr)
@@ -83,7 +85,7 @@ def dm_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
             asi.dm_count += 1
             storage_dict[(asi.dm_count, iK, iS)] = data
     except Exception as eee:
-        print(f"""Something happened in ASI default_saving_callback 
+        print(f"""Something happened in ASI dm_saving_callback
                   {label}: {eee}\nAborting...""")
         traceback.print_tb(eee.__traceback__, limit=5, file=sys.stdout)
         MPI.COMM_WORLD.Abort(1)
@@ -124,7 +126,9 @@ def ovlp_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
 
         if (matrix_descr_ptr.contents.storage_type not in {1,2}):
             if ((ctxt_tag is None) and (descr_tag is None)):
-                data = matrix_asi_to_numpy(asi, descr, data, matrix_descr_ptr).copy()
+                data = matrix_asi_to_numpy(asi, descr, data, matrix_descr_ptr)
+                if MPI.COMM_WORLD.Get_rank() == 0:
+                    data = data.copy()
             else:
                 if not(CTXT_Register.check_register(ctxt_tag)):
                     descr_cast = asi.scalapack.wrap_blacs_desc(descr)
@@ -155,7 +159,7 @@ def ovlp_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
             storage_dict[(iK, iS)] = data
             #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
     except Exception as eee:
-        print(f"""Something happened in ASI default_saving_callback 
+        print(f"""Something happened in ASI ovlp_saving_callback 
                   {label}: {eee}\nAborting...""")
         traceback.print_tb(eee.__traceback__, limit=5, file=sys.stdout)
         MPI.COMM_WORLD.Abort(1)
@@ -197,7 +201,9 @@ def ham_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
         # ASI_STORAGE_TYPE_TRIL,ASI_STORAGE_TYPE_TRIU
         if (matrix_descr_ptr.contents.storage_type not in {1,2}):
             if ((ctxt_tag is None) and (descr_tag is None)):
-                data = matrix_asi_to_numpy(asi, descr, data, matrix_descr_ptr).copy()
+                data = matrix_asi_to_numpy(asi, descr, data, matrix_descr_ptr)
+                if MPI.COMM_WORLD.Get_rank() == 0:
+                    data = data.copy()
             else:
                 if not(CTXT_Register.check_register(ctxt_tag)):
                     descr_cast = asi.scalapack.wrap_blacs_desc(descr)
@@ -238,7 +244,7 @@ def ham_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
                 storage_dict[(3, iK, iS)] = data
                 #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
     except Exception as eee:
-        print(f"""Something happened in ASI default_saving_callback {label}: 
+        print(f"""Something happened in ASI ham_saving_callback {label}: 
                   {eee}\nAborting...""")
         traceback.print_tb(eee.__traceback__, limit=5, file=sys.stdout)
         MPI.COMM_WORLD.Abort(1)
@@ -305,7 +311,7 @@ def matrix_loading_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
 
 
     except Exception as eee:
-        print(f"""Something happened in ASI default_saving_callback {label}: 
+        print(f"""Something happened in ASI matrix_loading_callback {label}: 
                   {eee}\nAborting...""")
         traceback.print_tb(eee.__traceback__, limit=5, file=sys.stdout)
         MPI.COMM_WORLD.Abort(1)
