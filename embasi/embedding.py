@@ -511,7 +511,7 @@ class ProjectionEmbedding(EmbeddingBase):
     def calculate_huzinaga_projector(self, hamiltonian, overlap, densmat):
 
         #self.P_b = -0.5*( (hamiltonian @ densmat @ overlap.T) + (overlap @ densmat @ hamiltonian.T) )
-        self.P_b = -0.5*( (hamiltonian @ densmat @ overlap) + (overlap @ densmat @ hamiltonian) )
+        self.P_b = -0.5*( (hamiltonian @ densmat @ overlap.T) + (overlap @ densmat @ hamiltonian.T) )
         
     def spade_localisation(self, atomsembed, hamiltonian, overlap):
         """Calculate the localised density matrix with the SPADE method
@@ -550,22 +550,9 @@ class ProjectionEmbedding(EmbeddingBase):
 
         mask_val = np.array(mask_val)
 
-        #if self.parallel:
-        #    u, sval, v = svd(overlap)
-        #else:
-        #    u, sval, v = np.linalg.svd(overlap, full_matrices=True)
-
-        #rank = sval > 1e-5
-        #n_bad_vals = np.count_nonzero([not val for val in rank])
-
-        #if n_bad_vals > 0:
-        #    raise Exception("Error in spade_localisation: Non-singular values in overlap matrix - basis likely too large.")
-
-        #mask_val = [val for (val, good_val) in zip(mask_val, rank) if good_val]
-        #mask_val = [val for val in mask_val]
         max_occ_state = np.count_nonzero(occ_mat)
         evecs_occ = evecs[:, :max_occ_state]
-        evecs_occ_a = evecs_occ[mask_val, :]
+        evecs_occ_a = evecs_occ[mask_val, :max_occ_state]
 
         if self.parallel:
             u, svals, v = svd(evecs_occ_a)
@@ -578,14 +565,12 @@ class ProjectionEmbedding(EmbeddingBase):
         root_print(f'Maximum SPADE state for subsystem A: {max_sval_change_idx}')
 
         evecs_occ_a = evecs_occ @ v[:max_sval_change_idx, :].T
-        evecs_occ_ab = evecs_occ
+        evecs_occ_ab = evecs_occ.copy()
 
         # @TODOSPIN: Need to redefine occupancies
-        #density_matrix_subsys_a = calculate_densmat(evecs_occ, occ_mat[:max_occ_state])
-        #density_matrix_subsys_b = density_matrix_supersystem - density_matrix_subsys_a
-        density_matrix_supersystem = 2.0 * (evecs_occ_ab @ evecs_occ_ab.copy().T)
-        density_matrix_subsys_a = 2.0 * (evecs_occ_a @ evecs_occ_a.copy().T)
-        
+        density_matrix_supersystem = 2.0 * (evecs_occ_ab.copy() @ evecs_occ_ab.copy().T)
+        density_matrix_subsys_a = 2.0 * (evecs_occ_a.copy() @ evecs_occ_a.copy().T)
+
         if not(self.parallel):
             density_matrix_supersystem = mpi_bcast_matrix(density_matrix_supersystem)
             density_matrix_subsys_a = mpi_bcast_matrix(density_matrix_subsys_a)

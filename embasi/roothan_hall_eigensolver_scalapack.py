@@ -1,6 +1,7 @@
 import numpy as np
 from ctypes import RTLD_GLOBAL, CDLL, POINTER, byref, c_int, c_int64, c_int32, c_bool, c_double
 from embasi.parallel_utils import root_print, mpi_bcast_matrix
+from scalapack4py.npscal import NPScal
 import scalapack4py.npscal.math_utils.operations as op
 import os
 
@@ -32,7 +33,6 @@ def calculate_densmat(eigenvectors, occ_mat):
     import copy
 
     occ_evecs = copy.copy(eigenvectors)
-    # @TODONPSCAL: FIGURE OUT HOW THIS IS DONE LOCALLY
     for idx in range(np.size(occ_mat)):
         occ_evecs[:,idx] = occ_evecs[:,idx] * np.sqrt(occ_mat[idx])
 
@@ -44,34 +44,31 @@ def overlap_illcondition_check_parallel(overlap, thresh, inv=True, return_mask=F
     from embasi.parallel_utils import root_print
     from scalapack4py.npscal.math_utils.npscal2npscal import eig
 
-    # @TODONPSCAL: REPLACE WITH GLOBAL SHAPE
     n_basis = overlap.gl_m
-
-    # @TODONPSCAL: REPLACE ARGUMENT WITH NPSCAL
     ovlp_evals, ovlp_evecs = eig(overlap, vl=thresh, vu=100000)
+
     # Count non-singular values
     n_bad = (ovlp_evals < thresh).sum()
     n_good = overlap.gl_m - n_bad
     good_val_mask = (ovlp_evals > thresh)
     if n_bad > 0:
         # Transform overlap matrix
-        # @TODONPSCAL: FIGURE OUT HOW THIS IS DONE LOCALLY
         ovlp_filtered = ovlp_evecs[:, good_val_mask]
         evals_filtered = ovlp_evals[good_val_mask]
 
-        for idx in range(np.size(evals_filtered)):
-            sqrt_ev = np.sqrt(evals_filtered[idx])
+        evals_diag = NPScal(ctxt_tag=overlap.ctxt_tag, descr_tag="rank_reduced_eval", lib=overlap.sl,
+                           gl_m=n_good, gl_n=n_good, dmb=overlap.descr.mb, dnb=overlap.descr.nb,
+                           drsrc=overlap.descr.rsrc, dcsrc=overlap.descr.csrc, dlld=None)
 
-            if inv:
-                # @TODONPSCAL: FIGURE OUT HOW THIS IS DONE LOCALLY
-                ovlp_filtered[:, idx] = ovlp_filtered[:, idx]*(1/sqrt_ev)
-            else:
-                # @TODONPSCAL: FIGURE OUT HOW THIS IS DONE LOCALLY
-                ovlp_filtered[:, idx] = ovlp_filtered[:, idx]*sqrt_ev
+        if inv:
+            evals_diag = op.diag(evals_filtered**(-0.5), ctxt_tag=overlap.ctxt_tag, descr_tag="rank_reduced_eval", lib=overlap.sl)
+            ovlp_filtered = ovlp_filtered.copy() @ evals_diag
+        else:
+            evals_diag = op.diag(evals_filtered**(0.5), ctxt_tag=overlap.ctxt_tag, descr_tag="rank_reduced_eval", lib=overlap.sl)
+            ovlp_filtered = evals_diag @ ovlp_filtered.copy().T
 
     else:
         if inv:
-            # @TODONPSCAL: REPLACE NUMPY DIRECTIVE
             ovlp_filtered = ovlp_evecs @ op.diag(ovlp_evals**(-0.5), ctxt_tag=overlap.ctxt_tag, descr_tag="main", lib=overlap.sl) @ ovlp_evecs.T
         else:
             ovlp_filtered = ovlp_evecs @ op.diag(ovlp_evals**(0.5), ctxt_tag=overlap.ctxt_tag, descr_tag="main", lib=overlap.sl) @ ovlp_evecs.T
@@ -92,8 +89,8 @@ def hamiltonian_eigensolv_parallel(hamiltonian, overlap, nelec, return_orthog=Fa
     xform_mat, n_bad = overlap_illcondition_check_parallel(overlap, thresh)
     n_good = n_basis - n_bad
     evals, evecs = eig(xform_hamiltonian(hamiltonian, xform_mat))
+
     if return_orthog:
-        #evals, evecs = sort_eigvals_and_evecs(evals, evecs)
         occ_mat = calculate_occ_mat(evals, nelec)
         
         return evals, evecs, occ_mat, xform_mat
@@ -101,7 +98,6 @@ def hamiltonian_eigensolv_parallel(hamiltonian, overlap, nelec, return_orthog=Fa
     else:
         evecs = back_xform_evecs(evecs, xform_mat)
 
-        evals, evecs = sort_eigvals_and_evecs(evals, evecs)
         occ_mat = calculate_occ_mat(evals, nelec)
 
         return evals, evecs, occ_mat
