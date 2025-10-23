@@ -368,7 +368,8 @@ class ProjectionEmbedding(EmbeddingBase):
                  total_charge=0, post_scf=None, total_energy_corr="1storder",
                  truncate_basis_thresh=None, truncate_basis_atoms=None,
                  localisation='SPADE', projection="level-shift",
-                 mu_val=1.e+06, parallel=False, gc=True, run_dir="./EmbASI_calc"):
+                 mu_val=1.e+06, parallel=False, gc=True, run_dir="./EmbASI_calc",
+                 basis_illcond_thresh=1e-5):
 
         from copy import copy, deepcopy
         from mpi4py import MPI
@@ -492,6 +493,8 @@ class ProjectionEmbedding(EmbeddingBase):
         self.truncate_basis_thresh = truncate_basis_thresh
         self.truncate_basis_atoms = truncate_basis_atoms
 
+        self.basis_illcond_thresh = basis_illcond_thresh
+
     def calculate_levelshift_projector(self, densmat, overlap):
         """Calculates level-shift projection operator
 
@@ -533,12 +536,14 @@ class ProjectionEmbedding(EmbeddingBase):
             evals, evecs, occ_mat = hamiltonian_eigensolv_parallel(hamiltonian, \
                                                                    overlap, \
                                                                    nelecs, \
-                                                                   return_orthog=False)
+                                                                   return_orthog=False, \
+                                                                   basis_illcond_thresh=self.basis_illcond_thresh)
         else:
             evals, evecs, occ_mat = hamiltonian_eigensolv(hamiltonian, \
                                                           overlap, \
-                                                          nelecs,
-                                                          return_orthog=False)
+                                                          nelecs, \
+                                                          return_orthog=False, \
+                                                          basis_illcond_thresh=self.basis_illcond_thresh)
 
         mask_val = []
 

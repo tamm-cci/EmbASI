@@ -78,15 +78,13 @@ def overlap_illcondition_check_parallel(overlap, thresh, inv=True, return_mask=F
     else:
         return ovlp_filtered, n_bad
 
-def hamiltonian_eigensolv_parallel(hamiltonian, overlap, nelec, return_orthog=False):
+def hamiltonian_eigensolv_parallel(hamiltonian, overlap, nelec, return_orthog=False, basis_illcond_thresh=1e-5):
 
     from embasi.parallel_utils import root_print
     from scalapack4py.npscal.math_utils.npscal2npscal import eig    
 
-    thresh = 1e-5
-
     n_basis = overlap.gl_m
-    xform_mat, n_bad = overlap_illcondition_check_parallel(overlap, thresh)
+    xform_mat, n_bad = overlap_illcondition_check_parallel(overlap, basis_illcond_thresh)
     n_good = n_basis - n_bad
     evals, evecs = eig(xform_hamiltonian(hamiltonian, xform_mat))
 

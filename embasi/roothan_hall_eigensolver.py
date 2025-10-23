@@ -79,11 +79,11 @@ def overlap_illcondition_check(overlap, thresh, inv=True, return_mask=False):
     else:
         return ovlp_filtered, n_bad
 
-def hamiltonian_eigensolv(hamiltonian, overlap, nelec, return_orthog=False):
+def hamiltonian_eigensolv(hamiltonian, overlap, nelec, return_orthog=False, basis_illcond_thresh=1e-5):
 
     from embasi.parallel_utils import root_print
 
-    thresh = 1e-8
+    thresh = basis_illcond_thresh
     n_basis = np.shape(overlap)[0]
     xform_mat, n_bad = overlap_illcondition_check(overlap, thresh)
     n_good = n_basis - n_bad
