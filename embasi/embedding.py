@@ -120,6 +120,11 @@ class EmbeddingBase(ABC):
 
         active_atom_mask = [ charge > thresh for charge in atomic_charge ]
 
+        # Corner case where HL atoms can be excluded for high charge thresholds
+        for idx, atom_active in enumerate(atomsembed.embed_mask):
+            if atom_active == 1:
+                active_atom_mask[idx] = True
+
         return active_atom_mask
 
     def set_basis_info(self, atomsembed):
@@ -184,6 +189,13 @@ class EmbeddingBase(ABC):
         active_atoms = np.array([ idx for idx, maskval 
                                   in enumerate(active_atom_mask) 
                                   if (maskval or atomsembed.embed_mask[idx] == 1) ])
+
+        hl_atoms = np.array([ idx for idx, maskval 
+                                  in enumerate(active_atom_mask) 
+                                  if (atomsembed.embed_mask[idx] == 1) ])
+        env_atoms = np.array([ idx for idx, maskval 
+                                  in enumerate(active_atom_mask) 
+                                  if (maskval and (not atomsembed.embed_mask[idx] == 1)) ])
 
         # Remove non-active atoms from basis_atoms to form a truncated
         # analogue
@@ -776,6 +788,7 @@ class ProjectionEmbedding(EmbeddingBase):
         # at every SCF iteration.
         self.A_HL.density_matrix_in = densmat_A_LL
         self.A_HL.input_fragment_nelectrons = self.A_pop
+
         self.vemb = AB_hamiltonian_estat_plus_xc - self.A_LL.hamiltonian_estat_plus_xc
         if self.projection == "huzinaga-sc":
             self.A_HL.fock_embedding_matrix = self.vemb

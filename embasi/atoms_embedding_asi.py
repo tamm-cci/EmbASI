@@ -247,7 +247,7 @@ class AtomsEmbed():
                 full_row_max = full_basis_max_idx[atom2]
                 full_col_min = full_basis_min_idx[atom1]
                 full_col_max = full_basis_max_idx[atom1]
-
+                
                 trunc_mat[trunc_row_min:trunc_row_max, 
                           trunc_col_min:trunc_col_max] = \
                         full_mat[full_row_min:full_row_max, 
@@ -293,7 +293,6 @@ class AtomsEmbed():
             from ctypes import cdll, CDLL, RTLD_GLOBAL
 
             lib = os.environ['ASI_LIB_PATH']
-            print(f"DESCR REGISTER {DESCR_Register}")
             new_descr_tag = "supersystem"
 
             full_mat = NPScal(ctxt_tag=self.blacs_ctxt_tag, descr_tag=new_descr_tag, lib=lib)
@@ -328,7 +327,7 @@ class AtomsEmbed():
                               trunc_col_min:trunc_col_max]
 
         return full_mat
-
+    
     def extract_results(self):
         """Extracts quantities not currently supported by ASI
 
@@ -437,9 +436,10 @@ class AtomsEmbed():
             self.atoms.calc.asi.register_hamiltonian_callback(ham_saving_and_huzinaga_callback,
                                                               (self.atoms.calc.asi,
                                                                self.atoms.calc.asi.ham_storage,
-                                                               {(1,1): self.fock_embedding_matrix},
-                                                               {(1,1): self.huzinaga_dm_in},
-                                                               {(1,1): self.huzinaga_ovlp_in},
+                                                               {"atembed": self},
+                                                               #{(1,1): self.fock_embedding_matrix},
+                                                               #{(1,1): self.huzinaga_dm_in},
+                                                               #{(1,1): self.huzinaga_ovlp_in},
                                                                self.atoms.calc.asi.ham_calc_cnt,
                                                                self.blacs_ctxt_tag,
                                                                self.blacs_descr_tag,
@@ -639,11 +639,18 @@ class AtomsEmbed():
         #    (type(inp_fock_embedding_mat) == NPScal))):
 
         #    raise TypeError("Input vemb needs to be np.ndarray of dimensions nbasis*nbasis.")
+        self._fock_embedding_matrix = inp_fock_embedding_mat
 
         if ((inp_fock_embedding_mat is not None) and (self.truncate)):
-            inp_fock_embedding_mat = self.full_mat_to_truncated(inp_fock_embedding_mat)
+            self.fock_embedding_matrix_trunc = self.full_mat_to_truncated(inp_fock_embedding_mat)
 
-        self._fock_embedding_matrix = inp_fock_embedding_mat
+    @property
+    def fock_embedding_matrix_trunc(self):
+        return self._fock_embedding_matrix_trunc
+
+    @fock_embedding_matrix_trunc.setter
+    def fock_embedding_matrix_trunc(self, inp_fock_embedding_mat):
+        self._fock_embedding_matrix_trunc = inp_fock_embedding_mat
 
     @property
     def huzinaga_dm_in(self):
@@ -651,17 +658,18 @@ class AtomsEmbed():
 
     @huzinaga_dm_in.setter
     def huzinaga_dm_in(self, huzinaga_dm_in):
-
-        #if (not ( isinstance(inp_fock_embedding_mat, (np.ndarray)) or 
-        #    (inp_fock_embedding_mat is None) or
-        #    (type(inp_fock_embedding_mat) == NPScal))):
-
-        #    raise TypeError("Input vemb needs to be np.ndarray of dimensions nbasis*nbasis.")
+        self._huzinaga_dm_in = huzinaga_dm_in
 
         if ((huzinaga_dm_in is not None) and (self.truncate)):
-            huzinaga_dm_in = self.full_mat_to_truncated(huzinaga_dm_in)
+            self.huzinaga_dm_in_trunc = self.full_mat_to_truncated(huzinaga_dm_in)
 
-        self._huzinaga_dm_in = huzinaga_dm_in
+    @property
+    def huzinaga_dm_in_trunc(self):
+        return self._huzinaga_dm_in_trunc
+
+    @huzinaga_dm_in_trunc.setter
+    def huzinaga_dm_in_trunc(self, huzinaga_dm_in):
+        self._huzinaga_dm_in_trunc = huzinaga_dm_in
 
     @property
     def huzinaga_ovlp_in(self):
@@ -669,17 +677,18 @@ class AtomsEmbed():
 
     @huzinaga_ovlp_in.setter
     def huzinaga_ovlp_in(self, huzinaga_ovlp_in):
-
-        #if (not ( isinstance(inp_fock_embedding_mat, (np.ndarray)) or 
-        #    (inp_fock_embedding_mat is None) or
-        #    (type(inp_fock_embedding_mat) == NPScal))):
-
-        #    raise TypeError("Input vemb needs to be np.ndarray of dimensions nbasis*nbasis.")
+        self._huzinaga_ovlp_in = huzinaga_ovlp_in
 
         if ((huzinaga_ovlp_in is not None) and (self.truncate)):
-            huzinaga_ovlp_in = self.full_mat_to_truncated(huzinaga_ovlp_in)
+            self.huzinaga_ovlp_in_trunc = self.full_mat_to_truncated(huzinaga_ovlp_in)
 
-        self._huzinaga_ovlp_in = huzinaga_ovlp_in
+    @property
+    def huzinaga_ovlp_in_trunc(self):
+        return self._huzinaga_ovlp_in_trunc
+
+    @huzinaga_ovlp_in_trunc.setter
+    def huzinaga_ovlp_in_trunc(self, huzinaga_ovlp_in):
+        self._huzinaga_ovlp_in_trunc = huzinaga_ovlp_in
 
     @property
     def density_matrix_in(self):
