@@ -43,7 +43,7 @@ class AtomsEmbed():
 
     def __init__(self, atoms, initial_calc, embed_mask, ghosts=0,
                  outdir='asi.calc', no_scf=False, ctxt_tag=None,
-                 descr_tag=None):
+                 descr_tag=None, huzinaga=False):
 
         self.atoms = atoms.copy()
         self.initial_embed_mask = embed_mask
@@ -91,6 +91,8 @@ class AtomsEmbed():
             self.ghost_list = [(at in [ghosts]) for at in self.embed_mask]
         else:
             self.ghost_list = [False]*len(atoms)
+
+        self.flag_huz = huzinaga
 
     def calc_initializer(self, asi):
 
@@ -380,6 +382,7 @@ class AtomsEmbed():
         from asi4py.asecalc import ASI_ASE_calculator
         from embasi.asi_default_callbacks import dm_saving_callback, \
                                                         ham_saving_callback, \
+                                                        ham_saving_and_huzinaga_callback, \
                                                         ovlp_saving_callback, \
                                                         matrix_loading_callback
 
@@ -429,18 +432,32 @@ class AtomsEmbed():
         self.atoms.calc.asi.ham_storage = {}
         self.atoms.calc.asi.ham_calc_cnt = {}
         self.atoms.calc.asi.ham_count = 0
-        self.atoms.calc.asi.register_hamiltonian_callback(ham_saving_callback, 
-                                                          (self.atoms.calc.asi,
-                                                           self.atoms.calc.asi.ham_storage,
-                                                           self.atoms.calc.asi.ham_calc_cnt,
-                                                           self.blacs_ctxt_tag,
-                                                           self.blacs_descr_tag,
-                                                           'Ham calc'))
+
+        if self.flag_huz:
+            self.atoms.calc.asi.register_hamiltonian_callback(ham_saving_and_huzinaga_callback,
+                                                              (self.atoms.calc.asi,
+                                                               self.atoms.calc.asi.ham_storage,
+                                                               {(1,1): self.fock_embedding_matrix},
+                                                               {(1,1): self.huzinaga_dm_in},
+                                                               {(1,1): self.huzinaga_ovlp_in},
+                                                               self.atoms.calc.asi.ham_calc_cnt,
+                                                               self.blacs_ctxt_tag,
+                                                               self.blacs_descr_tag,
+                                                               'Ham calc'))
+        else:
+            self.atoms.calc.asi.register_hamiltonian_callback(ham_saving_callback, 
+                                                              (self.atoms.calc.asi,
+                                                               self.atoms.calc.asi.ham_storage,
+                                                               self.atoms.calc.asi.ham_calc_cnt,
+                                                               self.blacs_ctxt_tag,
+                                                               self.blacs_descr_tag,
+                                                               'Ham calc'))
 
         if self.density_matrix_in is not None:
             self.atoms.calc.asi.register_DM_init(matrix_loading_callback,
                                                  (self.atoms.calc.asi,
                                                  {(1,1): self.density_matrix_in},
+                                                 False,
                                                  self.blacs_ctxt_tag,
                                                  self.blacs_descr_tag,
                                                  'DM init'))
@@ -449,6 +466,7 @@ class AtomsEmbed():
             self.atoms.calc.asi.register_modify_hamiltonian_callback(matrix_loading_callback,
                                                                      (self.atoms.calc.asi,
                                                                      {(1,1): self.fock_embedding_matrix},
+                                                                     self.flag_huz,
                                                                      self.blacs_ctxt_tag,
                                                                      self.blacs_descr_tag,
                                                                      'Modify H'))
@@ -626,6 +644,42 @@ class AtomsEmbed():
             inp_fock_embedding_mat = self.full_mat_to_truncated(inp_fock_embedding_mat)
 
         self._fock_embedding_matrix = inp_fock_embedding_mat
+
+    @property
+    def huzinaga_dm_in(self):
+        return self._huzinaga_dm_in
+
+    @huzinaga_dm_in.setter
+    def huzinaga_dm_in(self, huzinaga_dm_in):
+
+        #if (not ( isinstance(inp_fock_embedding_mat, (np.ndarray)) or 
+        #    (inp_fock_embedding_mat is None) or
+        #    (type(inp_fock_embedding_mat) == NPScal))):
+
+        #    raise TypeError("Input vemb needs to be np.ndarray of dimensions nbasis*nbasis.")
+
+        if ((huzinaga_dm_in is not None) and (self.truncate)):
+            huzinaga_dm_in = self.full_mat_to_truncated(huzinaga_dm_in)
+
+        self._huzinaga_dm_in = huzinaga_dm_in
+
+    @property
+    def huzinaga_ovlp_in(self):
+        return self._huzinaga_ovlp_in
+
+    @huzinaga_ovlp_in.setter
+    def huzinaga_ovlp_in(self, huzinaga_ovlp_in):
+
+        #if (not ( isinstance(inp_fock_embedding_mat, (np.ndarray)) or 
+        #    (inp_fock_embedding_mat is None) or
+        #    (type(inp_fock_embedding_mat) == NPScal))):
+
+        #    raise TypeError("Input vemb needs to be np.ndarray of dimensions nbasis*nbasis.")
+
+        if ((huzinaga_ovlp_in is not None) and (self.truncate)):
+            huzinaga_ovlp_in = self.full_mat_to_truncated(huzinaga_ovlp_in)
+
+        self._huzinaga_ovlp_in = huzinaga_ovlp_in
 
     @property
     def density_matrix_in(self):

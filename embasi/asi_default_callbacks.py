@@ -249,6 +249,104 @@ def ham_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
         traceback.print_tb(eee.__traceback__, limit=5, file=sys.stdout)
         MPI.COMM_WORLD.Abort(1)
 
+def ham_saving_and_huzinaga_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
+    """Default callback for saving hamiltonian matrices
+
+    This routine does some additional construction of the huzinaga matrix
+    to allow the code to solve the Huzinaga problem.
+
+    Callback function from ASI to be registered and invoked by 
+    a given QM code. Saves density matrices from a given ASI_run()
+    call to a dictionary of np.ndarray arrays, indexed by the 
+    number of hamiltonian matrices exported, k-point, and spin channel.
+
+    Code derived from the default saving callback from asi4py
+
+      Parameters
+    ----------
+    aux: Object
+        Auxiliary object passed to callback 
+    iK: c_int
+        k-point index of matrix
+    iS: c_int
+        Spin channel index of matrix        
+    descr: c_types.POINTER(c_int)
+        Pointer to BLACS descriptor of matrix
+    data: c_types.POINTER
+        Pointer to dble/cdble matrix
+    matrix_descr_ptr: c_types.POINTER(c_int)
+        Numerical value indexing matrix shape (See: ASI docs)
+
+    """
+    try:
+        asi, storage_dict, vemb, huz_dm, huz_ovlp, cnt_dict, ctxt_tag, descr_tag, label = cast(aux, py_object).value
+        
+        if asi.is_hamiltonian_real:
+            data_shape = (asi.n_basis,asi.n_basis) 
+        else:
+            data_shape = (asi.n_basis,asi.n_basis, 2)
+
+        # ASI_STORAGE_TYPE_TRIL,ASI_STORAGE_TYPE_TRIU
+        if (matrix_descr_ptr.contents.storage_type not in {1,2}):
+            if ((ctxt_tag is None) and (descr_tag is None)):
+                data = matrix_asi_to_numpy(asi, descr, data, matrix_descr_ptr)
+                if MPI.COMM_WORLD.Get_rank() == 0:
+                    data = data.copy()
+            else:
+                if not(CTXT_Register.check_register(ctxt_tag)):
+                    descr_cast = asi.scalapack.wrap_blacs_desc(descr)
+                    MP = asi.scalapack.blacs_gridinfo(descr_cast.ctxt)[0]
+                    NP = asi.scalapack.blacs_gridinfo(descr_cast.ctxt)[1]
+                    ctxt = BLACSContextManager(ctxt_tag, MP, NP, asi.scalapack)
+                                                
+                if not(DESCR_Register.check_register(descr_tag)):
+                    descr_cast = asi.scalapack.wrap_blacs_desc(descr)
+                    m, n, mb, nb = descr_cast.m, descr_cast.n, descr_cast.mb, descr_cast.nb
+                    rsrc, csrc, lld = descr_cast.rsrc, descr_cast.csrc, descr_cast.lld
+                    descr = BLACSDESCRManager(ctxt_tag, descr_tag, asi.scalapack, m, n,
+                                              mb, nb, rsrc, csrc, lld)
+                data = NPScal(loc_array=data, ctxt_tag=ctxt_tag, descr_tag=descr_tag, lib=asi.scalapack)
+
+        elif (matrix_descr_ptr.contents.storage_type in {1,2}): #
+            assert not descr, """default_saving_callback supports only dense 
+                                 full ScaLAPACK arrays"""
+            assert matrix_descr_ptr.contents.matrix_type == 1, \
+                "Triangular packed storage is supported only for hermitian matrices"
+            uplo = {1:'L',2:'U'}[matrix_descr_ptr.contents.storage_type]
+            data = triang_packed2full_hermit(data, asi.n_basis, 
+                                             asi.is_hamiltonian_real, uplo)
+
+        if data is not None:
+            #assert len(data.shape) == 2
+            if asi.ham_count < 3:
+                asi.ham_count = asi.ham_count + 1
+                storage_dict[(asi.ham_count, iK, iS)] = data
+                #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
+            else:
+                storage_dict.pop((1, iK, iS))
+                #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
+                storage_dict[(1, iK, iS)] = storage_dict[(2, iK, iS)]
+                #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
+                storage_dict[(2, iK, iS)] = storage_dict[(3, iK, iS)]
+                #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
+                storage_dict[(3, iK, iS)] = data
+                #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
+                
+        if ((ctxt_tag is None) and (descr_tag is None)):
+            m = np.asfortranarray(storage_dict[(iK, iS)]) if asi.scalapack.is_root(descr) else None
+        else:
+            vemb = vemb[(iK, iS)]
+            ovlp = huz_ovlp[(iK, iS)]
+            dm = huz_dm[(iK, iS)]
+            asi.huzinaga_eq = vemb - 0.5 * (((data+vemb) @ dm @ ovlp) + (ovlp @ dm @ (data+vemb)))
+
+    except Exception as eee:
+        print(f"""Something happened in ASI ham_saving_callback {label}: 
+                  {eee}\nAborting...""")
+        traceback.print_tb(eee.__traceback__, limit=5, file=sys.stdout)
+        MPI.COMM_WORLD.Abort(1)
+
+
 def matrix_loading_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
     """Default callback for loading matrices
 
@@ -276,12 +374,18 @@ def matrix_loading_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
     """
 
     try:
-        asi, storage_dict, ctxt_tag, descr_tag, label = cast(aux, py_object).value
+        asi, storage_dict, flag_huz, ctxt_tag, descr_tag, label = cast(aux, py_object).value
 
-        if ((ctxt_tag is None) and (descr_tag is None)):
-            m = np.asfortranarray(storage_dict[(iK, iS)]) if asi.scalapack.is_root(descr) else None
+        # This is unfortunately very opaque - essentially, the huzinaga equation is formulated
+        # in the hamiltonian saving callback as we need the fock matrix constructed during the
+        # SCF cycle, which cannot be set outside of the invoked QM code.
+        if flag_huz:
+            m = asi.huzinaga_eq
         else:
-            m = storage_dict[(iK, iS)]
+            if ((ctxt_tag is None) and (descr_tag is None)):
+                m = np.asfortranarray(storage_dict[(iK, iS)]) if asi.scalapack.is_root(descr) else None
+            else:
+                m = storage_dict[(iK, iS)]
 
         # ASI_STORAGE_TYPE_TRIL,ASI_STORAGE_TYPE_TRIU
         if (matrix_descr_ptr.contents.storage_type not in {1,2}):
