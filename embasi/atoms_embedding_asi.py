@@ -226,27 +226,40 @@ class AtomsEmbed():
         else:
             trunc_mat = np.zeros(shape=(full_nbasis, full_nbasis))
 
-        for atom1 in active_atoms:
+        continous_at_blocks = np.split(active_atoms, np.where(np.diff(active_atoms) != 1)[0]+1)
 
-            # Skip atoms belonging to region A (or 1) as their basis
-            # functions are already included
+        for block1 in continous_at_blocks:
+            for block2 in continous_at_blocks:
 
-            for atom2 in active_atoms:
-                # Skip core active atom blocks - they are already
-                # correctly placed.
+                if len(block2)==1:
+                    atom2_min = block2[0]
+                    atom2_max = block2[0]                
+                else:
+                    atom2_min = block2[0]
+                    atom2_max = block2[-1]
 
-                atom2_trunc = np.min(np.where(active_atoms==atom2))
-                atom1_trunc = np.min(np.where(active_atoms==atom1))
+                if len(block1)==1:
+                    atom1_min = block1[0]
+                    atom1_max = block1[0]                
+                else:
+                    atom1_min = block1[0]
+                    atom1_max = block1[-1]
 
-                trunc_row_min = trunc_basis_min_idx[atom2_trunc]
-                trunc_row_max = trunc_basis_max_idx[atom2_trunc]
-                trunc_col_min = trunc_basis_min_idx[atom1_trunc]
-                trunc_col_max = trunc_basis_max_idx[atom1_trunc]
+                atom2_min_trunc = np.min(np.where(active_atoms==atom2_min))
+                atom2_max_trunc = np.min(np.where(active_atoms==atom2_max))
 
-                full_row_min = full_basis_min_idx[atom2]
-                full_row_max = full_basis_max_idx[atom2]
-                full_col_min = full_basis_min_idx[atom1]
-                full_col_max = full_basis_max_idx[atom1]
+                atom1_min_trunc = np.min(np.where(active_atoms==atom1_min))
+                atom1_max_trunc = np.min(np.where(active_atoms==atom1_max))
+
+                trunc_row_min = trunc_basis_min_idx[atom2_min_trunc]
+                trunc_row_max = trunc_basis_max_idx[atom2_max_trunc]
+                trunc_col_min = trunc_basis_min_idx[atom1_min_trunc]
+                trunc_col_max = trunc_basis_max_idx[atom1_max_trunc]
+
+                full_row_min = full_basis_min_idx[atom2_min]
+                full_row_max = full_basis_max_idx[atom2_max]
+                full_col_min = full_basis_min_idx[atom1_min]
+                full_col_max = full_basis_max_idx[atom1_max]
                 
                 trunc_mat[trunc_row_min:trunc_row_max, 
                           trunc_col_min:trunc_col_max] = \
@@ -299,27 +312,40 @@ class AtomsEmbed():
         else:
             full_mat = np.zeros(shape=(full_nbasis, full_nbasis))
 
-        for atom1 in active_atoms:
+        continous_at_blocks = np.split(active_atoms, np.where(np.diff(active_atoms) != 1)[0]+1)
 
-            # Skip atoms belonging to region A (or 1) as their basis
-            # functions are already included
+        for block1 in continous_at_blocks:
+            for block2 in continous_at_blocks:
 
-            for atom2 in active_atoms:
-                # Skip core active atom blocks - they are already
-                # correctly placed.
+                if len(block2)==1:
+                    atom2_min = block2[0]
+                    atom2_max = block2[0]                
+                else:
+                    atom2_min = block2[0]
+                    atom2_max = block2[-1]
 
-                atom2_trunc = np.min(np.where(active_atoms==atom2))
-                atom1_trunc = np.min(np.where(active_atoms==atom1))
+                if len(block1)==1:
+                    atom1_min = block1[0]
+                    atom1_max = block1[0]                
+                else:
+                    atom1_min = block1[0]
+                    atom1_max = block1[-1]
 
-                trunc_row_min = trunc_basis_min_idx[atom2_trunc]
-                trunc_row_max = trunc_basis_max_idx[atom2_trunc]
-                trunc_col_min = trunc_basis_min_idx[atom1_trunc]
-                trunc_col_max = trunc_basis_max_idx[atom1_trunc]
+                atom2_min_trunc = np.min(np.where(active_atoms==atom2_min))
+                atom2_max_trunc = np.min(np.where(active_atoms==atom2_max))
 
-                full_row_min = full_basis_min_idx[atom2]
-                full_row_max = full_basis_max_idx[atom2]
-                full_col_min = full_basis_min_idx[atom1]
-                full_col_max = full_basis_max_idx[atom1]
+                atom1_min_trunc = np.min(np.where(active_atoms==atom1_min))
+                atom1_max_trunc = np.min(np.where(active_atoms==atom1_max))
+
+                trunc_row_min = trunc_basis_min_idx[atom2_min_trunc]
+                trunc_row_max = trunc_basis_max_idx[atom2_max_trunc]
+                trunc_col_min = trunc_basis_min_idx[atom1_min_trunc]
+                trunc_col_max = trunc_basis_max_idx[atom1_max_trunc]
+
+                full_row_min = full_basis_min_idx[atom2_min]
+                full_row_max = full_basis_max_idx[atom2_max]
+                full_col_min = full_basis_min_idx[atom1_min]
+                full_col_max = full_basis_max_idx[atom1_max]
 
                 full_mat[full_row_min:full_row_max, 
                          full_col_min:full_col_max] = \
