@@ -242,13 +242,18 @@ class AtomsEmbed():
             atom_min_trunc = np.min(np.where(active_atoms==atom_min))
             atom_max_trunc = np.min(np.where(active_atoms==atom_max))
 
-            trunc_row_min = trunc_basis_min_idx[atom_min_trunc]
+            trunc_row_min = trunc_basis_min_idx[atom_min_trunc] + 1
             trunc_row_max = trunc_basis_max_idx[atom_max_trunc]
 
-            full_row_min = full_basis_min_idx[atom_min]
+            full_row_min = full_basis_min_idx[atom_min] + 1
             full_row_max = full_basis_max_idx[atom_max]
+            
+            new_m = full_row_max - full_row_min + 1
+            new_n = full_nbasis
 
-            trunc_mat_row[trunc_row_min:trunc_row_max, 0:full_nbasis] = full_mat[full_row_min:full_row_max, 0:full_nbasis]
+            trunc_mat.sl.pdgemr2d(new_m, new_n, full_mat.loc_array, full_row_min, 1, full_mat.descr,
+                                  trunc_mat_row.loc_array, trunc_row_min, 1, trunc_mat_row.descr, trunc_mat.ctxt.ctxt)
+            #trunc_mat_row[trunc_row_min:trunc_row_max, 0:full_nbasis] = full_mat[full_row_min:full_row_max, 0:full_nbasis]
 
         for block1 in continous_at_blocks:
             if len(block1)==1:
@@ -261,13 +266,18 @@ class AtomsEmbed():
             atom_min_trunc = np.min(np.where(active_atoms==atom_min))
             atom_max_trunc = np.min(np.where(active_atoms==atom_max))
 
-            trunc_col_min = trunc_basis_min_idx[atom_min_trunc]
+            trunc_col_min = trunc_basis_min_idx[atom_min_trunc] + 1
             trunc_col_max = trunc_basis_max_idx[atom_max_trunc]
 
-            full_col_min = full_basis_min_idx[atom_min]
+            full_col_min = full_basis_min_idx[atom_min] + 1
             full_col_max = full_basis_max_idx[atom_max]
 
-            trunc_mat[0:trunc_nbasis, trunc_col_min:trunc_col_max] = trunc_mat_row[0:trunc_nbasis, full_col_min:full_col_max]
+            new_m = trunc_nbasis
+            new_n = trunc_col_max - trunc_col_min + 1
+
+            trunc_mat.sl.pdgemr2d(new_m, new_n, trunc_mat_row.loc_array, 1, full_col_min, trunc_mat_row.descr,
+                                  trunc_mat.loc_array, 1, trunc_col_min, trunc_mat.descr, trunc_mat.ctxt.ctxt)
+            #trunc_mat[0:trunc_nbasis, trunc_col_min:trunc_col_max] = trunc_mat_row[0:trunc_nbasis, full_col_min:full_col_max]
 
         #for block1 in continous_at_blocks:
         #    for block2 in continous_at_blocks:
@@ -371,13 +381,18 @@ class AtomsEmbed():
             atom_min_trunc = np.min(np.where(active_atoms==atom_min))
             atom_max_trunc = np.min(np.where(active_atoms==atom_max))
 
-            trunc_row_min = trunc_basis_min_idx[atom_min_trunc]
+            trunc_row_min = trunc_basis_min_idx[atom_min_trunc] + 1
             trunc_row_max = trunc_basis_max_idx[atom_max_trunc]
 
-            full_row_min = full_basis_min_idx[atom_min]
+            full_row_min = full_basis_min_idx[atom_min] + 1
             full_row_max = full_basis_max_idx[atom_max]
 
-            full_mat_row[full_row_min:full_row_max, 0:trunc_nbasis] = trunc_mat[trunc_row_min:trunc_row_max, 0:trunc_nbasis]
+            new_m = full_row_max - full_row_min + 1
+            new_n = trunc_nbasis
+
+            trunc_mat.sl.pdgemr2d(new_m, new_n, trunc_mat.loc_array, trunc_row_min, 1, trunc_mat.descr,
+                                  full_mat_row.loc_array, full_row_min, 1, full_mat_row.descr, trunc_mat.ctxt.ctxt)      
+            #full_mat_row[full_row_min:full_row_max, 0:trunc_nbasis] = trunc_mat[trunc_row_min:trunc_row_max, 0:trunc_nbasis]
 
         for block1 in continous_at_blocks:
             if len(block1)==1:
@@ -390,13 +405,18 @@ class AtomsEmbed():
             atom_min_trunc = np.min(np.where(active_atoms==atom_min))
             atom_max_trunc = np.min(np.where(active_atoms==atom_max))
 
-            trunc_col_min = trunc_basis_min_idx[atom_min_trunc]
+            trunc_col_min = trunc_basis_min_idx[atom_min_trunc] + 1
             trunc_col_max = trunc_basis_max_idx[atom_max_trunc]
 
-            full_col_min = full_basis_min_idx[atom_min]
+            full_col_min = full_basis_min_idx[atom_min] + 1
             full_col_max = full_basis_max_idx[atom_max]
 
-            full_mat[0:full_nbasis, full_col_min:full_col_max] = full_mat_row[0:full_nbasis, trunc_col_min:trunc_col_max]
+            new_m = full_nbasis
+            new_n = full_col_max - full_col_min + 1
+
+            trunc_mat.sl.pdgemr2d(new_m, new_n, full_mat_row.loc_array, 1, trunc_col_min, full_mat_row.descr,
+                                   full_mat.loc_array, 1, full_col_min, full_mat.descr, trunc_mat.ctxt.ctxt) 
+            #full_mat[0:full_nbasis, full_col_min:full_col_max] = full_mat_row[0:full_nbasis, trunc_col_min:trunc_col_max]
 
         #for block1 in continous_at_blocks:
         #    for block2 in continous_at_blocks:
