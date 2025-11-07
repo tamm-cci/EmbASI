@@ -221,6 +221,9 @@ class AtomsEmbed():
 
             lib = os.environ['ASI_LIB_PATH']
 
+            trunc_mat_row = NPScal(ctxt_tag=self.blacs_ctxt_tag, descr_tag="temp_rectangle", lib=lib,
+                               gl_m=trunc_nbasis, gl_n=full_nbasis, dmb=16, dnb=16)
+            
             trunc_mat = NPScal(ctxt_tag=self.blacs_ctxt_tag, descr_tag=self.blacs_descr_tag, lib=lib,
                                gl_m=trunc_nbasis, gl_n=trunc_nbasis, dmb=16, dnb=16)
         else:
@@ -229,42 +232,80 @@ class AtomsEmbed():
         continous_at_blocks = np.split(active_atoms, np.where(np.diff(active_atoms) != 1)[0]+1)
 
         for block1 in continous_at_blocks:
-            for block2 in continous_at_blocks:
+            if len(block1)==1:
+                atom_min = block1[0]
+                atom_max = block1[0]
+            else:
+                atom_min = block1[0]
+                atom_max = block1[-1]
 
-                if len(block2)==1:
-                    atom2_min = block2[0]
-                    atom2_max = block2[0]                
-                else:
-                    atom2_min = block2[0]
-                    atom2_max = block2[-1]
+            atom_min_trunc = np.min(np.where(active_atoms==atom_min))
+            atom_max_trunc = np.min(np.where(active_atoms==atom_max))
 
-                if len(block1)==1:
-                    atom1_min = block1[0]
-                    atom1_max = block1[0]                
-                else:
-                    atom1_min = block1[0]
-                    atom1_max = block1[-1]
+            trunc_row_min = trunc_basis_min_idx[atom_min_trunc]
+            trunc_row_max = trunc_basis_max_idx[atom_max_trunc]
 
-                atom2_min_trunc = np.min(np.where(active_atoms==atom2_min))
-                atom2_max_trunc = np.min(np.where(active_atoms==atom2_max))
+            full_row_min = full_basis_min_idx[atom_min]
+            full_row_max = full_basis_max_idx[atom_max]
 
-                atom1_min_trunc = np.min(np.where(active_atoms==atom1_min))
-                atom1_max_trunc = np.min(np.where(active_atoms==atom1_max))
+            trunc_mat_row[trunc_row_min:trunc_row_max, 0:full_nbasis] = full_mat[full_row_min:full_row_max, 0:full_nbasis]
 
-                trunc_row_min = trunc_basis_min_idx[atom2_min_trunc]
-                trunc_row_max = trunc_basis_max_idx[atom2_max_trunc]
-                trunc_col_min = trunc_basis_min_idx[atom1_min_trunc]
-                trunc_col_max = trunc_basis_max_idx[atom1_max_trunc]
+        for block1 in continous_at_blocks:
+            if len(block1)==1:
+                atom_min = block1[0]
+                atom_max = block1[0]
+            else:
+                atom_min = block1[0]
+                atom_max = block1[-1]
 
-                full_row_min = full_basis_min_idx[atom2_min]
-                full_row_max = full_basis_max_idx[atom2_max]
-                full_col_min = full_basis_min_idx[atom1_min]
-                full_col_max = full_basis_max_idx[atom1_max]
-                
-                trunc_mat[trunc_row_min:trunc_row_max, 
-                          trunc_col_min:trunc_col_max] = \
-                        full_mat[full_row_min:full_row_max, 
-                                 full_col_min:full_col_max]
+            atom_min_trunc = np.min(np.where(active_atoms==atom_min))
+            atom_max_trunc = np.min(np.where(active_atoms==atom_max))
+
+            trunc_col_min = trunc_basis_min_idx[atom_min_trunc]
+            trunc_col_max = trunc_basis_max_idx[atom_max_trunc]
+
+            full_col_min = full_basis_min_idx[atom_min]
+            full_col_max = full_basis_max_idx[atom_max]
+
+            trunc_mat[0:trunc_nbasis, trunc_col_min:trunc_col_max] = trunc_mat_row[0:trunc_nbasis, full_col_min:full_col_max]
+
+        #for block1 in continous_at_blocks:
+        #    for block2 in continous_at_blocks:
+        #
+        #        if len(block2)==1:
+        #            atom2_min = block2[0]
+        #            atom2_max = block2[0]                
+        #        else:
+        #            atom2_min = block2[0]
+        #            atom2_max = block2[-1]
+        #
+        #        if len(block1)==1:
+        #            atom1_min = block1[0]
+        #            atom1_max = block1[0]                
+        #        else:
+        #            atom1_min = block1[0]
+        #            atom1_max = block1[-1]
+        #
+        #        atom2_min_trunc = np.min(np.where(active_atoms==atom2_min))
+        #        atom2_max_trunc = np.min(np.where(active_atoms==atom2_max))
+        #
+        #        atom1_min_trunc = np.min(np.where(active_atoms==atom1_min))
+        #        atom1_max_trunc = np.min(np.where(active_atoms==atom1_max))
+        #
+        #        trunc_row_min = trunc_basis_min_idx[atom2_min_trunc]
+        #        trunc_row_max = trunc_basis_max_idx[atom2_max_trunc]
+        #        trunc_col_min = trunc_basis_min_idx[atom1_min_trunc]
+        #        trunc_col_max = trunc_basis_max_idx[atom1_max_trunc]
+        #
+        #        full_row_min = full_basis_min_idx[atom2_min]
+        #        full_row_max = full_basis_max_idx[atom2_max]
+        #        full_col_min = full_basis_min_idx[atom1_min]
+        #        full_col_max = full_basis_max_idx[atom1_max]
+        #        
+        #        trunc_mat[trunc_row_min:trunc_row_max, 
+        #                  trunc_col_min:trunc_col_max] = \
+        #                full_mat[full_row_min:full_row_max, 
+        #                         full_col_min:full_col_max]
 
         return trunc_mat
 
@@ -292,6 +333,9 @@ class AtomsEmbed():
         # Set to local variables to improve readability
         active_atoms = self.basis_info.active_atoms
 
+        full_nbasis = self.basis_info.full_nbasis
+        trunc_nbasis = self.basis_info.trunc_nbasis
+
         # TODO: Set-up for upper-triangular matrices.
         trunc_basis_min_idx = self.basis_info.trunc_basis_min_idx
         trunc_basis_max_idx = self.basis_info.trunc_basis_max_idx
@@ -308,6 +352,8 @@ class AtomsEmbed():
             lib = os.environ['ASI_LIB_PATH']
             new_descr_tag = "supersystem"
 
+            full_mat_row = NPScal(ctxt_tag=self.blacs_ctxt_tag, descr_tag=new_descr_tag, lib=lib)
+
             full_mat = NPScal(ctxt_tag=self.blacs_ctxt_tag, descr_tag=new_descr_tag, lib=lib)
         else:
             full_mat = np.zeros(shape=(full_nbasis, full_nbasis))
@@ -315,42 +361,80 @@ class AtomsEmbed():
         continous_at_blocks = np.split(active_atoms, np.where(np.diff(active_atoms) != 1)[0]+1)
 
         for block1 in continous_at_blocks:
-            for block2 in continous_at_blocks:
+            if len(block1)==1:
+                atom_min = block1[0]
+                atom_max = block1[0]
+            else:
+                atom_min = block1[0]
+                atom_max = block1[-1]
 
-                if len(block2)==1:
-                    atom2_min = block2[0]
-                    atom2_max = block2[0]                
-                else:
-                    atom2_min = block2[0]
-                    atom2_max = block2[-1]
+            atom_min_trunc = np.min(np.where(active_atoms==atom_min))
+            atom_max_trunc = np.min(np.where(active_atoms==atom_max))
 
-                if len(block1)==1:
-                    atom1_min = block1[0]
-                    atom1_max = block1[0]                
-                else:
-                    atom1_min = block1[0]
-                    atom1_max = block1[-1]
+            trunc_row_min = trunc_basis_min_idx[atom_min_trunc]
+            trunc_row_max = trunc_basis_max_idx[atom_max_trunc]
 
-                atom2_min_trunc = np.min(np.where(active_atoms==atom2_min))
-                atom2_max_trunc = np.min(np.where(active_atoms==atom2_max))
+            full_row_min = full_basis_min_idx[atom_min]
+            full_row_max = full_basis_max_idx[atom_max]
 
-                atom1_min_trunc = np.min(np.where(active_atoms==atom1_min))
-                atom1_max_trunc = np.min(np.where(active_atoms==atom1_max))
+            full_mat_row[full_row_min:full_row_max, 0:trunc_nbasis] = trunc_mat[trunc_row_min:trunc_row_max, 0:trunc_nbasis]
 
-                trunc_row_min = trunc_basis_min_idx[atom2_min_trunc]
-                trunc_row_max = trunc_basis_max_idx[atom2_max_trunc]
-                trunc_col_min = trunc_basis_min_idx[atom1_min_trunc]
-                trunc_col_max = trunc_basis_max_idx[atom1_max_trunc]
+        for block1 in continous_at_blocks:
+            if len(block1)==1:
+                atom_min = block1[0]
+                atom_max = block1[0]
+            else:
+                atom_min = block1[0]
+                atom_max = block1[-1]
 
-                full_row_min = full_basis_min_idx[atom2_min]
-                full_row_max = full_basis_max_idx[atom2_max]
-                full_col_min = full_basis_min_idx[atom1_min]
-                full_col_max = full_basis_max_idx[atom1_max]
+            atom_min_trunc = np.min(np.where(active_atoms==atom_min))
+            atom_max_trunc = np.min(np.where(active_atoms==atom_max))
 
-                full_mat[full_row_min:full_row_max, 
-                         full_col_min:full_col_max] = \
-                    trunc_mat[trunc_row_min:trunc_row_max, 
-                              trunc_col_min:trunc_col_max]
+            trunc_col_min = trunc_basis_min_idx[atom_min_trunc]
+            trunc_col_max = trunc_basis_max_idx[atom_max_trunc]
+
+            full_col_min = full_basis_min_idx[atom_min]
+            full_col_max = full_basis_max_idx[atom_max]
+
+            full_mat[0:full_nbasis, full_col_min:full_col_max] = full_mat_row[0:full_nbasis, trunc_col_min:trunc_col_max]
+
+        #for block1 in continous_at_blocks:
+        #    for block2 in continous_at_blocks:
+        #
+        #        if len(block2)==1:
+        #            atom2_min = block2[0]
+        #            atom2_max = block2[0]                
+        #        else:
+        #            atom2_min = block2[0]
+        #            atom2_max = block2[-1]
+        #
+        #        if len(block1)==1:
+        #            atom1_min = block1[0]
+        #            atom1_max = block1[0]                
+        #        else:
+        #            atom1_min = block1[0]
+        #            atom1_max = block1[-1]
+        #
+        #        atom2_min_trunc = np.min(np.where(active_atoms==atom2_min))
+        #        atom2_max_trunc = np.min(np.where(active_atoms==atom2_max))
+        #
+        #        atom1_min_trunc = np.min(np.where(active_atoms==atom1_min))
+        #        atom1_max_trunc = np.min(np.where(active_atoms==atom1_max))
+        #
+        #        trunc_row_min = trunc_basis_min_idx[atom2_min_trunc]
+        #        trunc_row_max = trunc_basis_max_idx[atom2_max_trunc]
+        #        trunc_col_min = trunc_basis_min_idx[atom1_min_trunc]
+        #        trunc_col_max = trunc_basis_max_idx[atom1_max_trunc]
+        #
+        #        full_row_min = full_basis_min_idx[atom2_min]
+        #        full_row_max = full_basis_max_idx[atom2_max]
+        #        full_col_min = full_basis_min_idx[atom1_min]
+        #        full_col_max = full_basis_max_idx[atom1_max]
+        #
+        #        full_mat[full_row_min:full_row_max, 
+        #                 full_col_min:full_col_max] = \
+        #            trunc_mat[trunc_row_min:trunc_row_max, 
+        #                      trunc_col_min:trunc_col_max]
 
         return full_mat
     
