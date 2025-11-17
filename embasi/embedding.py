@@ -50,7 +50,7 @@ class EmbeddingBase(ABC):
             root_print(f"Directory {self.run_dir} can not be created")
 
     def set_layer(self, atoms, layer_name, calc, embed_mask, ghosts=0, 
-                      no_scf=False, ctxt_tag=None, descr_tag=None):
+                      no_scf=False, ctxt_tag=None, descr_tag=None, insert_embedding_region=True):
         """Sets an AtomsEmbed object as an attribute
 
         Creates an AtomsEmbed object as a named attribute (layer_name) of 
@@ -73,6 +73,9 @@ class EmbeddingBase(ABC):
             Layer to be considered as grid only atoms. If 0, no grid only species assigned.
         no_scf: bool
             Terminate SCF cycle at the first step
+        insert_embedding_region: bool
+            Whether to insert qm_embedding_region lines in geometry.in. 
+            Defaults to True.
 
         """
         from .atoms_embedding_asi import AtomsEmbed
@@ -82,7 +85,7 @@ class EmbeddingBase(ABC):
 
         layer = AtomsEmbed(atoms, calc, embed_mask, outdir=outdir_name, 
                            ghosts=ghosts, no_scf=no_scf, descr_tag=descr_tag,
-                           ctxt_tag=ctxt_tag)
+                           insert_embedding_region=insert_embedding_region, ctxt_tag=ctxt_tag)
         setattr(self, layer_name, layer)
 
     def select_atoms_basis_truncation(self, atomsembed, densmat, overlap, thresh):
@@ -324,7 +327,8 @@ class StandardDFT(EmbeddingBase):
 
         low_level_calculator_1.parameters['qm_embedding_calc'] = 1
         self.set_layer(atoms, self.calc_names[0], low_level_calculator_1, 
-                       embed_mask, ghosts=0, no_scf=False)
+                       embed_mask, ghosts=0, no_scf=False, 
+                       insert_embedding_region=False)
 
     def run(self):
 
@@ -967,7 +971,7 @@ class FrozenDensityEmbedding(EmbeddingBase):
 
         self.run_dir =  run_dir
 
-        low_level_calculator.parameters['qm_embedding_type'] = 'frozendensity  write'
+        initial_calculator.parameters['qm_embedding_type'] = 'frozendensity  write'
         low_level_calculator.parameters['qm_embedding_type'] = 'frozendensity  read_and_write'
         high_level_calculator.parameters['qm_embedding_type'] = 'frozendensity  read_and_write'
 
@@ -976,13 +980,16 @@ class FrozenDensityEmbedding(EmbeddingBase):
         high_level_calculator.parameters['aims_output'] = "rho_and_derivs_on_grid"
 
         self.set_layer(atoms, "MU0", initial_calculator, 
-                       embed_mask, ghosts=2, no_scf=False)
+                       embed_mask, ghosts=2, no_scf=False,
+                       insert_embedding_region=False)
 
         self.set_layer(atoms, "F2A1", low_level_calculator, 
-                       embed_mask, ghosts=2, no_scf=False)
+                       embed_mask, ghosts=2, no_scf=False,
+                       insert_embedding_region=False)
 
         self.set_layer(atoms, "F1A2", high_level_calculator,
-                       embed_mask, ghosts=1, no_scf=False)
+                       embed_mask, ghosts=1, no_scf=False,
+                       insert_embedding_region=False)
 
         self.rank = MPI.COMM_WORLD.Get_rank()
         self.ntasks = MPI.COMM_WORLD.Get_size()
@@ -1006,16 +1013,19 @@ class FrozenDensityEmbedding(EmbeddingBase):
 
         cwd = os.path.join(os.getcwd(),self.run_dir[2:])
     
-        MU0_ri  = os.path.join(cwd, "MU0/ri_restart_coeffs.out")
-        F2A1_ri = os.path.join(cwd, "F2A1/ri_restart_coeffs.out")
-        F1A2_ri = os.path.join(cwd, "F1A2/ri_restart_coeffs.out")
+        MU0_opot  = os.path.join(cwd, "MU0/output_potential_00000000")
+        F2A1_opot = os.path.join(cwd, "F2A1/output_potential_00000000")
+        F1A2_opot = os.path.join(cwd, "F1A2/output_potential_00000000")
 
-        MU0_dd  = os.path.join(cwd, "MU0/rho_and_derivs_spin_1.dat")
-        F2A1_dd = os.path.join(cwd, "F2A1/rho_and_derivs_spin_1.dat")
-        F1A2_dd = os.path.join(cwd, "F1A2/rho_and_derivs_spin_1.dat")
+        F2A1_npot = os.path.join(cwd, "F2A1/output_potential_00000000_new")
+        F1A2_npot = os.path.join(cwd, "F1A2/output_potential_00000000_new")
 
-        F2A1_df = os.path.join(cwd, "F2A1/subsystem_info.dat")
-        F1A2_df = os.path.join(cwd, "F1A2/subsystem_info.dat")
+        MU0_oden  = os.path.join(cwd, "MU0/output_density_00000000")
+        F2A1_oden = os.path.join(cwd, "F2A1/output_density_00000000")
+        F1A2_oden = os.path.join(cwd, "F1A2/output_density_00000000")
+
+        F2A1_nden = os.path.join(cwd, "F2A1/output_density_00000000_new")
+        F1A2_nden = os.path.join(cwd, "F1A2/output_density_00000000_new")
 
         # Outer SCF loop
         fdet_file = open("fdet.txt", "w")
@@ -1035,20 +1045,19 @@ class FrozenDensityEmbedding(EmbeddingBase):
                     os.mkdir(tmp)
                 except FileExistsError:
                     root_print("Directory F1A2 already exists")
-                if self.Test_RI: shutil.copy(MU0_ri, F1A2_ri)
-                if self.Test_NonAdd: shutil.copy(MU0_dd, F1A2_df)
+
+                shutil.copy(MU0_oden, F1A2_oden)
+                shutil.copy(MU0_opot, F1A2_opot)
 
             # Cluster Calculation
             self.F1A2.run()
-            F1A2E = self.F1A2.total_energy
-
-            if self.Test_RI: shutil.copy(F1A2_ri, F2A1_ri)
-            if self.Test_NonAdd: shutil.copy(F1A2_dd, F2A1_df)
+            shutil.move(F1A2_nden, F2A1_oden)
+            shutil.move(F1A2_npot, F2A1_opot)
 
             # Environment Calculation
             self.F2A1.run()
-            if self.Test_RI: shutil.copy(F2A1_ri,F1A2_ri)
-            if self.Test_NonAdd: shutil.copy(F2A1_dd, F1A2_df)
+            shutil.move(F2A1_nden,F1A2_oden)
+            shutil.move(F2A1_npot, F1A2_opot)
 
             if n_cycle == max_cycle:
                 root_print("Max SCF cycles reached")
