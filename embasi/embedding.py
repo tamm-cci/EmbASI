@@ -50,7 +50,11 @@ class EmbeddingBase(ABC):
             root_print(f"Directory {self.run_dir} can not be created")
 
     def set_layer(self, atoms, layer_name, calc, embed_mask, ghosts=0, 
+<<<<<<< HEAD
                       no_scf=False, ctxt_tag=None, descr_tag=None, insert_embedding_region=True):
+=======
+                       no_scf=False, insert_embedding_region=True):
+>>>>>>> refs/remotes/origin/fdet_embclass
         """Sets an AtomsEmbed object as an attribute
 
         Creates an AtomsEmbed object as a named attribute (layer_name) of 
@@ -84,8 +88,13 @@ class EmbeddingBase(ABC):
         outdir_name = os.path.join(self.run_dir, layer_name)
 
         layer = AtomsEmbed(atoms, calc, embed_mask, outdir=outdir_name, 
+<<<<<<< HEAD
                            ghosts=ghosts, no_scf=no_scf, descr_tag=descr_tag,
                            insert_embedding_region=insert_embedding_region, ctxt_tag=ctxt_tag)
+=======
+                           ghosts=ghosts, no_scf=no_scf,
+                           insert_embedding_region=insert_embedding_region)
+>>>>>>> refs/remotes/origin/fdet_embclass
         setattr(self, layer_name, layer)
 
     def select_atoms_basis_truncation(self, atomsembed, densmat, overlap, thresh):
@@ -914,12 +923,15 @@ class ProjectionEmbedding(EmbeddingBase):
         root_print(f" -----------======================--------- " )
         root_print(f" " )
 
+<<<<<<< HEAD
         # And finally, now all the work is done, clear the ScaLAPACK
         # registers in case another calculation is ran.
         from scalapack4py.npscal.blacs_ctxt_management import CTXT_Register, DESCR_Register
         CTXT_Register.clear_register()
         DESCR_Register.clear_register()
 
+=======
+>>>>>>> refs/remotes/origin/fdet_embclass
 
 class FrozenDensityEmbedding(EmbeddingBase):
     """Implementation of Projeciton-Based Embedding with ASI communication
