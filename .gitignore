@@ -3,3 +3,5 @@
 /asiembedding.egg-info
 /build
 doc/build/
+.vscode/
+examples/FHIaims/projection_embedding/
