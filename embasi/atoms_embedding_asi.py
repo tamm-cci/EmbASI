@@ -48,10 +48,11 @@ class AtomsEmbed():
     """
 
     def __init__(self, atoms, initial_calc, embed_mask, ghosts=0,
-                 outdir='asi.calc', no_scf=False):
+                 outdir='asi.calc', no_scf=False, insert_embedding_region=True):
         self.atoms = atoms
         self.initial_embed_mask = embed_mask
         self.outdir = outdir
+        self.insert_embedding_region = insert_embedding_region
 
         if isinstance(embed_mask, int):
             # We hope the user knows what they are doing and
@@ -118,9 +119,10 @@ class AtomsEmbed():
 
         calc.write_inputfiles(asi.atoms, properties=['energy'])
 
-        if self.embed_mask is not None:
+        if self.embed_mask is not None and self.insert_embedding_region:
             self._insert_embedding_region_aims()
-            self._insert_custom_aims_controlin()
+
+        self._insert_custom_aims_controlin()
 
     def reorder_atoms_from_embed_mask(self):
         """ Re-orders atoms to push those in embedding region 1 to the beginning
