@@ -922,6 +922,17 @@ class ProjectionEmbedding(EmbeddingBase):
 class FrozenDensityEmbedding(EmbeddingBase):
     """Implementation of Frozen Density Embedding by Wesolowski and
     Warshell.
+
+    This embedding scheme have two subsystems diictated by the embed_mask.
+    The layer 1 is associated with calc_base_ll, and layer 2 with calc_base_hl.
+    The density of layer 1 is kept frozen during the calculation of layer 2.
+    At the end of the calculation, the total energy is obtained by summing  
+    the subsystem energies.
+
+    At the end of the calculation, the embedding potential and density
+    can be used to incorporate the effect of the environment in further
+    calculations.
+    
     Parameters
     ----------
     atoms: ASE Atoms
