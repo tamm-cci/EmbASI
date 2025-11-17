@@ -118,8 +118,6 @@ class EmbeddingBase(ABC):
         active_atom_mask: bool list
             Atoms considered active (True), or truncated (False).
 
-
-        !! just testing oct 6 if i still have dev rights
         """
 
         # @TODONPSCAL: REPLACE DIRECTIVE
@@ -922,10 +920,8 @@ class ProjectionEmbedding(EmbeddingBase):
 
 
 class FrozenDensityEmbedding(EmbeddingBase):
-    """Implementation of Projeciton-Based Embedding with ASI communication
-    A class controlling the interaction between two subsystems calculated at
-    two levels of theory (low-level and high-level) with the
-    Projection-Based Embedding (PbE) scheme of Manby et al.[1].
+    """Implementation of Frozen Density Embedding by Wesolowski and
+    Warshell.
     Parameters
     ----------
     atoms: ASE Atoms
@@ -939,16 +935,12 @@ class FrozenDensityEmbedding(EmbeddingBase):
         Calculator object for layer 2
     frag_charge: int
         Charge of the embedded fragment. Defaults to 0.
-    post_scf: str
-        Post-HF method applied to high-level calculation. Defaults to None.
-    mu_val: float
-        Pre-factor for level-shift orthogonalisation. Defaults to 1e+06 Ha.
-    truncate_basis: float or None:
-        Truncates the basis functions of the environment based on
-        a Mulliken charge metrix. Turned off if None. Defaults to None.
+
     References
     ----------
-    [1] Weso
+    [1] T.A. Wesolowski and A. Warshel,
+     Frozen Density Functional Approach for ab-initio Calculations 
+     of Solvated Molecules, Journal of Physical Chemistry 97, 8050 (1993)
     """
 
     def __init__(self, atoms, embed_mask, calc_base_ll, calc_base_hl,
@@ -974,10 +966,6 @@ class FrozenDensityEmbedding(EmbeddingBase):
         initial_calculator.parameters['qm_embedding_type'] = 'frozendensity  write'
         low_level_calculator.parameters['qm_embedding_type'] = 'frozendensity  read_and_write'
         high_level_calculator.parameters['qm_embedding_type'] = 'frozendensity  read_and_write'
-
-        initial_calculator.parameters["aims_output"] = "rho_and_derivs_on_grid"
-        low_level_calculator.parameters['aims_output'] = "rho_and_derivs_on_grid"
-        high_level_calculator.parameters['aims_output'] = "rho_and_derivs_on_grid"
 
         self.set_layer(atoms, "MU0", initial_calculator, 
                        embed_mask, ghosts=2, no_scf=False,
@@ -1076,16 +1064,8 @@ class FrozenDensityEmbedding(EmbeddingBase):
             fdet_file.flush()
             #print(ediff)
 
-
         end = time.time()
         fdet_file.close()
 
         root_print(f"Total time (s): {end-start}")
 
-
-""" Pseudo code for the run method
-        if n_scf == 1:
-            self.cluster.run()   # --> (no embedding)
-            self.env.run()       # --> (no embedding)
-            c2e_emb = get_embedding_pot()
-"""
