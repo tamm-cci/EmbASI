@@ -293,7 +293,7 @@ class AtomsEmbed():
                 trunc_mat.sl.pdgemr2d(new_m, new_n, full_mat.loc_array, full_row_min, 1, full_mat.descr,
                                       trunc_mat_row.loc_array, trunc_row_min, 1, trunc_mat_row.descr, trunc_mat.ctxt.ctxt)
             else:
-                trunc_mat_row[trunc_row_min+1,trunc_row_max,:] = full_mat[full_row_min+1:full_row_max,:]
+                trunc_mat_row[trunc_row_min-1:trunc_row_max,:] = full_mat[full_row_min-1:full_row_max,:]
 
         for block1 in continous_at_blocks:
             if len(block1)==1:
@@ -319,7 +319,7 @@ class AtomsEmbed():
                 trunc_mat.sl.pdgemr2d(new_m, new_n, trunc_mat_row.loc_array, 1, full_col_min, trunc_mat_row.descr,
                                       trunc_mat.loc_array, 1, trunc_col_min, trunc_mat.descr, trunc_mat.ctxt.ctxt)
             else:
-                trunc_mat[:,trunc_col_min+1:trunc_col_max] = trunc_mat_row[:,full_col_min+1:full_col_max]
+                trunc_mat[:,trunc_col_min-1:trunc_col_max] = trunc_mat_row[:,full_col_min-1:full_col_max]
 
         return trunc_mat
 
@@ -371,7 +371,7 @@ class AtomsEmbed():
 
             full_mat = NPScal(ctxt_tag=self.blacs_ctxt_tag, descr_tag=new_descr_tag, lib=lib)
         else:
-            full_mat_row = np.zeros(shape=(trunc_nbasis, full_nbasis))
+            full_mat_row = np.zeros(shape=(full_nbasis, trunc_nbasis))
             full_mat = np.zeros(shape=(full_nbasis, full_nbasis))
 
         continous_at_blocks = np.split(active_atoms, np.where(np.diff(active_atoms) != 1)[0]+1)
@@ -400,10 +400,8 @@ class AtomsEmbed():
                 trunc_mat.sl.pdgemr2d(new_m, new_n, trunc_mat.loc_array, trunc_row_min, 1, trunc_mat.descr,
                                       full_mat_row.loc_array, full_row_min, 1, full_mat_row.descr, trunc_mat.ctxt.ctxt)
             else:
-                full_mat_row[full_row_min+1:full_row_max,:] = trunc_mat[trunc_row_min+1,trunc_row_max,:]
+                full_mat_row[full_row_min-1:full_row_max,:] = trunc_mat[trunc_row_min-1:trunc_row_max,:]
                 
-            #full_mat_row[full_row_min:full_row_max, 0:trunc_nbasis] = trunc_mat[trunc_row_min:trunc_row_max, 0:trunc_nbasis]
-
         for block1 in continous_at_blocks:
             if len(block1)==1:
                 atom_min = block1[0]
@@ -428,7 +426,7 @@ class AtomsEmbed():
                 trunc_mat.sl.pdgemr2d(new_m, new_n, full_mat_row.loc_array, 1, trunc_col_min, full_mat_row.descr,
                                       full_mat.loc_array, 1, full_col_min, full_mat.descr, trunc_mat.ctxt.ctxt)
             else:
-                full_mat[:,full_col_min+1:full_col_max] = full_mat_row[:,trunc_col_min+1,trunc_col_max]
+                full_mat[:,full_col_min-1:full_col_max] = full_mat_row[:,trunc_col_min-1:trunc_col_max]
 
         return full_mat
     
@@ -567,9 +565,14 @@ class AtomsEmbed():
                                                  'DM init'))
 
         if self.fock_embedding_matrix is not None:
+            if self.truncate:
+                mat_in = self.fock_embedding_matrix_trunc
+            else:
+                mat_in = self.fock_embedding_matrix
+
             self.atoms.calc.asi.register_modify_hamiltonian_callback(matrix_loading_callback,
                                                                      (self.atoms.calc.asi,
-                                                                     {(1,1): self.fock_embedding_matrix},
+                                                                     {(1,1): mat_in},
                                                                      self.flag_huz,
                                                                      self.blacs_ctxt_tag,
                                                                      self.blacs_descr_tag,

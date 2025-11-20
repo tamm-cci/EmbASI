@@ -334,65 +334,37 @@ def ham_saving_and_huzinaga_callback(aux, iK, iS, descr, data, matrix_descr_ptr)
                 #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
                 storage_dict[(3, iK, iS)] = data
                 #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
-                
+
         if ((ctxt_tag is None) and (descr_tag is None)):
-            m = np.asfortranarray(storage_dict[(iK, iS)]) if asi.scalapack.is_root(descr) else None
+            if MPI.COMM_WORLD.Get_rank() == 0:
+                if atomsembed.truncate:
+
+                    vemb_supermol = atomsembed.fock_embedding_matrix
+                    ovlp_supermol = atomsembed.huzinaga_ovlp_in
+                    fock_supermol = atomsembed.truncated_mat_to_full(data)
+                    dm_supermol = atomsembed.huzinaga_dm_in
+
+                    fmat_supermol = (fock_supermol + vemb_supermol)
+
+                    projector = - 0.5 * ((fmat_supermol @ dm_supermol @ ovlp_supermol.T) + (ovlp_supermol @ dm_supermol @ fmat_supermol.T))
+                    projector = atomsembed.full_mat_to_truncated(projector)
+                    asi.huzinaga_eq = atomsembed.fock_embedding_matrix_trunc + projector
+
+
+                else:
+                    vemb = atomsembed.fock_embedding_matrix
+                    ovlp = atomsembed.huzinaga_ovlp_in
+                    dm = atomsembed.huzinaga_dm_in
+
+                    asi.huzinaga_eq = vemb - 0.5 * (((data+vemb) @ dm @ ovlp) + (ovlp @ dm @ (data+vemb)))
+
         else:
             if atomsembed.truncate:
-                #root_print("HELLO 1!")
-
-                #root_print("HELLO 2!")
-                #
-                #trunc_nbasis = atomsembed.basis_info.trunc_nbasis
-                #full_nbasis = atomsembed.basis_info.full_nbasis
-                #
-                #at_a_min = np.min(np.where(atomsembed.embed_mask==1))
-                #at_a_max = np.max(np.where(atomsembed.embed_mask==1))
-                #at_b_min = np.min(np.where(atomsembed.embed_mask==2))
-                #at_b_max = np.max(np.where(atomsembed.embed_mask==2))
-                #
-                #a_min = atomsembed.basis_info.full_basis_min_idx[at_a_min]
-                #a_max = atomsembed.basis_info.full_basis_max_idx[at_a_max]
-                #b_min = atomsembed.basis_info.full_basis_min_idx[at_b_min]
-                #b_max = atomsembed.basis_info.full_basis_max_idx[at_b_max]
-                #
-                #root_print(f"at a min {at_a_min}")
-                #root_print(f"at a max {at_a_max}")
-                #root_print(f"a min {a_min}")
-                #root_print(f"a max {a_max}")
-                #root_print(f"b min {b_min}")
-                #root_print(f"b max {b_max}")
-                
-                #root_print("HELLO 2a!")
-                #vemb_supermol = atomsembed.fock_embedding_matrix[a_min:a_max,b_min:b_max]
-                #root_print("HELLO 2b!")
-                #ovlp_supermol = atomsembed.huzinaga_ovlp_in[a_min:a_max,b_min:b_max]
-                #root_print("HELLO 2c!")
-                #fock_supermol = atomsembed.truncated_mat_to_full(data)[a_min:a_max,b_min:b_max]
-                #root_print("HELLO 2d!")
-
-                #dm_supermol = atomsembed.huzinaga_dm_in[b_min:b_max,b_min:b_max]
-                #root_print("HELLO 3!")
-
-                #root_print("HELLO 2a!")
-                #vemb_supermol = atomsembed.fock_embedding_matrix[0:trunc_nbasis,trunc_nbasis:full_nbasis]
-                #root_print("HELLO 2b!")
-                #ovlp_supermol = atomsembed.huzinaga_ovlp_in[0:trunc_nbasis,trunc_nbasis:full_nbasis]
-                #root_print("HELLO 2c!")
-                #fock_supermol = atomsembed.truncated_mat_to_full(data)[0:trunc_nbasis,trunc_nbasis:full_nbasis]
-                #root_print("HELLO 2d!")
-
-                #dm_supermol = atomsembed.huzinaga_dm_in[trunc_nbasis:full_nbasis,trunc_nbasis:full_nbasis]
-                #root_print("HELLO 3!")
-
-                #fmat_supermol = (fock_supermol + vemb_supermol)
-                #root_print("HELLO 4!")
-
                 vemb_supermol = atomsembed.fock_embedding_matrix
                 ovlp_supermol = atomsembed.huzinaga_ovlp_in
                 fock_supermol = atomsembed.truncated_mat_to_full(data)
                 dm_supermol = atomsembed.huzinaga_dm_in
-
+                
                 fmat_supermol = (fock_supermol + vemb_supermol)
 
                 projector = - 0.5 * ((fmat_supermol @ dm_supermol @ ovlp_supermol.T) + (ovlp_supermol @ dm_supermol @ fmat_supermol.T))
@@ -446,7 +418,10 @@ def matrix_loading_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
         # in the hamiltonian saving callback as we need the fock matrix constructed during the
         # SCF cycle, which cannot be set outside of the invoked QM code.
         if flag_huz:
-            m = asi.huzinaga_eq
+            if ((ctxt_tag is None) and (descr_tag is None)):
+                m = np.asfortranarray(asi.huzinaga_eq) if asi.scalapack.is_root(descr) else None
+            else:
+                m = asi.huzinaga_eq
         else:
             if ((ctxt_tag is None) and (descr_tag is None)):
                 m = np.asfortranarray(storage_dict[(iK, iS)]) if asi.scalapack.is_root(descr) else None
