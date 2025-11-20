@@ -50,7 +50,9 @@ class EmbeddingBase(ABC):
             root_print(f"Directory {self.run_dir} can not be created")
 
     def set_layer(self, atoms, layer_name, calc, embed_mask, ghosts=0, 
-                      no_scf=False, ctxt_tag=None, descr_tag=None, insert_embedding_region=True):
+                      no_scf=False, ctxt_tag=None, descr_tag=None, huzinaga=False,
+                      insert_embedding_region=True):
+
         """Sets an AtomsEmbed object as an attribute
 
         Creates an AtomsEmbed object as a named attribute (layer_name) of 
@@ -85,7 +87,9 @@ class EmbeddingBase(ABC):
 
         layer = AtomsEmbed(atoms, calc, embed_mask, outdir=outdir_name, 
                            ghosts=ghosts, no_scf=no_scf, descr_tag=descr_tag,
-                           insert_embedding_region=insert_embedding_region, ctxt_tag=ctxt_tag)
+                           ctxt_tag=ctxt_tag, huzinaga=huzinaga,
+                           insert_embedding_region=insert_embedding_region)
+
         setattr(self, layer_name, layer)
 
     def select_atoms_basis_truncation(self, atomsembed, densmat, overlap, thresh):
@@ -128,6 +132,11 @@ class EmbeddingBase(ABC):
             atomic_charge[atomsembed.basis_atoms[idx]] += abs(charge)
 
         active_atom_mask = [ charge > thresh for charge in atomic_charge ]
+
+        # Corner case where HL atoms can be excluded for high charge thresholds
+        for idx, atom_active in enumerate(atomsembed.embed_mask):
+            if atom_active == 1:
+                active_atom_mask[idx] = True
 
         return active_atom_mask
 
@@ -193,6 +202,13 @@ class EmbeddingBase(ABC):
         active_atoms = np.array([ idx for idx, maskval 
                                   in enumerate(active_atom_mask) 
                                   if (maskval or atomsembed.embed_mask[idx] == 1) ])
+
+        hl_atoms = np.array([ idx for idx, maskval 
+                                  in enumerate(active_atom_mask) 
+                                  if (atomsembed.embed_mask[idx] == 1) ])
+        env_atoms = np.array([ idx for idx, maskval 
+                                  in enumerate(active_atom_mask) 
+                                  if (maskval and (not atomsembed.embed_mask[idx] == 1)) ])
 
         # Remove non-active atoms from basis_atoms to form a truncated
         # analogue
@@ -417,8 +433,13 @@ class ProjectionEmbedding(EmbeddingBase):
         self.projection = projection
         if self.projection == "level-shift":
             root_print(f"MO projection performed with: level-shift")
+            self.flag_huz_sc = False
         elif self.projection == "huzinaga":
             root_print(f"MO projection performed with: huzinaga")
+            self.flag_huz_sc = False
+        elif self.projection == "huzinaga-sc":
+            root_print(f"MO projection performed with: self-consistent Huzinaga equations")
+            self.flag_huz_sc = True
         else:
             raise Exception("Invalid entry for projection: use 'level-shift' or 'huzinaga' ")
 
@@ -469,7 +490,8 @@ class ProjectionEmbedding(EmbeddingBase):
         self.set_layer(atoms, "A_HL", high_level_calculator_1,
                        embed_mask, ghosts=2, no_scf=False,
                        ctxt_tag=subsys_ctxt_tag,
-                       descr_tag=subsys_descr_tag)
+                       descr_tag=subsys_descr_tag,
+                       huzinaga=self.flag_huz_sc)
 
         high_level_calculator_2.parameters['qm_embedding_calc'] = 2
         high_level_calculator_2.parameters['charge_mix_param'] = 0.
@@ -757,8 +779,11 @@ class ProjectionEmbedding(EmbeddingBase):
             self.calculate_levelshift_projector(densmat_B_LL, overlap)
         elif self.projection == "huzinaga":
             self.calculate_huzinaga_projector(hamiltonian_AB_total, overlap, densmat_B_LL)
+        elif self.projection == "huzinaga-sc":
+            self.A_HL.huzinaga_dm_in = densmat_B_LL
+            self.A_HL.huzinaga_ovlp_in = overlap
         else:
-            raise Exception("Invalid entry for projection: use 'level-shift' or 'huzinaga' ")
+            raise Exception("Invalid entry for projection: use 'level-shift', 'huzinaga-sc', or 'huzinaga' ")
 
         # Calculate density matrix for subsystem A at the higher level of 
         # theory. Two terms are added to the hamiltonian matrix of the embedded
@@ -778,8 +803,12 @@ class ProjectionEmbedding(EmbeddingBase):
         # at every SCF iteration.
         self.A_HL.density_matrix_in = densmat_A_LL
         self.A_HL.input_fragment_nelectrons = self.A_pop
+
         self.vemb = AB_hamiltonian_estat_plus_xc - self.A_LL.hamiltonian_estat_plus_xc
-        self.A_HL.fock_embedding_matrix = self.vemb + self.P_b
+        if self.projection == "huzinaga-sc":
+            self.A_HL.fock_embedding_matrix = self.vemb
+        else:
+            self.A_HL.fock_embedding_matrix = self.vemb + self.P_b
 
         if self.gc:
             root_print(f"Pre-GC A_LL: {tracemalloc.get_traced_memory()}")
@@ -795,7 +824,7 @@ class ProjectionEmbedding(EmbeddingBase):
 
         if self.truncate:
             trunc_vemb = self.A_HL.full_mat_to_truncated(self.vemb)
-            trunc_P_b = self.A_HL.full_mat_to_truncated(self.P_b)
+            #trunc_P_b = self.A_HL.full_mat_to_truncated(self.P_b)
             trunc_densmat_A_HL = self.A_HL.full_mat_to_truncated(densmat_A_HL)
         
         if self.gc:
@@ -851,12 +880,17 @@ class ProjectionEmbedding(EmbeddingBase):
             self.time_ab_lowlevel_pp = end - start
 
         # Calculate projected density correction to total energy
-        if self.truncate:
+        if self.truncate and self.projection == "level-shift":
             self.PB_corr = \
                 (op.trace(trunc_P_b @ trunc_densmat_A_HL) * 27.211384500)
-        else:
+        elif (not self.truncate) and self.projection == "level-shift":
             self.PB_corr = \
                 (op.trace(self.P_b @ densmat_A_HL) * 27.211384500)
+        else:
+            self.PB_corr = 0
+    
+
+
 
         if "total_energy_method" in self.A_HL.initial_calc.parameters:
             self.subsys_A_highlvl_totalen = self.subsys_A_highlvl_totalen + \

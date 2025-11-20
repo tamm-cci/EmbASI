@@ -41,16 +41,14 @@ calc_ll = Aims(xc='PBE', profile=AimsProfile(command="asi-doesnt-need-command"),
     RI_method="LVL",
     density_update_method='density_matrix', # for DM export
     atomic_solver_xc="PBE",
-    override_initial_charge_check=True,
-  )
+    override_initial_charge_check=True,)
 
 calc_hl = Aims(xc='PBE', profile=AimsProfile(command="asi-doesnt-need-command"),
     KS_method="parallel",
     RI_method="LVL",
     density_update_method='density_matrix', # for DM export
     atomic_solver_xc="PBE",
-    override_initial_charge_check=True,
-  )
+    override_initial_charge_check=True,)
 
 # Import dimer from s26 test set
 os.chdir('MeOH_dimer')
@@ -67,8 +65,9 @@ Projection = ProjectionEmbedding(methanol_dimer,
                                  calc_base_ll=calc_ll,
                                  calc_base_hl=calc_hl,
                                  mu_val=1.e+6,
-                                 projection="huzinaga",
-                                 parallel=True)
+                                 truncate_basis_thresh=0.001,
+                                 projection="huzinaga-sc",
+                                 parallel=False)
 
 # Now run the simulation!
 root_print('\nRunning MeOH dimer \n')

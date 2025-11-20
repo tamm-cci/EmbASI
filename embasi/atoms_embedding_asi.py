@@ -49,8 +49,8 @@ class AtomsEmbed():
     """
 
     def __init__(self, atoms, initial_calc, embed_mask, ghosts=0,
-                 outdir='asi.calc', no_scf=False, insert_embedding_region=True, ctxt_tag=None,
-                 descr_tag=None):
+                 outdir='asi.calc', no_scf=False, ctxt_tag=None,
+                 descr_tag=None, huzinaga=False, insert_embedding_region=True):
 
         self.atoms = atoms.copy()
         self.initial_embed_mask = embed_mask
@@ -99,6 +99,8 @@ class AtomsEmbed():
             self.ghost_list = [(at in [ghosts]) for at in self.embed_mask]
         else:
             self.ghost_list = [False]*len(atoms)
+
+        self.flag_huz = huzinaga
 
     def calc_initializer(self, asi):
 
@@ -256,37 +258,68 @@ class AtomsEmbed():
 
             lib = os.environ['ASI_LIB_PATH']
 
+            trunc_mat_row = NPScal(ctxt_tag=self.blacs_ctxt_tag, descr_tag="temp_rectangle_f2t", lib=lib,
+                               gl_m=trunc_nbasis, gl_n=full_nbasis, dmb=16, dnb=16)
+            
             trunc_mat = NPScal(ctxt_tag=self.blacs_ctxt_tag, descr_tag=self.blacs_descr_tag, lib=lib,
                                gl_m=trunc_nbasis, gl_n=trunc_nbasis, dmb=16, dnb=16)
         else:
-            trunc_mat = np.zeros(shape=(full_nbasis, full_nbasis))
+            trunc_mat_row = np.zeros(shape=(trunc_nbasis, full_nbasis))
+            trunc_mat = np.zeros(shape=(trunc_nbasis, trunc_nbasis))
 
-        for atom1 in active_atoms:
+        continous_at_blocks = np.split(active_atoms, np.where(np.diff(active_atoms) != 1)[0]+1)
 
-            # Skip atoms belonging to region A (or 1) as their basis
-            # functions are already included
+        for block1 in continous_at_blocks:
+            if len(block1)==1:
+                atom_min = block1[0]
+                atom_max = block1[0]
+            else:
+                atom_min = block1[0]
+                atom_max = block1[-1]
 
-            for atom2 in active_atoms:
-                # Skip core active atom blocks - they are already
-                # correctly placed.
+            atom_min_trunc = np.min(np.where(active_atoms==atom_min))
+            atom_max_trunc = np.min(np.where(active_atoms==atom_max))
 
-                atom2_trunc = np.min(np.where(active_atoms==atom2))
-                atom1_trunc = np.min(np.where(active_atoms==atom1))
+            trunc_row_min = trunc_basis_min_idx[atom_min_trunc] + 1
+            trunc_row_max = trunc_basis_max_idx[atom_max_trunc]
 
-                trunc_row_min = trunc_basis_min_idx[atom2_trunc]
-                trunc_row_max = trunc_basis_max_idx[atom2_trunc]
-                trunc_col_min = trunc_basis_min_idx[atom1_trunc]
-                trunc_col_max = trunc_basis_max_idx[atom1_trunc]
+            full_row_min = full_basis_min_idx[atom_min] + 1
+            full_row_max = full_basis_max_idx[atom_max]
+            
+            new_m = full_row_max - full_row_min + 1
+            new_n = full_nbasis
 
-                full_row_min = full_basis_min_idx[atom2]
-                full_row_max = full_basis_max_idx[atom2]
-                full_col_min = full_basis_min_idx[atom1]
-                full_col_max = full_basis_max_idx[atom1]
+            if self.parallel:
+                trunc_mat.sl.pdgemr2d(new_m, new_n, full_mat.loc_array, full_row_min, 1, full_mat.descr,
+                                      trunc_mat_row.loc_array, trunc_row_min, 1, trunc_mat_row.descr, trunc_mat.ctxt.ctxt)
+            else:
+                trunc_mat_row[trunc_row_min-1:trunc_row_max,:] = full_mat[full_row_min-1:full_row_max,:]
 
-                trunc_mat[trunc_row_min:trunc_row_max, 
-                          trunc_col_min:trunc_col_max] = \
-                        full_mat[full_row_min:full_row_max, 
-                                 full_col_min:full_col_max]
+        for block1 in continous_at_blocks:
+            if len(block1)==1:
+                atom_min = block1[0]
+                atom_max = block1[0]
+            else:
+                atom_min = block1[0]
+                atom_max = block1[-1]
+
+            atom_min_trunc = np.min(np.where(active_atoms==atom_min))
+            atom_max_trunc = np.min(np.where(active_atoms==atom_max))
+
+            trunc_col_min = trunc_basis_min_idx[atom_min_trunc] + 1
+            trunc_col_max = trunc_basis_max_idx[atom_max_trunc]
+
+            full_col_min = full_basis_min_idx[atom_min] + 1
+            full_col_max = full_basis_max_idx[atom_max]
+
+            new_m = trunc_nbasis
+            new_n = trunc_col_max - trunc_col_min + 1
+
+            if self.parallel:
+                trunc_mat.sl.pdgemr2d(new_m, new_n, trunc_mat_row.loc_array, 1, full_col_min, trunc_mat_row.descr,
+                                      trunc_mat.loc_array, 1, trunc_col_min, trunc_mat.descr, trunc_mat.ctxt.ctxt)
+            else:
+                trunc_mat[:,trunc_col_min-1:trunc_col_max] = trunc_mat_row[:,full_col_min-1:full_col_max]
 
         return trunc_mat
 
@@ -314,6 +347,9 @@ class AtomsEmbed():
         # Set to local variables to improve readability
         active_atoms = self.basis_info.active_atoms
 
+        full_nbasis = self.basis_info.full_nbasis
+        trunc_nbasis = self.basis_info.trunc_nbasis
+
         # TODO: Set-up for upper-triangular matrices.
         trunc_basis_min_idx = self.basis_info.trunc_basis_min_idx
         trunc_basis_max_idx = self.basis_info.trunc_basis_max_idx
@@ -328,42 +364,72 @@ class AtomsEmbed():
             from ctypes import cdll, CDLL, RTLD_GLOBAL
 
             lib = os.environ['ASI_LIB_PATH']
-            print(f"DESCR REGISTER {DESCR_Register}")
             new_descr_tag = "supersystem"
+
+            full_mat_row = NPScal(ctxt_tag=self.blacs_ctxt_tag, descr_tag="temp_rectangle_t2f", lib=lib,
+                                  gl_m=full_nbasis, gl_n=trunc_nbasis, dmb=16, dnb=16)
 
             full_mat = NPScal(ctxt_tag=self.blacs_ctxt_tag, descr_tag=new_descr_tag, lib=lib)
         else:
+            full_mat_row = np.zeros(shape=(full_nbasis, trunc_nbasis))
             full_mat = np.zeros(shape=(full_nbasis, full_nbasis))
 
-        for atom1 in active_atoms:
+        continous_at_blocks = np.split(active_atoms, np.where(np.diff(active_atoms) != 1)[0]+1)
 
-            # Skip atoms belonging to region A (or 1) as their basis
-            # functions are already included
+        for block1 in continous_at_blocks:
+            if len(block1)==1:
+                atom_min = block1[0]
+                atom_max = block1[0]
+            else:
+                atom_min = block1[0]
+                atom_max = block1[-1]
 
-            for atom2 in active_atoms:
-                # Skip core active atom blocks - they are already
-                # correctly placed.
+            atom_min_trunc = np.min(np.where(active_atoms==atom_min))
+            atom_max_trunc = np.min(np.where(active_atoms==atom_max))
 
-                atom2_trunc = np.min(np.where(active_atoms==atom2))
-                atom1_trunc = np.min(np.where(active_atoms==atom1))
+            trunc_row_min = trunc_basis_min_idx[atom_min_trunc] + 1
+            trunc_row_max = trunc_basis_max_idx[atom_max_trunc]
 
-                trunc_row_min = trunc_basis_min_idx[atom2_trunc]
-                trunc_row_max = trunc_basis_max_idx[atom2_trunc]
-                trunc_col_min = trunc_basis_min_idx[atom1_trunc]
-                trunc_col_max = trunc_basis_max_idx[atom1_trunc]
+            full_row_min = full_basis_min_idx[atom_min] + 1
+            full_row_max = full_basis_max_idx[atom_max]
 
-                full_row_min = full_basis_min_idx[atom2]
-                full_row_max = full_basis_max_idx[atom2]
-                full_col_min = full_basis_min_idx[atom1]
-                full_col_max = full_basis_max_idx[atom1]
+            new_m = full_row_max - full_row_min + 1
+            new_n = trunc_nbasis
 
-                full_mat[full_row_min:full_row_max, 
-                         full_col_min:full_col_max] = \
-                    trunc_mat[trunc_row_min:trunc_row_max, 
-                              trunc_col_min:trunc_col_max]
+            if self.parallel:
+                trunc_mat.sl.pdgemr2d(new_m, new_n, trunc_mat.loc_array, trunc_row_min, 1, trunc_mat.descr,
+                                      full_mat_row.loc_array, full_row_min, 1, full_mat_row.descr, trunc_mat.ctxt.ctxt)
+            else:
+                full_mat_row[full_row_min-1:full_row_max,:] = trunc_mat[trunc_row_min-1:trunc_row_max,:]
+                
+        for block1 in continous_at_blocks:
+            if len(block1)==1:
+                atom_min = block1[0]
+                atom_max = block1[0]
+            else:
+                atom_min = block1[0]
+                atom_max = block1[-1]
+
+            atom_min_trunc = np.min(np.where(active_atoms==atom_min))
+            atom_max_trunc = np.min(np.where(active_atoms==atom_max))
+
+            trunc_col_min = trunc_basis_min_idx[atom_min_trunc] + 1
+            trunc_col_max = trunc_basis_max_idx[atom_max_trunc]
+
+            full_col_min = full_basis_min_idx[atom_min] + 1
+            full_col_max = full_basis_max_idx[atom_max]
+
+            new_m = full_nbasis
+            new_n = full_col_max - full_col_min + 1
+
+            if self.parallel:
+                trunc_mat.sl.pdgemr2d(new_m, new_n, full_mat_row.loc_array, 1, trunc_col_min, full_mat_row.descr,
+                                      full_mat.loc_array, 1, full_col_min, full_mat.descr, trunc_mat.ctxt.ctxt)
+            else:
+                full_mat[:,full_col_min-1:full_col_max] = full_mat_row[:,trunc_col_min-1:trunc_col_max]
 
         return full_mat
-
+    
     def extract_results(self):
         """Extracts quantities not currently supported by ASI
 
@@ -417,6 +483,7 @@ class AtomsEmbed():
         from asi4py.asecalc import ASI_ASE_calculator
         from embasi.asi_default_callbacks import dm_saving_callback, \
                                                         ham_saving_callback, \
+                                                        ham_saving_and_huzinaga_callback, \
                                                         ovlp_saving_callback, \
                                                         matrix_loading_callback
 
@@ -466,26 +533,47 @@ class AtomsEmbed():
         self.atoms.calc.asi.ham_storage = {}
         self.atoms.calc.asi.ham_calc_cnt = {}
         self.atoms.calc.asi.ham_count = 0
-        self.atoms.calc.asi.register_hamiltonian_callback(ham_saving_callback, 
-                                                          (self.atoms.calc.asi,
-                                                           self.atoms.calc.asi.ham_storage,
-                                                           self.atoms.calc.asi.ham_calc_cnt,
-                                                           self.blacs_ctxt_tag,
-                                                           self.blacs_descr_tag,
-                                                           'Ham calc'))
+
+        if self.flag_huz:
+            self.atoms.calc.asi.register_hamiltonian_callback(ham_saving_and_huzinaga_callback,
+                                                              (self.atoms.calc.asi,
+                                                               self.atoms.calc.asi.ham_storage,
+                                                               {"atembed": self},
+                                                               #{(1,1): self.fock_embedding_matrix},
+                                                               #{(1,1): self.huzinaga_dm_in},
+                                                               #{(1,1): self.huzinaga_ovlp_in},
+                                                               self.atoms.calc.asi.ham_calc_cnt,
+                                                               self.blacs_ctxt_tag,
+                                                               self.blacs_descr_tag,
+                                                               'Ham calc'))
+        else:
+            self.atoms.calc.asi.register_hamiltonian_callback(ham_saving_callback, 
+                                                              (self.atoms.calc.asi,
+                                                               self.atoms.calc.asi.ham_storage,
+                                                               self.atoms.calc.asi.ham_calc_cnt,
+                                                               self.blacs_ctxt_tag,
+                                                               self.blacs_descr_tag,
+                                                               'Ham calc'))
 
         if self.density_matrix_in is not None:
             self.atoms.calc.asi.register_DM_init(matrix_loading_callback,
                                                  (self.atoms.calc.asi,
                                                  {(1,1): self.density_matrix_in},
+                                                 False,
                                                  self.blacs_ctxt_tag,
                                                  self.blacs_descr_tag,
                                                  'DM init'))
 
         if self.fock_embedding_matrix is not None:
+            if self.truncate:
+                mat_in = self.fock_embedding_matrix_trunc
+            else:
+                mat_in = self.fock_embedding_matrix
+
             self.atoms.calc.asi.register_modify_hamiltonian_callback(matrix_loading_callback,
                                                                      (self.atoms.calc.asi,
-                                                                     {(1,1): self.fock_embedding_matrix},
+                                                                     {(1,1): mat_in},
+                                                                     self.flag_huz,
                                                                      self.blacs_ctxt_tag,
                                                                      self.blacs_descr_tag,
                                                                      'Modify H'))
@@ -658,11 +746,56 @@ class AtomsEmbed():
         #    (type(inp_fock_embedding_mat) == NPScal))):
 
         #    raise TypeError("Input vemb needs to be np.ndarray of dimensions nbasis*nbasis.")
+        self._fock_embedding_matrix = inp_fock_embedding_mat
 
         if ((inp_fock_embedding_mat is not None) and (self.truncate)):
-            inp_fock_embedding_mat = self.full_mat_to_truncated(inp_fock_embedding_mat)
+            self.fock_embedding_matrix_trunc = self.full_mat_to_truncated(inp_fock_embedding_mat)
 
-        self._fock_embedding_matrix = inp_fock_embedding_mat
+    @property
+    def fock_embedding_matrix_trunc(self):
+        return self._fock_embedding_matrix_trunc
+
+    @fock_embedding_matrix_trunc.setter
+    def fock_embedding_matrix_trunc(self, inp_fock_embedding_mat):
+        self._fock_embedding_matrix_trunc = inp_fock_embedding_mat
+
+    @property
+    def huzinaga_dm_in(self):
+        return self._huzinaga_dm_in
+
+    @huzinaga_dm_in.setter
+    def huzinaga_dm_in(self, huzinaga_dm_in):
+        self._huzinaga_dm_in = huzinaga_dm_in
+
+        if ((huzinaga_dm_in is not None) and (self.truncate)):
+            self.huzinaga_dm_in_trunc = self.full_mat_to_truncated(huzinaga_dm_in)
+
+    @property
+    def huzinaga_dm_in_trunc(self):
+        return self._huzinaga_dm_in_trunc
+
+    @huzinaga_dm_in_trunc.setter
+    def huzinaga_dm_in_trunc(self, huzinaga_dm_in):
+        self._huzinaga_dm_in_trunc = huzinaga_dm_in
+
+    @property
+    def huzinaga_ovlp_in(self):
+        return self._huzinaga_ovlp_in
+
+    @huzinaga_ovlp_in.setter
+    def huzinaga_ovlp_in(self, huzinaga_ovlp_in):
+        self._huzinaga_ovlp_in = huzinaga_ovlp_in
+
+        if ((huzinaga_ovlp_in is not None) and (self.truncate)):
+            self.huzinaga_ovlp_in_trunc = self.full_mat_to_truncated(huzinaga_ovlp_in)
+
+    @property
+    def huzinaga_ovlp_in_trunc(self):
+        return self._huzinaga_ovlp_in_trunc
+
+    @huzinaga_ovlp_in_trunc.setter
+    def huzinaga_ovlp_in_trunc(self, huzinaga_ovlp_in):
+        self._huzinaga_ovlp_in_trunc = huzinaga_ovlp_in
 
     @property
     def density_matrix_in(self):
