@@ -433,7 +433,7 @@ class ProjectionEmbedding(EmbeddingBase):
         self.projection = projection
         if self.projection == "level-shift":
             root_print(f"MO projection performed with: level-shift")
-            self.flag_huz = False
+            self.flag_huz_sc = False
         elif self.projection == "huzinaga":
             root_print(f"MO projection performed with: huzinaga")
             self.flag_huz_sc = False
@@ -880,14 +880,15 @@ class ProjectionEmbedding(EmbeddingBase):
             self.time_ab_lowlevel_pp = end - start
 
         # Calculate projected density correction to total energy
-        if self.truncate:
-            #self.PB_corr = \
-            #    (op.trace(trunc_P_b @ trunc_densmat_A_HL) * 27.211384500)
-            self.PB_corr = 0
+        if self.truncate and self.projection == "level-shift":
+            self.PB_corr = \
+                (op.trace(trunc_P_b @ trunc_densmat_A_HL) * 27.211384500)
+        elif (not self.truncate) and self.projection == "level-shift":
+            self.PB_corr = \
+                (op.trace(self.P_b @ densmat_A_HL) * 27.211384500)
         else:
-            #self.PB_corr = \
-            #    (op.trace(self.P_b @ densmat_A_HL) * 27.211384500)
             self.PB_corr = 0
+    
 
 
 
