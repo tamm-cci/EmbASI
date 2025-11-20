@@ -5,6 +5,9 @@ import scalapack4py.npscal.math_utils.operations as op
 import numpy as np
 from mpi4py import MPI
 
+# Development purposes
+import re
+
 class AtomsEmbed():
     """A wrapper around an ASE atoms objects for ASI library calls
 
@@ -33,6 +36,10 @@ class AtomsEmbed():
         Assigns atoms to be evaluated as ghost species for the purposes
         of embedding. If ghosts are needed for BSSE, they must be 
         set in dictionary atoms.info['ghosts'] as a mask.
+    grids: int
+        Assigns atoms to be evaluated as ghost species for the purposes
+        of embedding. If ghosts are needed for BSSE, they must be 
+        set in dictionary atoms.info['ghosts'] as a mask.
     outdir: str
         Name of directory output files are saved to
     no_scf: bool
@@ -43,11 +50,12 @@ class AtomsEmbed():
 
     def __init__(self, atoms, initial_calc, embed_mask, ghosts=0,
                  outdir='asi.calc', no_scf=False, ctxt_tag=None,
-                 descr_tag=None, huzinaga=False):
+                 descr_tag=None, huzinaga=False, insert_embedding_region=True):
 
         self.atoms = atoms.copy()
         self.initial_embed_mask = embed_mask
         self.outdir = outdir
+        self.insert_embedding_region = insert_embedding_region
 
         # Determines whether arrays are to be communicated in serial,
         # or as BLACS distributed arrays from a globally stored context
@@ -128,8 +136,10 @@ class AtomsEmbed():
 
         calc.write_inputfiles(asi.atoms, properties=['energy'])
 
-        if self.embed_mask is not None:
+        if self.embed_mask is not None and self.insert_embedding_region:
             self._insert_embedding_region_aims()
+
+        self._insert_custom_aims_controlin()
 
     def reorder_atoms_from_embed_mask(self):
         """ Re-orders atoms to push those in embedding region 1 to the beginning
@@ -176,6 +186,33 @@ class AtomsEmbed():
                 lines.insert(idx + shift, f'qm_embedding_region {embedding}\n')
 
         with open(geometry_path, 'w') as fil:
+            lines = "".join(lines)
+            fil.write(lines)
+
+    def _insert_custom_aims_controlin(self):
+        """Adds output keywords to the control.in file
+           This is an ad hoc solution to add output keyword to control.in
+        """
+
+        import os
+
+        cwd = os.getcwd()
+        control_path = os.path.join(cwd, "control.in")
+        with open(control_path, 'r') as fil:
+            lines = fil.readlines()
+            mask = [any(s in str(line) for s in ('aims_output',)) for line in lines]
+
+        if self.embed_mask is None:
+            return
+
+        shift = 0
+        for idx, maskval in enumerate(mask):
+            if maskval:
+               output_line = re.split(r'\s+', lines[idx])
+               output_line[0] = 'output'  # Remove empty strings
+               lines[idx] = '\t '.join(output_line) + '\n'
+
+        with open(control_path, 'w') as fil:
             lines = "".join(lines)
             fil.write(lines)
 
