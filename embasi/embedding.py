@@ -1145,8 +1145,8 @@ class ONIOMSubtractiveEmbedding(EmbeddingBase):
 
     def __init__(self, atoms, embed_mask, calc_base_ll, calc_base_hl,
                  total_charge=0, post_scf=None, covalent_cap=True,
-                 covalent_cap_species="H", covalent_cap_bond_len=1.0,
-                 run_dir="./EmbASI_calc"):
+                 cluster_hl=True, covalent_cap_species="H", covalent_cap_bond_len=1.0,
+                 parallel=True, run_dir="./EmbASI_calc"):
 
         from copy import copy, deepcopy
         from mpi4py import MPI
@@ -1157,6 +1157,16 @@ class ONIOMSubtractiveEmbedding(EmbeddingBase):
         super(ONIOMSubtractiveEmbedding, self).__init__(atoms, embed_mask,
                                                   calc_base_ll, calc_base_hl, run_dir=run_dir)
 
+        # Set-up tags for BLACS descriptors and contexts
+        if self.parallel:
+            supersys_ctxt_tag = "main"
+            subsys_ctxt_tag = "main"
+            supersys_descr_tag = "supersystem"
+            subsys_descr_tag = "subsystem"
+
+
+        self.cluster_hl = cluster_hl
+
         #self.calculator_ll.parameters['override_default_empty_basis_order']=".true."
         #self.calculator_hl.parameters['override_default_empty_basis_order']=".true."
 
@@ -1166,13 +1176,21 @@ class ONIOMSubtractiveEmbedding(EmbeddingBase):
         high_level_calculator_1 = deepcopy(self.calculator_hl)
         high_level_calculator_2 = deepcopy(self.calculator_hl)
 
+        if cluster_hl:
+            low_level_calculator_2.parameters.pop("k_grid")
+            high_level_calculator_1.parameters.pop("k_grid")
+            high_level_calculator_2.parameters.pop("k_grid")
+
         low_level_calculator_1.parameters['qm_embedding_calc'] = 1
         low_level_calculator_2.parameters['qm_embedding_calc'] = 1
         high_level_calculator_1.parameters['qm_embedding_calc'] = 1
         high_level_calculator_2.parameters['qm_embedding_calc'] = 1
 
         self.set_layer(atoms, "AB_LL", low_level_calculator_1, 
-                       embed_mask, ghosts=0, no_scf=False)
+                       embed_mask, ghosts=0, no_scf=False,
+                       ctxt_tag=supersys_ctxt_tag,
+                       descr_tag=supersys_descr_tag)
+
         self.AB_LL.input_total_charge = total_charge
 
         # Define a reduced set of atoms with quantum caps, if requested
@@ -1189,16 +1207,28 @@ class ONIOMSubtractiveEmbedding(EmbeddingBase):
 
         subsys_embed_mask = len(subsys_atoms) * [1]
 
+        # Removes periodic boundary conditions from the high-level subsystem calculation
+        if cluster_hl:
+            subsys_atoms.pbc = (False, False, False)
+
         self.set_layer(subsys_atoms, "A_LL", low_level_calculator_2,
-                       subsys_embed_mask, ghosts=0, no_scf=False)
+                       subsys_embed_mask, ghosts=0, no_scf=False,
+                       ctxt_tag=subsys_ctxt_tag,
+                       descr_tag=subsys_descr_tag)
+
 
         if "total_energy_method" in high_level_calculator_2.parameters:
             high_level_calculator_2.parameters['total_energy_method'] = high_level_calculator_2.parameters["xc"]
         self.set_layer(subsys_atoms, "A_HL", high_level_calculator_1,
-                       subsys_embed_mask, ghosts=0, no_scf=False)
+                       subsys_embed_mask, ghosts=0, no_scf=False,
+                       ctxt_tag=subsys_ctxt_tag,
+                       descr_tag=subsys_descr_tag)
+
 
         self.set_layer(subsys_atoms, "A_HL_PP", high_level_calculator_2,
-                       subsys_embed_mask, ghosts=0, no_scf=False)
+                       subsys_embed_mask, ghosts=0, no_scf=False,
+                       ctxt_tag=subsys_ctxt_tag,
+                       descr_tag=subsys_descr_tag)
 
         self.rank = MPI.COMM_WORLD.Get_rank()
         self.ntasks = MPI.COMM_WORLD.Get_size()
