@@ -1114,3 +1114,195 @@ class FrozenDensityEmbedding(EmbeddingBase):
 
         root_print(f"Total time (s): {end-start}")
 
+class ONIOMSubtractiveEmbedding(EmbeddingBase):
+    """Implementation of ONIOM-like Subtractive Embedding
+
+    A class that
+
+    Parameters
+    ----------
+    atoms: ASE Atoms
+        Structural and chemical information of system
+    embed_mask: int or list
+        Number of atoms from index 0 in layer 1, or list of reigons assigned
+        to each atom (i.e., [1,1,1,2,2,2])
+    calc_base_ll: ASE FileIOCalculator
+        Calculator object for layer 1
+    calc_base_hl: ASE FileIOCalculator
+        Calculator object for layer 2
+    frag_charge: int
+        Charge of the embedded fragment. Defaults to 0.
+    post_scf: str
+        Post-HF method applied to high-level calculation. Defaults to None.
+
+    References
+    ----------
+    [1] Manby, F. R.; Stella, M.; Goodpaster, J. D.; Miller, T. F. I.
+    A Simple, Exact Density-Functional-Theory Embedding Scheme. J. Chem.
+    Theory Comput. 2012, 8 (8), 2564–2568.
+
+    """
+
+    def __init__(self, atoms, embed_mask, calc_base_ll, calc_base_hl,
+                 total_charge=0, post_scf=None, covalent_cap=True,
+                 cluster_hl=True, covalent_cap_species="H", covalent_cap_bond_len=1.0,
+                 parallel=True, run_dir="./EmbASI_calc"):
+
+        from copy import copy, deepcopy
+        from mpi4py import MPI
+        from .geom_utils import GeomUtils
+
+        self.calc_names = ["AB_LL","A_LL","A_HL","A_HL_PP"]
+
+        super(ONIOMSubtractiveEmbedding, self).__init__(atoms, embed_mask,
+                                                  calc_base_ll, calc_base_hl, run_dir=run_dir)
+
+        # Set-up tags for BLACS descriptors and contexts
+        if self.parallel:
+            supersys_ctxt_tag = "main"
+            subsys_ctxt_tag = "main"
+            supersys_descr_tag = "supersystem"
+            subsys_descr_tag = "subsystem"
+
+
+        self.cluster_hl = cluster_hl
+
+        #self.calculator_ll.parameters['override_default_empty_basis_order']=".true."
+        #self.calculator_hl.parameters['override_default_empty_basis_order']=".true."
+
+        low_level_calculator_1 = deepcopy(self.calculator_ll)
+        low_level_calculator_2 = deepcopy(self.calculator_ll)
+        
+        high_level_calculator_1 = deepcopy(self.calculator_hl)
+        high_level_calculator_2 = deepcopy(self.calculator_hl)
+
+        if cluster_hl:
+            low_level_calculator_2.parameters.pop("k_grid")
+            high_level_calculator_1.parameters.pop("k_grid")
+            high_level_calculator_2.parameters.pop("k_grid")
+
+        low_level_calculator_1.parameters['qm_embedding_calc'] = 1
+        low_level_calculator_2.parameters['qm_embedding_calc'] = 1
+        high_level_calculator_1.parameters['qm_embedding_calc'] = 1
+        high_level_calculator_2.parameters['qm_embedding_calc'] = 1
+
+        self.set_layer(atoms, "AB_LL", low_level_calculator_1, 
+                       embed_mask, ghosts=0, no_scf=False,
+                       ctxt_tag=supersys_ctxt_tag,
+                       descr_tag=supersys_descr_tag)
+
+        self.AB_LL.input_total_charge = total_charge
+
+        # Define a reduced set of atoms with quantum caps, if requested
+        geom_tools = GeomUtils(atoms)
+
+        if covalent_cap:
+            subsys_atoms = geom_tools.quantum_cap_region(embed_mask,
+                                                         covalent_cap_species,
+                                                         covalent_cap_bond_len)
+        else:
+            embed_mask = np.array(embed_mask)
+            mask = np.where(embed_mask == 1)[0]
+            subsys_atoms = atoms[mask]
+
+        subsys_embed_mask = len(subsys_atoms) * [1]
+
+        # Removes periodic boundary conditions from the high-level subsystem calculation
+        if cluster_hl:
+            subsys_atoms.pbc = (False, False, False)
+
+        self.set_layer(subsys_atoms, "A_LL", low_level_calculator_2,
+                       subsys_embed_mask, ghosts=0, no_scf=False,
+                       ctxt_tag=subsys_ctxt_tag,
+                       descr_tag=subsys_descr_tag)
+
+
+        if "total_energy_method" in high_level_calculator_2.parameters:
+            high_level_calculator_2.parameters['total_energy_method'] = high_level_calculator_2.parameters["xc"]
+        self.set_layer(subsys_atoms, "A_HL", high_level_calculator_1,
+                       subsys_embed_mask, ghosts=0, no_scf=False,
+                       ctxt_tag=subsys_ctxt_tag,
+                       descr_tag=subsys_descr_tag)
+
+
+        self.set_layer(subsys_atoms, "A_HL_PP", high_level_calculator_2,
+                       subsys_embed_mask, ghosts=0, no_scf=False,
+                       ctxt_tag=subsys_ctxt_tag,
+                       descr_tag=subsys_descr_tag)
+
+        self.rank = MPI.COMM_WORLD.Get_rank()
+        self.ntasks = MPI.COMM_WORLD.Get_size()
+
+        self.covalent_cap = covalent_cap
+        self.covalent_cap_species = covalent_cap_species
+        self.covalent_cap_bond_len = covalent_cap_bond_len
+
+    def run(self):
+        """ Summary
+        The primary driver for ONIOM-like QM/QM embedding using a subtractive scheme.
+        The total energy is evaluated using 
+        
+        ...
+
+        """
+        import numpy as np
+
+        root_print("Embedding calculation begun...")
+
+        # Performs a single-point energy evaluation for a system composed of A
+        # and B. Returns localised density matrices for subsystems A and B, and
+        # the two-electron components of the hamiltonian (combined with
+        # nuclear-electron potential).
+        start = time.time()
+        self.AB_LL.run()
+        subsys_AB_lowlvl_totalen = self.AB_LL.total_energy
+        end = time.time()
+        self.time_ab_lowlevel = end - start
+
+        # Calculates the electron count for the combined (A+B) subsystems (A and B).
+        #self.AB_pop = self.calc_subsys_pop(self.AB_LL.overlap, \
+        #                                   (densmat_A_LL + densmat_B_LL))
+        #root_print(f" Population of Subsystem AB: {self.AB_pop}")
+
+        # Calculate the energy for subsystem A with the lower level of theory
+        start = time.time()
+        self.A_LL.run()
+        subsys_A_lowlvl_totalen = self.A_LL.total_energy
+        end = time.time()
+        self.time_a_lowlevel = end - start
+
+        start = time.time()
+        self.A_HL.density_matrix_in = self.A_LL.density_matrices_out[0]
+        self.A_HL.run()
+        subsys_A_dft_highlvl_totalen = self.A_HL.total_energy
+        end = time.time()
+        self.time_a_highlevel = end - start
+
+        # Calculate the total energy of the embedded subsystem A at the high
+        # level of theory without the associated embedding potential.        
+        self.A_HL_PP.density_matrix_in = self.A_HL.density_matrices_out[0]
+        start = time.time()
+        self.A_HL_PP.run()
+        subsys_A_highlvl_totalen = self.A_HL_PP.total_energy
+        end = time.time()
+        self.time_a_highlevel_pp = end - start
+
+        self.DFT_AinB_total_energy = subsys_AB_lowlvl_totalen - subsys_A_lowlvl_totalen + \
+            subsys_A_dft_highlvl_totalen
+
+        if "total_energy_method" in self.A_HL.initial_calc.parameters:
+            subsys_A_highlvl_totalen = subsys_A_highlvl_totalen + \
+                self.A_HL.post_scf_corr_energy - self.A_HL.dft_energy
+
+        root_print( f" ----------- FINAL         OUTPUTS --------- " )
+        root_print(f" ")
+        root_print(f" Total Energy (A+B Low-Level): {subsys_AB_lowlvl_totalen} eV" )
+        root_print(f" Total Energy (A Low-Level): {subsys_A_lowlvl_totalen} eV" )
+        root_print(f" Total Energy (A High-Level): {subsys_A_highlvl_totalen} eV" )
+        root_print(f"  " )
+        root_print(f" Final Energies Information:")
+        root_print(f" Final total energy: {self.DFT_AinB_total_energy} eV" )
+        root_print(f" " )
+        root_print(f" -----------======================--------- " )
+        root_print(f" " )
+
