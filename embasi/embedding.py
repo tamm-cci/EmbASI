@@ -92,7 +92,7 @@ class EmbeddingBase(ABC):
 
         setattr(self, layer_name, layer)
 
-    def select_atoms_basis_truncation(self, atomsembed, densmat, overlap, thresh):
+    def select_atoms_basis_truncation(self, atomsembed, densmat, overlap, thresh, layer):
         """Lists atomic centers significant charge for a given density matrix
 
         Returns a list of corresponding atoms for which the total contribution 
@@ -135,7 +135,7 @@ class EmbeddingBase(ABC):
 
         # Corner case where HL atoms can be excluded for high charge thresholds
         for idx, atom_active in enumerate(atomsembed.embed_mask):
-            if atom_active == 1:
+            if atom_active == layer:
                 active_atom_mask[idx] = True
 
         return active_atom_mask
@@ -175,7 +175,7 @@ class EmbeddingBase(ABC):
 
         return BasisInfo
 
-    def set_truncation_defaults(self, atomsembed, active_atom_mask):
+    def set_truncation_defaults(self, atomsembed, active_atom_mask, layer):
         """Sets default BasisInfo objects for each embedding layer
 
         Necessary to maintain consistency in values needed for matrix truncation
@@ -201,14 +201,14 @@ class EmbeddingBase(ABC):
         # truncated matrix
         active_atoms = np.array([ idx for idx, maskval 
                                   in enumerate(active_atom_mask) 
-                                  if (maskval or atomsembed.embed_mask[idx] == 1) ])
+                                  if (maskval or atomsembed.embed_mask[idx] == layer) ])
 
         hl_atoms = np.array([ idx for idx, maskval 
                                   in enumerate(active_atom_mask) 
                                   if (atomsembed.embed_mask[idx] == 1) ])
         env_atoms = np.array([ idx for idx, maskval 
                                   in enumerate(active_atom_mask) 
-                                  if (maskval and (not atomsembed.embed_mask[idx] == 1)) ])
+                                  if (maskval and (not atomsembed.embed_mask[idx] == layer)) ])
 
         # Remove non-active atoms from basis_atoms to form a truncated
         # analogue
@@ -236,6 +236,7 @@ class EmbeddingBase(ABC):
         BasisInfo = Basis_info()
         BasisInfo.full_natoms = len(active_atom_mask)
         BasisInfo.trunc_natoms = len(active_atoms)
+        BasisInfo.active_atoms_mask = active_atom_mask
         BasisInfo.active_atoms = active_atoms
         BasisInfo.full_basis_atoms = atomsembed.basis_atoms
         BasisInfo.trunc_basis_atoms = trunc_basis_atoms
@@ -396,20 +397,45 @@ class ProjectionEmbedding(EmbeddingBase):
                  truncate_basis_thresh=None, truncate_basis_atoms=None,
                  localisation='SPADE', projection="level-shift",
                  mu_val=1.e+06, parallel=False, gc=True, run_dir="./EmbASI_calc",
-                 basis_illcond_thresh=1e-5):
+                 basis_illcond_thresh=1e-5, scalapack_block_size=16):
 
         from copy import copy, deepcopy
         from mpi4py import MPI
 
+        # Set truncation keywords
+        self.truncate = False
+        self.abs_truncate = False
+        self.truncate_basis_thresh = truncate_basis_thresh
+        self.truncate_basis_atoms = truncate_basis_atoms
+
+        if (truncate_basis_thresh is not None) and (truncate_basis_atoms is not None):
+            raise Exception("Please only specific truncate_basis_thresh OR truncate_basis_atoms")
+        
+        if (truncate_basis_thresh is not None) or (truncate_basis_atoms is not None):
+            self.truncate_basis_thresh = truncate_basis_thresh
+            self.truncate_basis_atoms = truncate_basis_atoms
+
+            self.truncate = True
+
+            if truncate_basis_thresh == "absolute":
+                # Set truncation treshold to high value for absolute truncation
+                self.truncate_basis_thresh = 1000
+                self.abs_truncate = True
+
         self.total_energy_corr = total_energy_corr
+
+        # Set calculators for a given method of calculating the total embedding energy
+        if self.abs_truncate and (not (self.total_energy_corr == "nonscf")):
+            raise Exception("total_energy_corr must be set to 'nonscf' if truncate_basis_thresh is 'absolute'")
 
         if self.total_energy_corr == "1storder":
             self.calc_names = ["AB_LL","A_LL","A_HL","A_HL_PP"]
         elif self.total_energy_corr == "nonscf": 
-            self.calc_names = ["AB_LL","A_LL","A_HL","A_HL_PP","AB_LL_PP"]
+            self.calc_names = ["AB_LL","A_LL","A_HL","B_LL","A_HL_PP","AB_LL_PP","B_LL_PP"]
         else:
             raise Exception("Invalid entry for total_energy_corr: use '1storder' or 'nonscf' ")
 
+        # Initialise the ProjectionEmbedding object given EmbeddingBase
         super(ProjectionEmbedding, self).__init__(atoms, embed_mask,
                                                   calc_base_ll, calc_base_hl,
                                                   run_dir=run_dir)
@@ -417,6 +443,10 @@ class ProjectionEmbedding(EmbeddingBase):
         # Determines whether arrays will be communicated in parallel
         self.parallel = parallel
         self.gc = gc
+
+        if self.parallel:
+            self.calculator_ll.parameters['scalapack_block_size'] = scalapack_block_size
+            self.calculator_hl.parameters['scalapack_block_size'] = scalapack_block_size
 
         self.localisation = localisation
         if self.localisation == "SPADE":
@@ -427,8 +457,9 @@ class ProjectionEmbedding(EmbeddingBase):
             self.calculator_hl.parameters['qm_embedding_mo_localise']=".true."
         else:
             raise Exception("Invalid entry for localisation: use 'SPADE' or 'qmcode' ")
-        #self.calculator_ll.parameters['override_default_empty_basis_order']=".true."
-        #self.calculator_hl.parameters['override_default_empty_basis_order']=".true."
+
+        self.calculator_ll.parameters['override_default_empty_basis_order']=".true."
+        self.calculator_hl.parameters['override_default_empty_basis_order']=".true."
 
         self.projection = projection
         if self.projection == "level-shift":
@@ -449,8 +480,10 @@ class ProjectionEmbedding(EmbeddingBase):
         high_level_calculator_1 = deepcopy(self.calculator_hl)
         high_level_calculator_2 = deepcopy(self.calculator_hl)
 
-        if self.total_energy_corr == "nonscf":
+        if self.total_energy_corr == "nonscf" or self.total_energy_corr == "test_1storder":
             low_level_calculator_3 = deepcopy(self.calculator_ll)
+            low_level_calculator_4 = deepcopy(self.calculator_ll)
+            low_level_calculator_5 = deepcopy(self.calculator_ll)
 
         # Determines the BLACS context and descriptors used for the communication
         # and storage of arrays in the NPScal registry structure
@@ -459,11 +492,13 @@ class ProjectionEmbedding(EmbeddingBase):
             subsys_ctxt_tag = "main"
             supersys_descr_tag = "supersystem"
             subsys_descr_tag = "subsystem"
+            subsys_B_descr_tag = "subsystem_B"
         else:
             supersys_ctxt_tag = None
             subsys_ctxt_tag = None
             supersys_descr_tag = None
             subsys_descr_tag = None
+            subsys_B_descr_tag = None
 
         # Add AtomEmbedding objects assigned to each stage of the Projection
         # embedding workflow, where:
@@ -483,8 +518,8 @@ class ProjectionEmbedding(EmbeddingBase):
         low_level_calculator_2.parameters['sc_iter_limit'] = 0
         self.set_layer(atoms, "A_LL", low_level_calculator_2,
                        embed_mask, ghosts=2, no_scf=False,
-                       ctxt_tag=subsys_ctxt_tag,
-                       descr_tag=subsys_descr_tag)
+                       ctxt_tag=supersys_ctxt_tag,
+                       descr_tag=supersys_descr_tag)
 
         high_level_calculator_1.parameters['qm_embedding_calc'] = 3
         self.set_layer(atoms, "A_HL", high_level_calculator_1,
@@ -505,26 +540,34 @@ class ProjectionEmbedding(EmbeddingBase):
 
         if self.total_energy_corr == "nonscf":
             low_level_calculator_3.parameters['qm_embedding_calc'] = 2
+            low_level_calculator_3.parameters['sc_iter_limit'] = 0
             low_level_calculator_3.parameters['charge_mix_param'] = 0.
             self.set_layer(atoms, "AB_LL_PP", low_level_calculator_3,
                            embed_mask, ghosts=0, no_scf=False,
                            ctxt_tag=supersys_ctxt_tag,
-                           descr_tag=supersys_descr_tag)
+                           descr_tag=supersys_descr_tag,)
             self.AB_LL.input_total_charge = total_charge
+
+            low_level_calculator_4.parameters['qm_embedding_calc'] = 3
+            #low_level_calculator_3.parameters['charge_mix_param'] = 0.
+            #low_level_calculator_3.parameters['sc_iter_limit'] = 0
+            self.set_layer(atoms, "B_LL", low_level_calculator_4,
+                           embed_mask, ghosts=1, no_scf=False,
+                           ctxt_tag=supersys_ctxt_tag,
+                           descr_tag=subsys_B_descr_tag,
+                           huzinaga=self.flag_huz_sc)
+
+            low_level_calculator_5.parameters['qm_embedding_calc'] = 2
+            low_level_calculator_5.parameters['sc_iter_limit'] = 0
+            low_level_calculator_5.parameters['charge_mix_param'] = 0.
+            self.set_layer(atoms, "B_LL_PP", low_level_calculator_5,
+                           embed_mask, ghosts=1, no_scf=False,
+                           ctxt_tag=supersys_ctxt_tag,
+                           descr_tag=supersys_descr_tag,)
 
         self.mu_val = mu_val
         self.rank = MPI.COMM_WORLD.Get_rank()
         self.ntasks = MPI.COMM_WORLD.Get_size()
-
-        self.truncate = False
-        if (truncate_basis_thresh is not None) and (truncate_basis_atoms is not None):
-            raise Exception("Please only specific truncate_basis_thresh OR truncate_basis_atoms")
-        
-        if (truncate_basis_thresh is not None) or (truncate_basis_atoms is not None):
-            self.truncate = True
-
-        self.truncate_basis_thresh = truncate_basis_thresh
-        self.truncate_basis_atoms = truncate_basis_atoms
 
         self.basis_illcond_thresh = basis_illcond_thresh
 
@@ -599,6 +642,7 @@ class ProjectionEmbedding(EmbeddingBase):
 
         svals_diff = np.ediff1d(svals**2.0)
         max_sval_change_idx = np.argmax(np.abs(svals_diff)) + 1
+        #max_sval_change_idx = np.argmax(np.abs(svals_diff))
 
         root_print(f'Maximum SPADE state for subsystem A: {max_sval_change_idx}')
 
@@ -719,17 +763,18 @@ class ProjectionEmbedding(EmbeddingBase):
                 self.basis_mask = self.select_atoms_basis_truncation(self.AB_LL,
                                                                 densmat_A_LL,
                                                                 overlap,
-                                                                self.truncate_basis_thresh)
+                                                                self.truncate_basis_thresh,
+                                                                1)
             elif (self.truncate_basis_atoms is not None):
                 self.basis_mask = [ x in self.truncate_basis_atoms for x in np.arange(len(self.AB_LL.atoms)) ]
             else:
                 raise Exception("self.truncate is True, but neither self.truncate_basis_thresh or self.truncate_basis_atoms are set")
 
-            self.basis_info = self.set_truncation_defaults(self.AB_LL, self.basis_mask)
+            self.basis_info = self.set_truncation_defaults(self.AB_LL, self.basis_mask, 1)
             self.trunc_basis_atoms = self.basis_info.trunc_basis_atoms
 
             self.AB_LL.truncate = False
-            self.A_LL.truncate = True
+            self.A_LL.truncate = False
             self.A_HL.truncate = True
             self.A_HL_PP.truncate = True
         else:
@@ -743,10 +788,44 @@ class ProjectionEmbedding(EmbeddingBase):
             self.AB_LL_PP.truncate = False
             self.AB_LL_PP.basis_info = basis_info
 
+            self.basis_mask = self.select_atoms_basis_truncation(self.AB_LL,
+                                                                 densmat_B_LL,
+                                                                 overlap,
+                                                                 self.truncate_basis_thresh,
+                                                                 2)
+            basis_info_B = self.set_truncation_defaults(self.AB_LL, self.basis_mask, 2)
+            self.B_LL.basis_info = basis_info_B
+            self.B_LL.truncate = True
+            self.B_LL_PP.basis_info = basis_info_B
+            self.B_LL_PP.truncate = False
+
         self.AB_LL.basis_info = self.basis_info
         self.A_LL.basis_info = self.basis_info
         self.A_HL.basis_info = self.basis_info
         self.A_HL_PP.basis_info = self.basis_info
+
+        # Exceptionally ugly - this needs to be cleaned up 0.0
+        if self.abs_truncate:
+            self.AB_LL.abs_truncate = False
+            self.A_LL.abs_truncate = False
+            self.AB_LL_PP.abs_truncate = False
+            self.A_HL.abs_truncate = True
+            self.A_HL_PP.abs_truncate = True
+            self.B_LL.abs_truncate = True
+            self.B_LL_PP.abs_truncate = True
+            if self.total_energy_corr == "nonscf":
+                self.B_LL.abs_truncate = True
+                self.B_LL_PP.abs_truncate = False
+                self.AB_LL_PP.abs_truncate = False
+        else:
+            self.AB_LL.abs_truncate = False
+            self.A_LL.abs_truncate = False
+            self.A_HL.abs_truncate = False
+            self.A_HL_PP.abs_truncate = False
+            if self.total_energy_corr == "nonscf":
+                self.B_LL.abs_truncate = False
+                self.B_LL_PP.abs_truncate = False
+                self.AB_LL_PP.abs_truncate = False
 
         # Calculates the electron count for the combined (A+B) and separated 
         # subsystems (A and B).
@@ -763,9 +842,6 @@ class ProjectionEmbedding(EmbeddingBase):
 
         # Calculate the energy for subsystem A with the lower level of theory
         self.A_LL.density_matrix_in = densmat_A_LL
-        if self.truncate:
-            trunc_densmat_A_LL = self.A_LL.full_mat_to_truncated(densmat_A_LL)
-
         self.A_LL.input_fragment_nelectrons = self.A_pop
         start = time.time()
         self.A_LL.run(ev_corr_scf=True)
@@ -803,17 +879,18 @@ class ProjectionEmbedding(EmbeddingBase):
         # at every SCF iteration.
         self.A_HL.density_matrix_in = densmat_A_LL
         self.A_HL.input_fragment_nelectrons = self.A_pop
-
         self.vemb = AB_hamiltonian_estat_plus_xc - self.A_LL.hamiltonian_estat_plus_xc
+        #self.vemb = hamiltonian_AB_total - self.A_LL.hamiltonian_total
         if self.projection == "huzinaga-sc":
             self.A_HL.fock_embedding_matrix = self.vemb
+            self.A_HL.embedding_ham_in = hamiltonian_AB_total
         else:
             self.A_HL.fock_embedding_matrix = self.vemb + self.P_b
 
-        if self.gc:
-            root_print(f"Pre-GC A_LL: {tracemalloc.get_traced_memory()}")
-            self.A_LL.garbage_collect()
-            root_print(f"Post-GC A_LL: {tracemalloc.get_traced_memory()}")
+        #if self.gc:
+        #    root_print(f"Pre-GC A_LL: {tracemalloc.get_traced_memory()}")
+        #    self.A_LL.garbage_collect()
+        #    root_print(f"Post-GC A_LL: {tracemalloc.get_traced_memory()}")
         
         start = time.time()
         self.A_HL.run()
@@ -822,11 +899,6 @@ class ProjectionEmbedding(EmbeddingBase):
 
         densmat_A_HL = copy.copy(self.A_HL.density_matrices_out[0])
 
-        if self.truncate:
-            trunc_vemb = self.A_HL.full_mat_to_truncated(self.vemb)
-            #trunc_P_b = self.A_HL.full_mat_to_truncated(self.P_b)
-            trunc_densmat_A_HL = self.A_HL.full_mat_to_truncated(densmat_A_HL)
-        
         if self.gc:
             root_print(f"Pre-GC A_HL: {tracemalloc.get_traced_memory()}")
             self.A_HL.garbage_collect()
@@ -861,8 +933,7 @@ class ProjectionEmbedding(EmbeddingBase):
             self.charge_renorm = 1.0
 
             # Calculate A low-level reference energy
-            self.A_LL.density_matrix_in = self.charge_renorm * \
-                                        self.A_HL.density_matrices_out[0]
+            self.A_LL.density_matrix_in = self.charge_renorm * densmat_A_HL
             self.A_LL.run(ev_corr_scf=True)
             start = time.time()
             self.subsys_A_lowlvl_totalen = self.A_LL.ev_corr_total_energy
@@ -870,8 +941,7 @@ class ProjectionEmbedding(EmbeddingBase):
             self.time_a_lowlevel_pp = end - start
 
             # Calculate AB low-level reference energy
-            self.AB_LL_PP.density_matrix_in = \
-                (self.charge_renorm * self.A_HL.density_matrices_out[0]) + densmat_B_LL
+            self.AB_LL_PP.density_matrix_in = densmat_A_HL + densmat_B_LL
 
             start = time.time()
             self.AB_LL_PP.run(ev_corr_scf=True)
@@ -888,18 +958,15 @@ class ProjectionEmbedding(EmbeddingBase):
                 (op.trace(self.P_b @ densmat_A_HL) * 27.211384500)
         else:
             self.PB_corr = 0
-    
-
-
 
         if "total_energy_method" in self.A_HL.initial_calc.parameters:
             self.subsys_A_highlvl_totalen = self.subsys_A_highlvl_totalen + \
                 self.A_HL.post_scf_corr_energy - self.A_HL.dft_energy
 
-        if self.total_energy_corr == "1storder":
+        if self.total_energy_corr == "1storder" or self.total_energy_corr == "test_1storder":
             if self.truncate:
-                self.order_1_embedding_corr = op.trace((trunc_densmat_A_HL - trunc_densmat_A_LL) @ \
-                                                       (trunc_vemb)) * 27.211384500
+                self.order_1_embedding_corr = op.trace(self.A_HL.full_mat_to_truncated(densmat_A_HL - densmat_A_LL) @ \
+                                                       self.A_HL.full_mat_to_truncated(self.vemb)) * 27.211384500
             else:
                 self.order_1_embedding_corr = op.trace((densmat_A_HL - densmat_A_LL) @ \
                                                        (self.vemb)) * 27.211384500
@@ -936,7 +1003,7 @@ class ProjectionEmbedding(EmbeddingBase):
         root_print(f" Total Energy (A Low-Level): {self.subsys_A_lowlvl_totalen} eV" )
         root_print(f" Total Energy (A High-Level): {self.subsys_A_highlvl_totalen} eV" )
         root_print(f" Projection operator energy correction DM^(A_HL) @ Pb: {self.PB_corr} eV" )
-        if self.total_energy_corr == "1storder":
+        if self.total_energy_corr == "1storder"  or self.total_energy_corr == "test_1storder":
             root_print(f" First order energy correction (DM^(A_HL)-DM^(A_LL)) @ v_emb): {self.order_1_embedding_corr} eV" )
         root_print(f"  " )
         root_print(f" Final Energies Information:")

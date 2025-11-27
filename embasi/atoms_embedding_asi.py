@@ -109,7 +109,7 @@ class AtomsEmbed():
         if self.truncate:
             self.ghost_list = [ 
                 ghst for (idx, ghst) in enumerate(self.ghost_list)
-                           if idx in self.basis_info.active_atoms ]
+                if idx in self.basis_info.active_atoms ]
         else:
             self.ghost_list = self.ghost_list
 
@@ -258,8 +258,8 @@ class AtomsEmbed():
 
             lib = os.environ['ASI_LIB_PATH']
 
-            trunc_mat_row = NPScal(ctxt_tag=self.blacs_ctxt_tag, descr_tag="temp_rectangle_f2t", lib=lib,
-                               gl_m=trunc_nbasis, gl_n=full_nbasis, dmb=16, dnb=16)
+            trunc_mat_row = NPScal(ctxt_tag=self.blacs_ctxt_tag, descr_tag=f"{self.blacs_descr_tag}_temp_rectangle_f2t", lib=lib,
+                                   gl_m=trunc_nbasis, gl_n=full_nbasis, dmb=16, dnb=16)
             
             trunc_mat = NPScal(ctxt_tag=self.blacs_ctxt_tag, descr_tag=self.blacs_descr_tag, lib=lib,
                                gl_m=trunc_nbasis, gl_n=trunc_nbasis, dmb=16, dnb=16)
@@ -366,7 +366,7 @@ class AtomsEmbed():
             lib = os.environ['ASI_LIB_PATH']
             new_descr_tag = "supersystem"
 
-            full_mat_row = NPScal(ctxt_tag=self.blacs_ctxt_tag, descr_tag="temp_rectangle_t2f", lib=lib,
+            full_mat_row = NPScal(ctxt_tag=self.blacs_ctxt_tag, descr_tag=f"{self.blacs_descr_tag}_temp_rectangle_t2f", lib=lib,
                                   gl_m=full_nbasis, gl_n=trunc_nbasis, dmb=16, dnb=16)
 
             full_mat = NPScal(ctxt_tag=self.blacs_ctxt_tag, descr_tag=new_descr_tag, lib=lib)
@@ -491,6 +491,7 @@ class AtomsEmbed():
 
         if self.truncate and len(self.atoms) != self.basis_info.trunc_natoms:
             self.atoms = self.atoms[self.basis_info.active_atoms]
+            print(len(self.atoms))
 
         self.atoms.calc = ASI_ASE_calculator(os.environ['ASI_LIB_PATH'],
                                         self.calc_initializer,
@@ -796,6 +797,25 @@ class AtomsEmbed():
     @huzinaga_ovlp_in_trunc.setter
     def huzinaga_ovlp_in_trunc(self, huzinaga_ovlp_in):
         self._huzinaga_ovlp_in_trunc = huzinaga_ovlp_in
+
+    @property
+    def embedding_ham_in(self):
+        return self._embedding_ham_in
+
+    @embedding_ham_in.setter
+    def embedding_ham_in(self, huzinaga_ovlp_in):
+        self._embedding_ham_in = embedding_ham_in
+
+        if ((embedding_ham_in is not None) and (self.truncate)):
+            self.embedding_ham_in_trunc = self.full_mat_to_truncated(embedding_ham_in)
+
+    @property
+    def embedding_ham_in_trunc(self):
+        return self._embedding_ham_in_trunc
+
+    @embedding_ham_in.setter
+    def embedding_ham_in(self, embedding_ham_in):
+        self._embedding_ham_in = embedding_ham_in
 
     @property
     def density_matrix_in(self):

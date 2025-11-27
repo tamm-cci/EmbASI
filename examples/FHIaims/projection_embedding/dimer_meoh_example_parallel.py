@@ -77,3 +77,26 @@ root_print('Finished running MeOH dimer \n')
 # Total energy for the embedded fragment may be accessed:
 meoh_dimer_pbe0inpbe_energy = Projection.DFT_AinB_total_energy
 
+# Set up ProjectionEmbedding, with:
+# - Embedding mask (1=Highlevel (PBE0), 2=Low-level (PBE))
+# - Assigned higher and lower level calculators
+# - Fragment charge (Usually -1 per split covalent bond)
+# - TODO: ADD AUTOMATIC DETECTION OF FRAGMENT CHARGE
+Projection = ProjectionEmbedding(methanol_dimer[:6],
+                                 embed_mask=[2,1,2,2,2,1],
+                                 calc_base_ll=calc_ll,
+                                 calc_base_hl=calc_hl,
+                                 mu_val=1.e+6,
+                                 truncate_basis_thresh=0.001,
+                                 projection="huzinaga-sc",
+                                 parallel=False)
+
+# Now run the simulation!
+root_print('\nRunning MeOH dimer \n')
+Projection.run()
+root_print('Finished running MeOH dimer \n')
+
+# Total energy for the embedded fragment may be accessed:
+meoh_monomer_pbe0inpbe_energy = Projection.DFT_AinB_total_energy
+
+print(f"{meoh_dimer_pbe0inpbe_energy-(2*meoh_monomer_pbe0inpbe_energy)}")
