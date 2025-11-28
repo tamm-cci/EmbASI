@@ -100,6 +100,8 @@ class AtomsEmbed():
         else:
             self.ghost_list = [False]*len(atoms)
 
+        self.ghost_list_calc = self.ghost_list
+
         self.flag_huz = huzinaga
 
     def calc_initializer(self, asi):
@@ -107,11 +109,11 @@ class AtomsEmbed():
         calc = self.initial_calc
 
         if self.truncate:
-            self.ghost_list = [ 
+            self.ghost_list_calc = [ 
                 ghst for (idx, ghst) in enumerate(self.ghost_list)
                 if idx in self.basis_info.active_atoms ]
         else:
-            self.ghost_list = self.ghost_list
+            self.ghost_list_calc = self.ghost_list
 
         # Before passing into the main input writer, we may
         # have extra ghosts needed for the CP correction to the
@@ -131,7 +133,7 @@ class AtomsEmbed():
         calc.parameters['charge'] = -float(total_charge)
 
         # Ensure the Aims template shares the input parameters of the calculator object
-        calc.parameters["ghosts"] = self.ghost_list
+        calc.parameters["ghosts"] = self.ghost_list_calc
         calc.template.parameters = calc.parameters
 
         calc.write_inputfiles(asi.atoms, properties=['energy'])
@@ -464,7 +466,7 @@ class AtomsEmbed():
                 if 'Total energy after the post-s.c.f.' in line:
                     self.post_scf_corr_energy = float(outline[9])
 
-    def run(self, ev_corr_scf=False):
+    def run(self, ev_corr_scf=False, ev_corr_scf_final_density=False):
         """Invokes the ASI_run() call and extracts matrix quantities
 
         Driver routine which executes the QM code and controls which
@@ -641,6 +643,22 @@ class AtomsEmbed():
                 # @TODONPSCAL: REPLACE NP DIRECTIVE
                 self.ev_corr_energy = \
                     27.211384500 * op.trace(self.density_matrix_in @
+                                            self.hamiltonian_total)
+
+            self.ev_corr_total_energy = \
+                self.total_energy - self.ev_sum + self.ev_corr_energy
+
+        if ev_corr_scf_final_density:
+
+            if self.truncate:
+                # @TODONPSCAL: REPLACE NP DIRECTIVE
+                self.ev_corr_energy = \
+                    27.211384500 * op.trace(self.full_mat_to_truncated(self.density_matrices_out[0]) @ 
+                                        self.full_mat_to_truncated(self.hamiltonian_total))
+            else:
+                # @TODONPSCAL: REPLACE NP DIRECTIVE
+                self.ev_corr_energy = \
+                    27.211384500 * op.trace(self.density_matrices_out[0] @
                                             self.hamiltonian_total)
 
             self.ev_corr_total_energy = \
@@ -926,7 +944,7 @@ class AtomsEmbed():
     def free_atom_nelectrons(self):
         
         tot_nelec = np.sum(self.atoms.numbers)
-        ghost_nelec = np.sum(self.atoms.numbers[self.ghost_list])
+        ghost_nelec = np.sum(self.atoms.numbers[self.ghost_list_calc])
 
         return tot_nelec - ghost_nelec
 

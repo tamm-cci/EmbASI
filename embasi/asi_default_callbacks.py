@@ -280,24 +280,24 @@ def ham_saving_and_huzinaga_callback(aux, iK, iS, descr, data, matrix_descr_ptr)
     """
     def get_abs_trunc_indices(atomsembed):
         import numpy as np
-        root_print("I BREAK HERE 2a")
+
         active_atoms = np.array(atomsembed.basis_info.active_atoms_mask)
-        root_print("I BREAK HERE 2b")    
+
         # First and last truncated atom
         trunc_at_first = np.argmax(active_atoms == True)
         trunc_at_last = len(active_atoms) - 1 - np.argmax((active_atoms == True)[::-1])
         # Find first and last active atom
         full_at_first = np.argmax(active_atoms == False)
         full_at_last = len(active_atoms) - 1 - np.argmax((active_atoms == False)[::-1])
-        root_print("I BREAK HERE 2c")
+
         full_basis_min_idx = atomsembed.basis_info.full_basis_min_idx
         full_basis_max_idx = atomsembed.basis_info.full_basis_max_idx
         A_block_min = full_basis_min_idx[trunc_at_first]
         A_block_max = full_basis_max_idx[trunc_at_last]
-        root_print("I BREAK HERE 2d")
+
         B_block_min = full_basis_min_idx[full_at_first]
         B_block_max = full_basis_max_idx[full_at_last]
-        root_print("I BREAK HERE 2e")
+
 
         return A_block_min, A_block_max, B_block_min, B_block_max
 
@@ -394,35 +394,30 @@ def ham_saving_and_huzinaga_callback(aux, iK, iS, descr, data, matrix_descr_ptr)
 
         else:
             if atomsembed.truncate:
-                root_print("I BREAK HERE 1")
+
                 vemb_supermol = atomsembed.fock_embedding_matrix
                 ovlp_supermol = atomsembed.huzinaga_ovlp_in
                 dm_supermol = atomsembed.huzinaga_dm_in
-                root_print("I BREAK HERE 2")
+
                 if atomsembed.abs_truncate:
-                    root_print("I BREAK HERE 2aa")
                     fock_supermol = atomsembed.embedding_ham_in
-                    root_print("I BREAK HERE 2ab")
+
                     A_block_min, A_block_max, B_block_min, B_block_max = get_abs_trunc_indices(atomsembed)
-                    root_print("I BREAK HERE 3")
+
                     fmat_supermol = fock_supermol[A_block_min:A_block_max,B_block_min:B_block_max]
                     dm_supermol = dm_supermol[B_block_min:B_block_max,B_block_min:B_block_max]
                     ovlp_supermol = ovlp_supermol[A_block_min:A_block_max,B_block_min:B_block_max]
                 else:
-                    root_print("I BREAK HERE 2aa")
                     fock_supermol = atomsembed.truncated_mat_to_full(data)
-                    root_print("I BREAK HERE 3")
                     fmat_supermol = (fock_supermol + vemb_supermol)
-                    root_print("I BREAK HERE 4")
 
-                root_print("I BREAK HERE 5")
                 projector = - 0.5 * ((fmat_supermol @ dm_supermol @ ovlp_supermol.T) + (ovlp_supermol @ dm_supermol @ fmat_supermol.T))
-                root_print("I BREAK HERE 6")
+
                 if not(atomsembed.abs_truncate):
                     projector = atomsembed.full_mat_to_truncated(projector)
-                root_print("I BREAK HERE 7")
+
                 asi.huzinaga_eq = atomsembed.fock_embedding_matrix_trunc + projector
-                root_print("I BREAK HERE 8")
+
             else:
                 vemb = atomsembed.fock_embedding_matrix
                 ovlp = atomsembed.huzinaga_ovlp_in
@@ -469,7 +464,7 @@ def matrix_loading_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
         # This is unfortunately very opaque - essentially, the huzinaga equation is formulated
         # in the hamiltonian saving callback as we need the fock matrix constructed during the
         # SCF cycle, which cannot be set outside of the invoked QM code.
-        root_print("I BREAK HERE A1")
+
         if flag_huz:
             if ((ctxt_tag is None) and (descr_tag is None)):
                 m = np.asfortranarray(asi.huzinaga_eq) if asi.scalapack.is_root(descr) else None
@@ -480,7 +475,7 @@ def matrix_loading_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
                 m = np.asfortranarray(storage_dict[(iK, iS)]) if asi.scalapack.is_root(descr) else None
             else:
                 m = storage_dict[(iK, iS)]
-        root_print("I BREAK HERE A2")
+
         # ASI_STORAGE_TYPE_TRIL,ASI_STORAGE_TYPE_TRIU
         if (matrix_descr_ptr.contents.storage_type not in {1,2}):
             if ((ctxt_tag is None) and (descr_tag is None)):
@@ -491,17 +486,17 @@ def matrix_loading_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
                                                 
                 if not(DESCR_Register.check_register(descr_tag)):
                     raise Exception("BLACS descriptor not recognised")
-                root_print("I BREAK HERE A3")
+
                 src_descr = DESCR_Register.get_register(descr_tag)
                 dest_descr = asi.scalapack.wrap_blacs_desc(descr)
-                root_print("I BREAK HERE A4")
+
                 data = ctypes2ndarray(data, shape=(dest_descr.locrow, dest_descr.loccol)).T
-                root_print("I BREAK HERE A5")
+
                 asi.scalapack.pdgemr2d(asi.n_basis, asi.n_basis,
                                        m.loc_array, 1, 1, src_descr,
                                        data, 1, 1, dest_descr,
                                        dest_descr.ctxt)
-                root_print("I BREAK HERE A6")
+
             return 1
         else:
             asi.scalapack.scatter_numpy(m, descr, data, asi.hamiltonian_dtype)
