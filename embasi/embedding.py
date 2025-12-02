@@ -356,7 +356,7 @@ class StandardDFT(EmbeddingBase):
 
 
 class ProjectionEmbedding(EmbeddingBase):
-    """Implementation of Projeciton-Based Embedding with ASI communication
+    """Implementation of Projection-Based Embedding with ASI communication
 
     A class controlling the interaction between two subsystems calculated at
     two levels of theory (low-level and high-level) with the
