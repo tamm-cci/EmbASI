@@ -518,10 +518,14 @@ class ProjectionEmbedding(EmbeddingBase):
         low_level_calculator_2.parameters['sc_iter_limit'] = 0
         self.set_layer(atoms, "A_LL", low_level_calculator_2,
                        embed_mask, ghosts=2, no_scf=False,
-                       ctxt_tag=supersys_ctxt_tag,
+                       ctxt_tag=subsys_ctxt_tag,
                        descr_tag=supersys_descr_tag)
 
         high_level_calculator_1.parameters['qm_embedding_calc'] = 3
+        #high_level_calculator_1.parameters['sc_accuracy_etot'] = 100.0
+        #high_level_calculator_1.parameters['sc_accuracy_rho']  = 100.0
+        #high_level_calculator_1.parameters['sc_accuracy_eev']  = 10000.0
+        #high_level_calculator_1.parameters['postprocess_anyway'] = True
         self.set_layer(atoms, "A_HL", high_level_calculator_1,
                        embed_mask, ghosts=2, no_scf=False,
                        ctxt_tag=subsys_ctxt_tag,
@@ -549,8 +553,10 @@ class ProjectionEmbedding(EmbeddingBase):
             self.AB_LL.input_total_charge = total_charge
 
             low_level_calculator_4.parameters['qm_embedding_calc'] = 3
-            #low_level_calculator_3.parameters['charge_mix_param'] = 0.
-            #low_level_calculator_3.parameters['sc_iter_limit'] = 0
+            #low_level_calculator_4.parameters['sc_accuracy_etot'] = 100.0
+            #low_level_calculator_4.parameters['sc_accuracy_rho']  = 100.0
+            #low_level_calculator_4.parameters['sc_accuracy_eev']  = 100000.0
+            #low_level_calculator_4.parameters['postprocess_anyway'] = True
             self.set_layer(atoms, "B_LL", low_level_calculator_4,
                            embed_mask, ghosts=1, no_scf=False,
                            ctxt_tag=supersys_ctxt_tag,
@@ -563,7 +569,7 @@ class ProjectionEmbedding(EmbeddingBase):
             self.set_layer(atoms, "B_LL_PP", low_level_calculator_5,
                            embed_mask, ghosts=1, no_scf=False,
                            ctxt_tag=supersys_ctxt_tag,
-                           descr_tag=supersys_descr_tag,)
+                           descr_tag=subsys_B_descr_tag,)
 
         self.mu_val = mu_val
         self.rank = MPI.COMM_WORLD.Get_rank()
@@ -591,6 +597,48 @@ class ProjectionEmbedding(EmbeddingBase):
 
         #self.P_b = -0.5*( (hamiltonian @ densmat @ overlap.T) + (overlap @ densmat @ hamiltonian.T) )
         self.P_b = -0.5*( (hamiltonian @ densmat @ overlap.T) + (overlap @ densmat @ hamiltonian.T) )
+
+    def calculate_abs_trunc_huzinaga_projector(self, atomsembed):
+
+        def get_abs_trunc_indices(atomsembed):
+            import numpy as np
+
+            active_atoms = np.array(atomsembed.basis_info.active_atoms_mask)
+
+            # First and last truncated atom
+            trunc_at_first = np.argmax(active_atoms == True)
+            trunc_at_last = len(active_atoms) - 1 - np.argmax((active_atoms == True)[::-1])
+            # Find first and last active atom
+            full_at_first = np.argmax(active_atoms == False)
+            full_at_last = len(active_atoms) - 1 - np.argmax((active_atoms == False)[::-1])
+
+            full_basis_min_idx = atomsembed.basis_info.full_basis_min_idx
+            full_basis_max_idx = atomsembed.basis_info.full_basis_max_idx
+            A_block_min = full_basis_min_idx[trunc_at_first]
+            A_block_max = full_basis_max_idx[trunc_at_last]
+
+            B_block_min = full_basis_min_idx[full_at_first]
+            B_block_max = full_basis_max_idx[full_at_last]
+
+            return A_block_min, A_block_max, B_block_min, B_block_max
+
+        vemb_supermol = atomsembed.fock_embedding_matrix
+        ovlp_supermol = atomsembed.huzinaga_ovlp_in
+        dm_supermol = atomsembed.huzinaga_dm_in
+
+        if atomsembed.abs_truncate:
+            fmat_supermol = atomsembed.embedding_ham_in
+            A_block_min, A_block_max, B_block_min, B_block_max = get_abs_trunc_indices(atomsembed)
+            
+            fmat_supermol = fmat_supermol[A_block_min:A_block_max,B_block_min:B_block_max]
+            dm_supermol = dm_supermol[B_block_min:B_block_max,B_block_min:B_block_max]
+            ovlp_supermol = ovlp_supermol[A_block_min:A_block_max,B_block_min:B_block_max]
+        else:
+            fmat_supermol = (vemb_supermol)
+
+        projector = - 0.5 * ((fmat_supermol @ dm_supermol @ ovlp_supermol.T) + (ovlp_supermol @ dm_supermol @ fmat_supermol.T))
+
+        return projector
         
     def spade_localisation(self, atomsembed, hamiltonian, overlap):
         """Calculate the localised density matrix with the SPADE method
@@ -668,22 +716,29 @@ class ProjectionEmbedding(EmbeddingBase):
 
     def freeze_and_thaw(self, densmat_A_HL, densmat_B_LL, overlap, ncycles=5):
 
-        for i in range(ncycles):
-            # Calculate AB low-level reference energy
-            self.AB_LL_PP.density_matrix_in = densmat_A_HL + densmat_B_LL
+        from .diis import DIIS
 
+        #diis_dma = DIIS(densmat_A_HL, 12, 0.5)
+        #diis_dmb = DIIS(densmat_B_LL, 12, 0.5)
+        update_densmat = densmat_A_HL + densmat_B_LL
+
+        for i in range(ncycles):
+
+            # Calculate AB low-level reference energy
+            self.AB_LL_PP.density_matrix_in = update_densmat
             start = time.time()
             self.AB_LL_PP.run(ev_corr_scf=True)
             new_energy = self.AB_LL_PP.ev_corr_total_energy
             end = time.time()
             self.time_ab_lowlevel_pp = end - start
+            root_print(f"FAT ITERATION {i} AB ENERGY B OPT: {new_energy}")
 
-            ### A_LL
-            self.A_LL.density_matrix_in = densmat_A_HL
-            self.A_LL.input_fragment_nelectrons = self.A_pop
+            ### A_HL_PP
+            self.A_HL_PP.density_matrix_in = densmat_A_HL
+            self.A_HL_PP.input_fragment_nelectrons = self.A_pop
             start = time.time()
-            self.A_LL.run(ev_corr_scf=True)
-            self.subsys_A_lowlvl_totalen = self.A_LL.ev_corr_total_energy
+            self.A_HL_PP.run(ev_corr_scf=True)
+            self.subsys_AHL_lowlvl_totalen = self.A_HL_PP.ev_corr_total_energy
             end = time.time()
             self.time_a_lowlevel = end - start
         
@@ -695,30 +750,66 @@ class ProjectionEmbedding(EmbeddingBase):
             self.subsys_A_lowlvl_totalen = self.B_LL_PP.ev_corr_total_energy
             end = time.time()
             self.time_a_lowlevel = end - start
-        
+
+            #if i==0:
+            #    emb_ham_a = self.AB_LL_PP.hamiltonian_total - self.A_HL_PP.hamiltonian_total
+            #    diis_emb_ham_a = DIIS(emb_ham_a, 12, 0.5)
+            #else:
+            #    emb_ham_a = diis_emb_ham_a.diis_step(emb_ham_a)
+            emb_ham_a = self.AB_LL_PP.hamiltonian_total - self.A_HL_PP.hamiltonian_total
+            
+            #a_estat_only = self.A_HL_PP.hamiltonian_estat_plus_xc
+            #b_estat_only = self.B_LL_PP.hamiltonian_estat_plus_xc
+
             ### A_HL
             if self.projection == "huzinaga-sc":
                 self.A_HL.huzinaga_dm_in = densmat_B_LL
                 self.A_HL.huzinaga_ovlp_in = overlap
             else:
                 raise Exception("Invalid entry for projection: use 'level-shift', 'huzinaga-sc', or 'huzinaga' ")
+                
+            #a_estat = ham_estat - a_estat_only
 
             self.A_HL.density_matrix_in = densmat_A_HL
             self.A_HL.input_fragment_nelectrons = self.A_pop
-            self.vemb = self.AB_LL_PP.hamiltonian_estat_plus_xc - self.A_LL.hamiltonian_estat_plus_xc
+            #self.vemb = a_estat
+            self.vemb = emb_ham_a
             if self.projection == "huzinaga-sc":
                 self.A_HL.fock_embedding_matrix = self.vemb
-                self.A_HL.embedding_ham_in = self.AB_LL_PP.hamiltonian_total
-            else:
-                self.A_HL.fock_embedding_matrix = self.vemb + self.P_b
-        
+                self.A_HL.embedding_ham_in = self.vemb
+                a_proj = calculate_abs_trunc_huzinaga_projector(self.A_HL)
+                if i==0:
+                    a_proj = a_proj + emb_ham_a
+                    diis_emb_ham_b = DIIS(a_proj, 12, 0.5)
+                else:
+                    a_proj = a_proj + emb_ham_a
+                    a_proj = diis_emb_ham_a.diis_step(a_proj)
+
+            self.A_HL.fock_embedding_matrix = a_proj
+
             start = time.time()
             self.A_HL.run(ev_corr_scf_final_density=True)
             end = time.time()
             self.time_a_highlevel = end - start
             self.subsys_A_highlvl_totalen = self.A_HL.ev_corr_total_energy
 
+            densmat_A_HL = self.A_HL.density_matrices_out[0].copy()
+
             ### B_LL
+            self.AB_LL_PP.density_matrix_in = densmat_A_HL + densmat_B_LL
+            start = time.time()
+            self.AB_LL_PP.run(ev_corr_scf=True)
+            new_energy = self.AB_LL_PP.ev_corr_total_energy
+            end = time.time()
+            self.time_ab_lowlevel_pp = end - start
+
+            #if i==0:
+            #    emb_ham_b = self.AB_LL_PP.hamiltonian_total - self.B_LL_PP.hamiltonian_total
+            #    diis_emb_ham_b = DIIS(emb_ham_a, 12, 0.5)
+            #else:
+            #    emb_ham_b = diis_emb_ham_b.diis_step(emb_ham_b)
+            emb_ham_b = self.AB_LL_PP.hamiltonian_total - self.B_LL_PP.hamiltonian_total
+
             if self.projection == "huzinaga-sc":
                 self.B_LL.huzinaga_dm_in = densmat_A_HL
                 self.B_LL.huzinaga_ovlp_in = overlap
@@ -727,21 +818,30 @@ class ProjectionEmbedding(EmbeddingBase):
 
             self.B_LL.density_matrix_in = densmat_B_LL
             self.B_LL.input_fragment_nelectrons = self.B_pop
-            self.vemb = self.AB_LL_PP.hamiltonian_estat_plus_xc - self.B_LL_PP.hamiltonian_estat_plus_xc
+            self.vemb = emb_ham_b
             if self.projection == "huzinaga-sc":
                 self.B_LL.fock_embedding_matrix = self.vemb
-                self.B_LL.embedding_ham_in = self.AB_LL_PP.hamiltonian_total
-            else:
-                self.B_LL.fock_embedding_matrix = self.vemb + self.P_b
-        
+                self.B_LL.embedding_ham_in = self.vemb
+                b_proj = calculate_abs_trunc_huzinaga_projector(self.B_LL)
+                if i==0:
+                    b_proj = b_proj + emb_ham_b
+                    diis_emb_ham_b = DIIS(b_proj, 12, 0.5)
+                else:
+                    b_proj = b_proj + emb_ham_b
+                    b_proj = diis_emb_ham_b.diis_step(b_proj)
+
+            self.B_LL.fock_embedding_matrix = b_proj
+
             start = time.time()
             self.B_LL.run(ev_corr_scf_final_density=True)
             end = time.time()
             self.time_a_highlevel = end - start
             self.subsys_A_highlvl_totalen = self.A_HL.ev_corr_total_energy
 
-            densmat_A_HL = copy.copy(self.A_HL.density_matrices_out[0])
-            densmat_B_LL = copy.copy(self.B_LL.density_matrices_out[0])
+            # UPDATE DENSITY
+            densmat_B_LL = self.B_LL.density_matrices_out[0].copy()
+            
+            update_densmat = densmat_A_HL + densmat_B_LL
 
             if i == 0:
                 delta_energy = new_energy - self.AB_LL.total_energy
@@ -750,6 +850,10 @@ class ProjectionEmbedding(EmbeddingBase):
 
             root_print(f"ITERATION {i}: DELTA ENERGY - {delta_energy} eV")
             old_energy = new_energy
+
+            if np.abs(delta_energy) < 1e-6 and i != 0:
+                root_print(f"FAT CONVERGED!")
+                break
 
         return densmat_A_HL, densmat_B_LL
         
@@ -838,8 +942,8 @@ class ProjectionEmbedding(EmbeddingBase):
         else:
             densmat_A_LL = self.AB_LL.density_matrices_out[0]
             densmat_B_LL = self.AB_LL.density_matrices_out[1]
-            if self.gc:
-                self.AB_LL.garbage_collect()
+            #if self.gc:
+                #self.AB_LL.garbage_collect()
 
 
         # Initialises the density matrix for subsystem A, and calculates the
@@ -884,7 +988,7 @@ class ProjectionEmbedding(EmbeddingBase):
             self.B_LL.basis_info = basis_info_B
             self.B_LL.truncate = True
             self.B_LL_PP.basis_info = basis_info_B
-            self.B_LL_PP.truncate = False
+            self.B_LL_PP.truncate = True
 
         self.AB_LL.basis_info = self.basis_info
         self.A_LL.basis_info = self.basis_info
@@ -902,7 +1006,7 @@ class ProjectionEmbedding(EmbeddingBase):
             self.B_LL_PP.abs_truncate = True
             if self.total_energy_corr == "nonscf":
                 self.B_LL.abs_truncate = True
-                self.B_LL_PP.abs_truncate = False
+                self.B_LL_PP.abs_truncate = True
                 self.AB_LL_PP.abs_truncate = False
         else:
             self.AB_LL.abs_truncate = False
@@ -928,70 +1032,70 @@ class ProjectionEmbedding(EmbeddingBase):
         root_print(f" Population of Subsystem B: {self.B_pop}")
 
         # Calculate the energy for subsystem A with the lower level of theory
-        self.A_LL.density_matrix_in = densmat_A_LL
-        self.A_LL.input_fragment_nelectrons = self.A_pop
-        start = time.time()
-        self.A_LL.run(ev_corr_scf=True)
-        self.subsys_A_lowlvl_totalen = self.A_LL.ev_corr_total_energy
-        end = time.time()
-        self.time_a_lowlevel = end - start
-
-        # Initialises the density matrix for subsystem A, and calculated the 
-        # hamiltonian components for subsystem A at the low-level reference.
-        if self.projection == "level-shift":
-            self.calculate_levelshift_projector(densmat_B_LL, overlap)
-        elif self.projection == "huzinaga":
-            self.calculate_huzinaga_projector(hamiltonian_AB_total, overlap, densmat_B_LL)
-        elif self.projection == "huzinaga-sc":
-            self.A_HL.huzinaga_dm_in = densmat_B_LL
-            self.A_HL.huzinaga_ovlp_in = overlap
-        else:
-            raise Exception("Invalid entry for projection: use 'level-shift', 'huzinaga-sc', or 'huzinaga' ")
-
-        # Calculate density matrix for subsystem A at the higher level of 
-        # theory. Two terms are added to the hamiltonian matrix of the embedded
-        # subsystem to form the full embedded Fock-matrix, F^{A}:
-        #   F^{A} = h^{core} + g^{high-level}[A] + v_{emb}^[A, B] + /mu P^{B}
-        # 1) v_{emb}^[A, B], the embedding potential, which introduces the 
-        #    Hartree and exchange-correlation potentials of the environment
-        #    (in the case of FHI-aims, this includes the full electrostatic
-        #    potential, i.e., the Hartree and nuclear-electron potentials of 
-        #    subsystem B acting on subsystem A).
-        # 2) The level-shift operator, /mu P^{B}, which orthogonalises the basis
-        #    functions associated with the environment (subsystem B) from the 
-        #    embedded subsystem by adding a large energy penalty to hamiltonian
-        #    components associated with subsystem B.
+        #self.A_LL.density_matrix_in = densmat_A_LL
+        #self.A_LL.input_fragment_nelectrons = self.A_pop
+        #start = time.time()
+        #self.A_LL.run(ev_corr_scf=True)
+        #self.subsys_A_lowlvl_totalen = self.A_LL.ev_corr_total_energy
+        #end = time.time()
+        #self.time_a_lowlevel = end - start
         #
-        # Registered callbacks in ASI add the above components to the Fock-matrix
-        # at every SCF iteration.
-        self.A_HL.density_matrix_in = densmat_A_LL
-        self.A_HL.input_fragment_nelectrons = self.A_pop
-        self.vemb = AB_hamiltonian_estat_plus_xc - self.A_LL.hamiltonian_estat_plus_xc
-        #self.vemb = hamiltonian_AB_total - self.A_LL.hamiltonian_total
-        if self.projection == "huzinaga-sc":
-            self.A_HL.fock_embedding_matrix = self.vemb
-            self.A_HL.embedding_ham_in = hamiltonian_AB_total
-        else:
-            self.A_HL.fock_embedding_matrix = self.vemb + self.P_b
-
+        ## Initialises the density matrix for subsystem A, and calculated the 
+        ## hamiltonian components for subsystem A at the low-level reference.
+        #if self.projection == "level-shift":
+        #    self.calculate_levelshift_projector(densmat_B_LL, overlap)
+        #elif self.projection == "huzinaga":
+        #    self.calculate_huzinaga_projector(hamiltonian_AB_total, overlap, densmat_B_LL)
+        #elif self.projection == "huzinaga-sc":
+        #    self.A_HL.huzinaga_dm_in = densmat_B_LL
+        #    self.A_HL.huzinaga_ovlp_in = overlap
+        #else:
+        #    raise Exception("Invalid entry for projection: use 'level-shift', 'huzinaga-sc', or 'huzinaga' ")
+        #
+        ## Calculate density matrix for subsystem A at the higher level of 
+        ## theory. Two terms are added to the hamiltonian matrix of the embedded
+        ## subsystem to form the full embedded Fock-matrix, F^{A}:
+        ##   F^{A} = h^{core} + g^{high-level}[A] + v_{emb}^[A, B] + /mu P^{B}
+        ## 1) v_{emb}^[A, B], the embedding potential, which introduces the 
+        ##    Hartree and exchange-correlation potentials of the environment
+        ##    (in the case of FHI-aims, this includes the full electrostatic
+        ##    potential, i.e., the Hartree and nuclear-electron potentials of 
+        ##    subsystem B acting on subsystem A).
+        ## 2) The level-shift operator, /mu P^{B}, which orthogonalises the basis
+        ##    functions associated with the environment (subsystem B) from the 
+        ##    embedded subsystem by adding a large energy penalty to hamiltonian
+        ##    components associated with subsystem B.
+        ##
+        ## Registered callbacks in ASI add the above components to the Fock-matrix
+        ## at every SCF iteration.
+        #self.A_HL.density_matrix_in = densmat_A_LL
+        #self.A_HL.input_fragment_nelectrons = self.A_pop
+        #self.vemb = AB_hamiltonian_estat_plus_xc - self.A_LL.hamiltonian_estat_plus_xc
+        ##self.vemb = hamiltonian_AB_total - self.A_LL.hamiltonian_total
+        #if self.projection == "huzinaga-sc":
+        #    self.A_HL.fock_embedding_matrix = self.vemb
+        #    self.A_HL.embedding_ham_in = hamiltonian_AB_total - self.A_LL.hamiltonian_estat_plus_xc
+        #else:
+        #    self.A_HL.fock_embedding_matrix = self.vemb + self.P_b
+        #
+        ##if self.gc:
+        ##    root_print(f"Pre-GC A_LL: {tracemalloc.get_traced_memory()}")
+        ##    self.A_LL.garbage_collect()
+        ##    root_print(f"Post-GC A_LL: {tracemalloc.get_traced_memory()}")
+        #
+        #start = time.time()
+        #self.A_HL.run(ev_corr_scf_final_density=True)
+        #end = time.time()
+        #self.time_a_highlevel = end - start
+        #self.subsys_A_highlvl_totalen = self.A_HL.ev_corr_total_energy
+        #
+        #densmat_A_HL = copy.copy(self.A_HL.density_matrices_out[0])
         #if self.gc:
-        #    root_print(f"Pre-GC A_LL: {tracemalloc.get_traced_memory()}")
-        #    self.A_LL.garbage_collect()
-        #    root_print(f"Post-GC A_LL: {tracemalloc.get_traced_memory()}")
-        
-        start = time.time()
-        self.A_HL.run(ev_corr_scf_final_density=True)
-        end = time.time()
-        self.time_a_highlevel = end - start
-        self.subsys_A_highlvl_totalen = self.A_HL.ev_corr_total_energy
+        #    root_print(f"Pre-GC A_HL: {tracemalloc.get_traced_memory()}")
+        #    self.A_HL.garbage_collect()
+        #    root_print(f"Post-GC A_HL: {tracemalloc.get_traced_memory()}")
 
-        densmat_A_HL = copy.copy(self.A_HL.density_matrices_out[0])
-        if self.gc:
-            root_print(f"Pre-GC A_HL: {tracemalloc.get_traced_memory()}")
-            self.A_HL.garbage_collect()
-            root_print(f"Post-GC A_HL: {tracemalloc.get_traced_memory()}")
-
-        self.freeze_and_thaw(densmat_A_LL, densmat_B_LL, overlap, ncycles=20)
+        densmat_A_HL, densmat_B_LL = self.freeze_and_thaw(densmat_A_LL, densmat_B_LL, overlap, ncycles=100)
 
         # Calculate the total energy of the embedded subsystem A at the high
         # level of theory without the associated embedding potential.        
@@ -999,7 +1103,7 @@ class ProjectionEmbedding(EmbeddingBase):
         self.A_HL_PP.input_fragment_nelectrons = self.A_pop
         start = time.time()
         self.A_HL_PP.run(ev_corr_scf=True)
-        #self.subsys_A_highlvl_totalen = self.A_HL_PP.ev_corr_total_energy
+        self.subsys_A_highlvl_totalen = self.A_HL_PP.ev_corr_total_energy
         end = time.time()
         self.time_a_highlevel_pp = end - start
 
@@ -1019,10 +1123,11 @@ class ProjectionEmbedding(EmbeddingBase):
             # root_print(f" Population of Subystem A^[HL] (post-norm): 
             #             {self.calc_subsys_pop(self.AB_LL.overlap, 
             #             self.charge_renorm*self.A_HL.density_matrices_out[0])}")
-            self.charge_renorm = 1.0
+            #self.charge_renorm = 1.0
 
             # Calculate A low-level reference energy
-            self.A_LL.density_matrix_in = self.charge_renorm * densmat_A_HL
+            self.A_LL.input_fragment_nelectrons = self.A_pop
+            self.A_LL.density_matrix_in = densmat_A_HL
             self.A_LL.run(ev_corr_scf=True)
             start = time.time()
             self.subsys_A_lowlvl_totalen = self.A_LL.ev_corr_total_energy

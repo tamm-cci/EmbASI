@@ -493,7 +493,6 @@ class AtomsEmbed():
 
         if self.truncate and len(self.atoms) != self.basis_info.trunc_natoms:
             self.atoms = self.atoms[self.basis_info.active_atoms]
-            print(len(self.atoms))
 
         self.atoms.calc = ASI_ASE_calculator(os.environ['ASI_LIB_PATH'],
                                         self.calc_initializer,

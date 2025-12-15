@@ -394,29 +394,26 @@ def ham_saving_and_huzinaga_callback(aux, iK, iS, descr, data, matrix_descr_ptr)
 
         else:
             if atomsembed.truncate:
-
                 vemb_supermol = atomsembed.fock_embedding_matrix
                 ovlp_supermol = atomsembed.huzinaga_ovlp_in
                 dm_supermol = atomsembed.huzinaga_dm_in
 
                 if atomsembed.abs_truncate:
-                    fock_supermol = atomsembed.embedding_ham_in
+                    #fock_supermol = atomsembed.embedding_ham_in
 
-                    A_block_min, A_block_max, B_block_min, B_block_max = get_abs_trunc_indices(atomsembed)
+                    #A_block_min, A_block_max, B_block_min, B_block_max = get_abs_trunc_indices(atomsembed)
 
-                    fmat_supermol = fock_supermol[A_block_min:A_block_max,B_block_min:B_block_max]
-                    dm_supermol = dm_supermol[B_block_min:B_block_max,B_block_min:B_block_max]
-                    ovlp_supermol = ovlp_supermol[A_block_min:A_block_max,B_block_min:B_block_max]
+                    #fmat_supermol = fock_supermol[A_block_min:A_block_max,B_block_min:B_block_max]
+                    #dm_supermol = dm_supermol[B_block_min:B_block_max,B_block_min:B_block_max]
+                    #ovlp_supermol = ovlp_supermol[A_block_min:A_block_max,B_block_min:B_block_max]
+                    asi.huzinaga_eq = atomsembed.fock_embedding_matrix_trunc
                 else:
                     fock_supermol = atomsembed.truncated_mat_to_full(data)
                     fmat_supermol = (fock_supermol + vemb_supermol)
 
-                projector = - 0.5 * ((fmat_supermol @ dm_supermol @ ovlp_supermol.T) + (ovlp_supermol @ dm_supermol @ fmat_supermol.T))
+                    projector = - 0.5 * ((fmat_supermol @ dm_supermol @ ovlp_supermol.T) + (ovlp_supermol @ dm_supermol @ fmat_supermol.T))
 
-                if not(atomsembed.abs_truncate):
-                    projector = atomsembed.full_mat_to_truncated(projector)
-
-                asi.huzinaga_eq = atomsembed.fock_embedding_matrix_trunc + projector
+                    asi.huzinaga_eq = atomsembed.fock_embedding_matrix_trunc + projector
 
             else:
                 vemb = atomsembed.fock_embedding_matrix
