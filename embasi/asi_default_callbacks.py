@@ -399,14 +399,20 @@ def ham_saving_and_huzinaga_callback(aux, iK, iS, descr, data, matrix_descr_ptr)
                 dm_supermol = atomsembed.huzinaga_dm_in
 
                 if atomsembed.abs_truncate:
-                    #fock_supermol = atomsembed.embedding_ham_in
+                    fock_supermol = atomsembed.embedding_ham_in
 
-                    #A_block_min, A_block_max, B_block_min, B_block_max = get_abs_trunc_indices(atomsembed)
+                    A_block_min, A_block_max, B_block_min, B_block_max = get_abs_trunc_indices(atomsembed)
 
-                    #fmat_supermol = fock_supermol[A_block_min:A_block_max,B_block_min:B_block_max]
-                    #dm_supermol = dm_supermol[B_block_min:B_block_max,B_block_min:B_block_max]
-                    #ovlp_supermol = ovlp_supermol[A_block_min:A_block_max,B_block_min:B_block_max]
-                    asi.huzinaga_eq = atomsembed.fock_embedding_matrix_trunc
+                    fmat_supermol = fock_supermol[A_block_min:A_block_max,B_block_min:B_block_max]
+                    dm_supermol = dm_supermol[B_block_min:B_block_max,B_block_min:B_block_max]
+                    ovlp_supermol = ovlp_supermol[A_block_min:A_block_max,B_block_min:B_block_max]
+
+                    projector = - 0.5 * ((fmat_supermol @ dm_supermol @ ovlp_supermol.T) + (ovlp_supermol @ dm_supermol @ fmat_supermol.T))
+
+                    asi.huzinaga_eq = atomsembed.fock_embedding_matrix_trunc + projector
+
+                    #asi.huzinaga_eq = atomsembed.embedding_ham_in_trunc + projector
+
                 else:
                     fock_supermol = atomsembed.truncated_mat_to_full(data)
                     fmat_supermol = (fock_supermol + vemb_supermol)
@@ -488,12 +494,12 @@ def matrix_loading_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
                 dest_descr = asi.scalapack.wrap_blacs_desc(descr)
 
                 data = ctypes2ndarray(data, shape=(dest_descr.locrow, dest_descr.loccol)).T
-
+                root_print("1")
                 asi.scalapack.pdgemr2d(asi.n_basis, asi.n_basis,
                                        m.loc_array, 1, 1, src_descr,
                                        data, 1, 1, dest_descr,
                                        dest_descr.ctxt)
-
+                root_print("2")
             return 1
         else:
             asi.scalapack.scatter_numpy(m, descr, data, asi.hamiltonian_dtype)

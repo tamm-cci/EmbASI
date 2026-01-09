@@ -3,7 +3,7 @@ import numpy as np
 
 class DIIS():
 
-    def __init__(self, init_update_matrix, hist_len=5, mixing_step=1.0, iter_mixing_start=3):
+    def __init__(self, init_update_matrix, hist_len=5, mixing_step=1.0, iter_mixing_start=4, debug=False):
 
         self.hist_len = hist_len
         self.niter_tot = 0
@@ -16,91 +16,127 @@ class DIIS():
         self.update_matrix_hist = {}
         self.update_matrix_err_hist = {}
 
-        self.add_history(init_update_matrix)
+        self.prev_opt_in = init_update_matrix
 
-    def add_history(self, update_matrix):
+        self.debug = debug
+
+    def add_history(self, update_matrix, update_matrix_residual):
         
         if len(self.update_matrix_hist) == self.hist_len:
             for idx in range(self.hist_len - 1):
                 self.update_matrix_hist[idx] = self.update_matrix_hist[idx+1]
             self.update_matrix_hist.pop(self.hist_len - 1)
 
-        if len(self.update_matrix_err_hist) == self.hist_len - 1:
-            for idx in range(self.hist_len - 2):
+        if len(self.update_matrix_err_hist) == self.hist_len:
+            for idx in range(self.hist_len - 1):
                 self.update_matrix_err_hist[idx] = self.update_matrix_err_hist[idx+1]
-            self.update_matrix_err_hist.pop(self.hist_len - 2)
+            self.update_matrix_err_hist.pop(self.hist_len - 1)
 
         curr_len = len(self.update_matrix_hist)
         self.update_matrix_hist[curr_len] = update_matrix.copy()
-
-        if len(self.update_matrix_hist) > 1:
-            for idx in range(len(self.update_matrix_hist) - 1):
-                self.update_matrix_err_hist[idx] = self.update_matrix_hist[idx + 1] - self.update_matrix_hist[idx]
+        self.update_matrix_err_hist[curr_len] = update_matrix_residual.copy()
 
         if self.curr_hist_len < self.hist_len:
             self.curr_hist_len += 1
 
-        root_print(f" CURR: {self.curr_hist_len}")
-        root_print(f" HIST: {self.update_matrix_hist}")
-        root_print(f" ERR HIST: {self.update_matrix_err_hist}")
+    def get_coeff_matrix(self):
 
-    def diis_step(self, update_matrix):
+        import scalapack4py.npscal.math_utils.operations as op
+
+        if len(self.update_matrix_err_hist) == 0:
+            return None
+        
+        solve_mat_size = len(self.update_matrix_err_hist) + 1
+
+        if not hasattr(self, "solve_mat"):
+            self.solve_mat = np.zeros((solve_mat_size,solve_mat_size))
+
+        if len(self.update_matrix_err_hist) == self.hist_len:
+
+            if np.shape(self.solve_mat)[0] != solve_mat_size:
+                temp_solv_mat = np.zeros((solve_mat_size,solve_mat_size))
+                old_smat_size = np.shape(self.solve_mat)[0]
+                temp_solv_mat[0:old_smat_size, 0:old_smat_size] = self.solve_mat
+                self.solve_mat = temp_solv_mat
+            else:
+                self.solve_mat = np.roll(self.solve_mat, shift=-1, axis=(0,1))
+        else:
+            temp_solv_mat = np.zeros((solve_mat_size,solve_mat_size))
+            temp_solv_mat[0:solve_mat_size-2, 0:solve_mat_size-2] = self.solve_mat[0:solve_mat_size-2, 0:solve_mat_size-2]
+            self.solve_mat = temp_solv_mat
+
+            
+        for idx1 in range(solve_mat_size - 1):
+            self.solve_mat[idx1, solve_mat_size-2] = op.trace(self.update_matrix_err_hist[idx1].T @ self.update_matrix_err_hist[solve_mat_size-2])
+            self.solve_mat[solve_mat_size-2, idx1] = self.solve_mat[idx1, solve_mat_size-2]
+
+        # Assign
+        self.solve_mat[-1,:] = -1.0
+        self.solve_mat[:,-1] = -1.0
+        self.solve_mat[-1,-1] = 0
+
+        if self.debug: root_print(f"SOLVE MAT: {self.solve_mat}")
+
+        rhs = np.zeros(solve_mat_size)
+        rhs[-1] = -1
+
+        #w, v = scipy.linalg.eigh(solve_mat)
+
+        #if np.any(abs(w)<1e-14):
+        #    root_print(f"Linear dependence in DIIS error vectors")
+        #    idx = abs(w)>1e-14
+        #    coeffs = np.dot(v[:,idx]*(1./w[idx]), np.dot(v[:,idx].T.conj(), rhs))
+        #else:
+        try:
+            import scipy
+            #coeffs = np.linalg.solve(solve_mat, rhs)
+            coeffs = scipy.optimize.lsq_linear(self.solve_mat, rhs)
+            coeffs = coeffs.x
+        except:
+            raise Exception("DIIS linalg solve failed.")
+
+        return coeffs
+
+    def diis_step(self, update_matrix, coeff_mat=None):
 
         import scalapack4py.npscal.math_utils.operations as op
 
         self.niter_tot += 1
 
-        if self.niter_tot < self.n_damped_mixing:
+        if self.niter_tot <= self.n_damped_mixing:
             curr_mixing_step = self.mixing_step
         else:
             curr_mixing_step = self.mixing_step
 
-        self.add_history(update_matrix)
+        residual = update_matrix - self.prev_opt_in
 
         # If only two matrices present, just add the 
         # residual between the two matrices scaled 
         # by the mixing step.
-        if len(self.update_matrix_err_hist) == 1 or (self.iter_mixing_start > self.niter_tot):
-            return ((1 - curr_mixing_step) * self.update_matrix_hist[self.curr_hist_len - 2]) + (curr_mixing_step * self.update_matrix_hist[self.curr_hist_len - 1])
-        elif len(self.update_matrix_err_hist) < 1:
-            raise Exception("DIIS ERROR: No update matrix history detected")
+        if (self.iter_mixing_start > self.niter_tot):
+            output = self.prev_opt_in + (curr_mixing_step * residual)
+            self.prev_opt_in = output.copy()
+            return output
+        else:
+            self.add_history(update_matrix, residual)
 
-        solve_mat_size = len(self.update_matrix_err_hist) + 1
-        solve_mat = np.zeros((solve_mat_size,solve_mat_size))
-        
-        for idx1 in range(solve_mat_size - 1):
-            for idx2 in range(idx1 + 1):
-                solve_mat[idx1, idx2] = op.trace(self.update_matrix_err_hist[idx1].T @ self.update_matrix_err_hist[idx2])
+        if coeff_mat is None:
+            coeffs = self.get_coeff_matrix()
+        else:
+            coeffs = coeff_mat
 
-                if idx1 != idx2:
-                    solve_mat[idx2, idx1] = solve_mat[idx1, idx2]
+        if self.debug: root_print(f"COEFFS: {coeffs}")
 
-        # Assign 
-        solve_mat[-1,:] = -1.0
-        solve_mat[:,-1] = -1.0
-        solve_mat[-1,-1] = 0
-        root_print(f"SOLVE MAT PRE SOLVE: {solve_mat}")
-        rhs = np.zeros(solve_mat_size)
-        rhs[-1] = -1
-        
-        try:
-            coeffs = np.linalg.solve(solve_mat, rhs)
-        except:
-            raise Exception("DIIS linalg solve failed.")
-
-        root_print(f"SOLVE MAT AFTER SOLVE: {solve_mat}")
-        root_print(f"COEFFS: {coeffs}")
         # Output extrpolated DIIS step
-        #output = self.update_matrix_err_hist[idx] +
-        for idx in range(solve_mat_size - 1):
-            root_print(f"MIXING IDX: {idx}")
+        for idx in range(len(coeffs)-1):
             if idx == 0:
-                output = (coeffs[0] * self.update_matrix_hist[0])
+                #output = (coeffs[0] * self.update_matrix_hist[0])
+                output = coeffs[0] * (self.update_matrix_hist[0] + (curr_mixing_step * self.update_matrix_err_hist[0]))
             else:
-                output = output + (coeffs[idx] * self.update_matrix_hist[idx])
-                #output = output + (curr_mixing_step * coeffs[idx] * self.update_matrix_err_hist[idx])
+                #output = output + (coeffs[idx] * self.update_matrix_hist[idx])
+                output = output + (coeffs[idx] * (self.update_matrix_hist[idx] + (curr_mixing_step * self.update_matrix_err_hist[idx])))
 
-        #output = ((1.0 - curr_mixing_step) * output) + (curr_mixing_step * self.update_matrix_hist[self.curr_hist_len - 1])
+        self.prev_opt_in = output.copy()
 
         return output
 

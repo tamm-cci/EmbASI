@@ -69,9 +69,9 @@ def overlap_illcondition_check_parallel(overlap, thresh, inv=True, return_mask=F
 
     else:
         if inv:
-            ovlp_filtered = ovlp_evecs @ op.diag(ovlp_evals**(-0.5), ctxt_tag=overlap.ctxt_tag, descr_tag="main", lib=overlap.sl) @ ovlp_evecs.T
+            ovlp_filtered = ovlp_evecs @ op.diag(ovlp_evals**(-0.5), ctxt_tag=overlap.ctxt_tag, descr_tag=f"main_{overlap.gl_m}", lib=overlap.sl) @ ovlp_evecs.T
         else:
-            ovlp_filtered = ovlp_evecs @ op.diag(ovlp_evals**(0.5), ctxt_tag=overlap.ctxt_tag, descr_tag="main", lib=overlap.sl) @ ovlp_evecs.T
+            ovlp_filtered = ovlp_evecs @ op.diag(ovlp_evals**(0.5), ctxt_tag=overlap.ctxt_tag, descr_tag=f"main_{overlap.gl_m}", lib=overlap.sl) @ ovlp_evecs.T
 
     if return_mask:
         return ovlp_filtered, n_bad, good_val_mask
