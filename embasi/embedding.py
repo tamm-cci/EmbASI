@@ -704,7 +704,7 @@ class ProjectionEmbedding(EmbeddingBase):
         if mixing_type == "densmat":
             diis_dens_a = DIIS(densmat_A_LL, hist_len, mixing_step_size, debug=False)
             diis_dens_b = DIIS(densmat_B_LL, hist_len, mixing_step_size, debug=False)
-            diis_dens_ab = DIIS(update_densmat, hist_len, mixing_step_size, debug=True)
+            diis_dens_ab = DIIS(update_densmat, hist_len, mixing_step_size, debug=False)
 
         for i in range(ncycles):
 

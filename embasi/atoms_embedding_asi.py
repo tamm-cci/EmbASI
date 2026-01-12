@@ -633,7 +633,6 @@ class AtomsEmbed():
         
         ovlp_trunc = self.full_mat_to_truncated(sc_huz_ovlp)
         nelecs = self.input_fragment_nelectrons
-        time_s = time.time()
         if self.parallel:
             evals, evecs, occ_mat = hamiltonian_eigensolv_parallel(emb_ham_trunc, \
                                                                    ovlp_trunc, \
@@ -642,10 +641,9 @@ class AtomsEmbed():
                                                                    basis_illcond_thresh=1e-5)
         else:
             raise Exception("ONLY PARALLEL WORKS NOW!")
-        root_print(f"TIME FOR DIAG {time.time() - time_s} s")
 
         max_occ_state = np.count_nonzero(occ_mat)
-        evecs_occ = evecs[:, :max_occ_state]
+        evecs_occ = evecs[:, :max_occ_state+1]
 
         dm_out = 2.0 * (evecs_occ.copy() @ evecs_occ.copy().T)
 

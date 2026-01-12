@@ -494,12 +494,10 @@ def matrix_loading_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
                 dest_descr = asi.scalapack.wrap_blacs_desc(descr)
 
                 data = ctypes2ndarray(data, shape=(dest_descr.locrow, dest_descr.loccol)).T
-                root_print("1")
                 asi.scalapack.pdgemr2d(asi.n_basis, asi.n_basis,
                                        m.loc_array, 1, 1, src_descr,
                                        data, 1, 1, dest_descr,
                                        dest_descr.ctxt)
-                root_print("2")
             return 1
         else:
             asi.scalapack.scatter_numpy(m, descr, data, asi.hamiltonian_dtype)

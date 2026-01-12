@@ -100,6 +100,7 @@ class DIIS():
     def diis_step(self, update_matrix, coeff_mat=None):
 
         import scalapack4py.npscal.math_utils.operations as op
+        import time
 
         self.niter_tot += 1
 
@@ -118,16 +119,21 @@ class DIIS():
             self.prev_opt_in = output.copy()
             return output
         else:
+            time_s = time.time()
             self.add_history(update_matrix, residual)
+            root_print(f"Time for history add: {time.time()-time_s}")
 
+        time_s = time.time()            
         if coeff_mat is None:
             coeffs = self.get_coeff_matrix()
         else:
             coeffs = coeff_mat
+        root_print(f"Tome for Coeff Calc: {time.time()-time_s}")
 
         if self.debug: root_print(f"COEFFS: {coeffs}")
 
         # Output extrpolated DIIS step
+        time_s = time.time()
         for idx in range(len(coeffs)-1):
             if idx == 0:
                 #output = (coeffs[0] * self.update_matrix_hist[0])
@@ -135,6 +141,7 @@ class DIIS():
             else:
                 #output = output + (coeffs[idx] * self.update_matrix_hist[idx])
                 output = output + (coeffs[idx] * (self.update_matrix_hist[idx] + (curr_mixing_step * self.update_matrix_err_hist[idx])))
+        root_print(f"Time for extrapolation: {time.time()-time_s}")
 
         self.prev_opt_in = output.copy()
 
