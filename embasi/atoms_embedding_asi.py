@@ -643,7 +643,7 @@ class AtomsEmbed():
             raise Exception("ONLY PARALLEL WORKS NOW!")
 
         max_occ_state = np.count_nonzero(occ_mat)
-        evecs_occ = evecs[:, :max_occ_state+1]
+        evecs_occ = evecs[:, :round(nelecs/2.0)]
 
         dm_out = 2.0 * (evecs_occ.copy() @ evecs_occ.copy().T)
 
