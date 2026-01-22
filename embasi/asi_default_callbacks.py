@@ -358,10 +358,11 @@ def ham_saving_and_huzinaga_callback(aux, iK, iS, descr, data, matrix_descr_ptr)
                 storage_dict[(3, iK, iS)] = data
                 #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
 
+        # TODO: @SPIN AND K-POINT LOOP
         if ((ctxt_tag is None) and (descr_tag is None)):
             if MPI.COMM_WORLD.Get_rank() == 0:
                 if atomsembed.truncate:
-
+                    
                     vemb_supermol = atomsembed.fock_embedding_matrix
                     ovlp_supermol = atomsembed.huzinaga_ovlp_in
                     fock_supermol = atomsembed.truncated_mat_to_full(data)
