@@ -1,5 +1,6 @@
 from embasi.parallel_utils import root_print
 import numpy as np
+import time
 
 class DIIS():
 
@@ -65,11 +66,11 @@ class DIIS():
             temp_solv_mat[0:solve_mat_size-2, 0:solve_mat_size-2] = self.solve_mat[0:solve_mat_size-2, 0:solve_mat_size-2]
             self.solve_mat = temp_solv_mat
 
-            
+        time_s = time.time()            
         for idx1 in range(solve_mat_size - 1):
             self.solve_mat[idx1, solve_mat_size-2] = op.trace(self.update_matrix_err_hist[idx1].T @ self.update_matrix_err_hist[solve_mat_size-2])
             self.solve_mat[solve_mat_size-2, idx1] = self.solve_mat[idx1, solve_mat_size-2]
-
+        root_print(f"Tome for Coeff Calc Matmul: {time.time()-time_s}")
         # Assign
         self.solve_mat[-1,:] = -1.0
         self.solve_mat[:,-1] = -1.0
@@ -87,6 +88,7 @@ class DIIS():
         #    idx = abs(w)>1e-14
         #    coeffs = np.dot(v[:,idx]*(1./w[idx]), np.dot(v[:,idx].T.conj(), rhs))
         #else:
+        time_s = time.time()
         try:
             import scipy
             #coeffs = np.linalg.solve(solve_mat, rhs)
@@ -94,7 +96,7 @@ class DIIS():
             coeffs = coeffs.x
         except:
             raise Exception("DIIS linalg solve failed.")
-
+        root_print(f"Tome for Coeff Leat squares (if this is the slow step, I am going to flip out): {time.time()-time_s}")
         return coeffs
 
     def diis_step(self, update_matrix, coeff_mat=None):
@@ -140,7 +142,13 @@ class DIIS():
                 output = coeffs[0] * (self.update_matrix_hist[0] + (curr_mixing_step * self.update_matrix_err_hist[0]))
             else:
                 #output = output + (coeffs[idx] * self.update_matrix_hist[idx])
-                output = output + (coeffs[idx] * (self.update_matrix_hist[idx] + (curr_mixing_step * self.update_matrix_err_hist[idx])))
+                curr_it = self.update_matrix_hist[idx].copy()
+                curr_it *= coeffs[idx]
+                curr_his = self.update_matrix_err_hist[idx].copy()
+                curr_his *= curr_mixing_step * coeffs[idx]
+                output += curr_it
+                output += curr_his
+                #output += (coeffs[idx] * (self.update_matrix_hist[idx] + (curr_mixing_step * self.update_matrix_err_hist[idx])))
         root_print(f"Time for extrapolation: {time.time()-time_s}")
 
         self.prev_opt_in = output.copy()

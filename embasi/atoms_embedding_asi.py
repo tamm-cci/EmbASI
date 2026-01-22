@@ -670,6 +670,7 @@ class AtomsEmbed():
 
         """
         import os
+        import time
         import numpy as np
         from asi4py.asecalc import ASI_ASE_calculator
         from embasi.asi_default_callbacks import dm_saving_callback, \
@@ -680,6 +681,8 @@ class AtomsEmbed():
 
         root_print(f'Calculation {self.outdir}...')
 
+        start_time = time.time()
+        
         if self.truncate and len(self.atoms) != self.basis_info.trunc_natoms:
             self.atoms = self.atoms[self.basis_info.active_atoms]
 
@@ -814,6 +817,9 @@ class AtomsEmbed():
 
         MPI.COMM_WORLD.Barrier()
 
+        end_time = time.time()
+        self.last_run_time = end_time - start_time
+
         self.extract_results()
 
         # Within the embedding workflow, we often want to calculate the total 
@@ -866,6 +872,7 @@ class AtomsEmbed():
 
             self.ev_corr_total_energy = \
                 self.total_energy - self.ev_sum + self.ev_corr_energy
+
 
     def close_calculator(self):
         self.atoms.calc.asi.close()

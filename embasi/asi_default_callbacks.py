@@ -418,7 +418,7 @@ def ham_saving_and_huzinaga_callback(aux, iK, iS, descr, data, matrix_descr_ptr)
                     fmat_supermol = (fock_supermol + vemb_supermol)
 
                     projector = - 0.5 * ((fmat_supermol @ dm_supermol @ ovlp_supermol.T) + (ovlp_supermol @ dm_supermol @ fmat_supermol.T))
-
+                    projector = atomsembed.full_mat_to_truncated(projector)
                     asi.huzinaga_eq = atomsembed.fock_embedding_matrix_trunc + projector
 
             else:
