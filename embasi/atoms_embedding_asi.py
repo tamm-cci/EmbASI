@@ -703,6 +703,9 @@ class AtomsEmbed():
                                                  self.atoms,
                                                  work_dir=self.outdir)
 
+        self.n_local_ks = self.atoms.calc.asi.n_local_ks
+        self.n_spins = self.atoms.calc.asi.n_spin
+
         # Explicitly set function pointers to NULL to avoid
         # previously set function pointers from passing into
         # the present calculation.
@@ -812,6 +815,16 @@ class AtomsEmbed():
             self.atoms.calc.asi.dm_count = mpi_bcast_integer(self.atoms.calc.asi.dm_count)
             self.atoms.calc.asi.ham_count = mpi_bcast_integer(self.atoms.calc.asi.ham_count)
 
+        if self.truncate:
+            for i_spin in range(self.n_spins):
+                for i_kpt in range(self.n_local_ks):
+                    #kin_idx=1; esp_idx=2; tot_idx=3
+                    self.atoms.calc.asi.ham_storage[(1,i_spin,i_kpt)] = self.truncated_mat_to_full(self.atoms.calc.asi.ham_storage.get((1,i_spin,i_kpt)))
+                    self.atoms.calc.asi.ham_storage[(2,i_spin,i_kpt)] = self.truncated_mat_to_full(self.atoms.calc.asi.ham_storage.get((2,i_spin,i_kpt)))
+                    self.atoms.calc.asi.ham_storage[(3,i_spin,i_kpt)] = self.truncated_mat_to_full(self.atoms.calc.asi.ham_storage.get((3,i_spin,i_kpt)))
+
+
+            
         if close_calc:
             self.atoms.calc.asi.close()
 
@@ -891,29 +904,20 @@ class AtomsEmbed():
     @property
     def hamiltonian_total(self):
         tot_idx = 3
-        if self.truncate:
-            return self.truncated_mat_to_full(self.atoms.calc.asi.ham_storage.get((tot_idx,1,1)))
-        else:
-            return self.atoms.calc.asi.ham_storage.get((tot_idx,1,1))
-
+        return self.atoms.calc.asi.ham_storage
+        
     @property
     def hamiltonian_estat_plus_xc(self):
         """_summary_
         Generates
         """
         estat_idx = 2
-        if self.truncate:
-            return self.truncated_mat_to_full(self.atoms.calc.asi.ham_storage.get((estat_idx,1,1)))
-        else:
-            return self.atoms.calc.asi.ham_storage.get((estat_idx,1,1))
+        return self.atoms.calc.asi.ham_storage
 
     @property
     def hamiltonian_kinetic(self):
         kin_idx = 1
-        if self.truncate:
-            return self.truncated_mat_to_full(self.atoms.calc.asi.ham_storage.get((kin_idx,1,1)))
-        else:
-            return self.atoms.calc.asi.ham_storage.get((kin_idx,1,1))
+        return self.atoms.calc.asi.ham_storage.get((kin_idx,1,1))
 
     @property
     def fock_embedding_matrix(self):
@@ -1107,7 +1111,7 @@ class AtomsEmbed():
         """Overlap matrix of nbasisxnbasis
 
         """
-        return self.atoms.calc.asi.overlap_storage.get((1,1))
+        return self.atoms.calc.asi.overlap_storage
 
     @property
     def basis_atoms(self):
