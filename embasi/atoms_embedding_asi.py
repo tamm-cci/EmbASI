@@ -5,6 +5,7 @@ import scalapack4py.npscal.math_utils.operations as op
 import numpy as np
 import time
 from mpi4py import MPI
+from .ks_array import SpinKpointArray
 
 # Development purposes
 import re
@@ -738,7 +739,9 @@ class AtomsEmbed():
                                                   self.blacs_descr_tag,
                                                   'DM calc'))
         
-        self.atoms.calc.asi.ham_storage = {}
+        self.atoms.calc.asi.ham_kin = {}
+        self.atoms.calc.asi.ham_2ee = {}
+        self.atoms.calc.asi.ham_tot = {}
         self.atoms.calc.asi.ham_calc_cnt = {}
         self.atoms.calc.asi.ham_count = 0
 
@@ -746,6 +749,8 @@ class AtomsEmbed():
             self.atoms.calc.asi.register_hamiltonian_callback(ham_saving_and_huzinaga_callback,
                                                               (self.atoms.calc.asi,
                                                                self.atoms.calc.asi.ham_storage,
+                                                               self.atoms.calc.asi.ham_2ee,
+                                                               self.atoms.calc.asi.ham_tot,
                                                                {"atembed": self},
                                                                #{(1,1): self.fock_embedding_matrix},
                                                                #{(1,1): self.huzinaga_dm_in},
@@ -816,15 +821,23 @@ class AtomsEmbed():
             self.atoms.calc.asi.ham_count = mpi_bcast_integer(self.atoms.calc.asi.ham_count)
 
         if self.truncate:
-            for i_spin in range(self.n_spins):
-                for i_kpt in range(self.n_local_ks):
-                    #kin_idx=1; esp_idx=2; tot_idx=3
-                    self.atoms.calc.asi.ham_storage[(1,i_spin,i_kpt)] = self.truncated_mat_to_full(self.atoms.calc.asi.ham_storage.get((1,i_spin,i_kpt)))
-                    self.atoms.calc.asi.ham_storage[(2,i_spin,i_kpt)] = self.truncated_mat_to_full(self.atoms.calc.asi.ham_storage.get((2,i_spin,i_kpt)))
-                    self.atoms.calc.asi.ham_storage[(3,i_spin,i_kpt)] = self.truncated_mat_to_full(self.atoms.calc.asi.ham_storage.get((3,i_spin,i_kpt)))
+            for idx, kspdict in self.atoms.calc.asi.ham_storage.items():
+                for key in kspdict.keys():
+                    self.atoms.calc.asi.ham_storage[idx][key] = self.truncated_mat_to_full(kspdict.get(key))
+            for idx, kspdict in self.atoms.calc.asi.ham_storage.items():
+                for key in kspdict.keys():
+                    self.atoms.calc.asi.dm_storage[idx][key] = self.truncated_mat_to_full(kspdict.get(key))
+            for key in self.atoms.calc.asi.overlap_storage.keys():
+                self.atoms.calc.asi.overlap_storage[key] = self.truncated_mat_to_full(self.atoms.calc.asi.overlap_storage.get(key))
 
+        # Now put all of the output arrays into a nice wrapper
+        self._ham_kin = SpinKpointArray(self.atoms.calc.asi.ham_storage[0], self.n_spins, self.n_local_ks)
+        self._ham_2ee = SpinKpointArray(self.atoms.calc.asi.ham_storage[1], self.n_spins, self.n_local_ks)
+        self._ham_tot = SpinKpointArray(self.atoms.calc.asi.ham_storage[2], self.n_spins, self.n_local_ks)
+        self._ovlp = SpinKpointArray(self.atoms.calc.asi.overlap_storage, self.n_spins, self.n_local_ks)
+        # THIS IS CODE BREAKING FOR QM CODE LOCALISATION - I WILL NEED A FIX TO RESTORE
+        self._dm = SpinKpointArray(self.atoms.calc.asi.dm_storage[0], self.n_spins, self.n_local_ks)
 
-            
         if close_calc:
             self.atoms.calc.asi.close()
 
@@ -903,21 +916,14 @@ class AtomsEmbed():
             
     @property
     def hamiltonian_total(self):
-        tot_idx = 3
-        return self.atoms.calc.asi.ham_storage
-        
+        return self._ham_tot
     @property
     def hamiltonian_estat_plus_xc(self):
-        """_summary_
-        Generates
-        """
-        estat_idx = 2
-        return self.atoms.calc.asi.ham_storage
+        return self._ham_2ee
 
     @property
     def hamiltonian_kinetic(self):
-        kin_idx = 1
-        return self.atoms.calc.asi.ham_storage.get((kin_idx,1,1))
+        return self._ham_kin
 
     @property
     def fock_embedding_matrix(self):
@@ -1110,7 +1116,7 @@ class AtomsEmbed():
     def overlap(self):
         """Overlap matrix of nbasisxnbasis
 
-        """
+         """
         return self.atoms.calc.asi.overlap_storage
 
     @property
