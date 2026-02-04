@@ -89,7 +89,8 @@ def dm_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
                 storage_dict[asi.dm_count] = {}
             #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
             storage_dict[asi.dm_count][(PiS, PiK)] = data
-            asi.dm_count += 1
+            if (iS*iK) == (asi.n_local_ks):
+                asi.dm_count = asi.dm_count + 1
     except Exception as eee:
         print(f"""Something happened in ASI dm_saving_callback
                   {label}: {eee}\nAborting...""")
@@ -249,15 +250,17 @@ def ham_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
 
             if asi.ham_count < 3:
                 storage_dict[asi.ham_count][(PiS, PiK)] = data
-                asi.ham_count = asi.ham_count + 1
+
+                if (iS*iK) == (asi.n_local_ks):
+                    asi.ham_count = asi.ham_count + 1
                 #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
             else:
                 #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
-                storage_dict[1][(PiS, PiK)] = storage_dict[(2, (PiS, PiK))]
+                storage_dict[0][(PiS, PiK)] = storage_dict[1][(PiS, PiK)]
                 #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
-                storage_dict[2]](PiS, PiK)] = storage_dict[(3, (PiS, PiK))]
+                storage_dict[1][(PiS, PiK)] = storage_dict[2][(PiS, PiK)]
                 #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
-                storage_dict[3][(PiS, PiK)] = data
+                storage_dict[2][(PiS, PiK)] = data
                 #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
     except Exception as eee:
         print(f"""Something happened in ASI ham_saving_callback {label}: 
@@ -373,9 +376,9 @@ def ham_saving_and_huzinaga_callback(aux, iK, iS, descr, data, matrix_descr_ptr)
                 #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
             else:
                 #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
-                storage_dict[1][(PiS, PiK)] = storage_dict[(2, (PiS, PiK))]
+                storage_dict[1][(PiS, PiK)] = storage_dict[2][(PiS, PiK)]
                 #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
-                storage_dict[2]](PiS, PiK)] = storage_dict[(3, (PiS, PiK))]
+                storage_dict[2][(PiS, PiK)] = storage_dict[3][(PiS, PiK)]
                 #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
                 storage_dict[3][(PiS, PiK)] = data
                 #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
@@ -412,7 +415,8 @@ def ham_saving_and_huzinaga_callback(aux, iK, iS, descr, data, matrix_descr_ptr)
                     vemb = atomsembed.fock_embedding_matrix[PiS, PiK]
                     ovlp = atomsembed.huzinaga_ovlp_in[PiS, PiK]
                     dm = atomsembed.huzinaga_dm_in[PiS, PiK]
-
+                    # BROKEN ATM - FIX LATER
+                    asi.huzinaga_eq = {}
                     asi.huzinaga_eq[PiS, PiK] = vemb - 0.5 * (((data+vemb) @ dm @ ovlp) + (ovlp @ dm @ (data+vemb)))
 
         else:
@@ -442,14 +446,17 @@ def ham_saving_and_huzinaga_callback(aux, iK, iS, descr, data, matrix_descr_ptr)
 
                     projector = - 0.5 * ((fmat_supermol @ dm_supermol @ ovlp_supermol.T) + (ovlp_supermol @ dm_supermol @ fmat_supermol.T))
                     projector = atomsembed.full_mat_to_truncated(projector)
-                    asi.huzinaga_eq = atomsembed.fock_embedding_matrix_trunc + projector
+                    # BROKEN ATM - FIX LATER
+                    asi.huzinaga_eq = {}
+                    asi.huzinaga_eq[PiS, PiK] = atomsembed.fock_embedding_matrix_trunc + projector
 
             else:
                 vemb = atomsembed.fock_embedding_matrix[PiS, PiK]
                 ovlp = atomsembed.huzinaga_ovlp_in[PiS, PiK]
                 dm = atomsembed.huzinaga_dm_in[PiS, PiK]
-
-                asi.huzinaga_eq([PiS, PiK]) = vemb - 0.5 * (((data+vemb) @ dm @ ovlp) + (ovlp @ dm @ (data+vemb)))
+                # BROKEN ATM - FIX LATER
+                asi.huzinaga_eq = {}
+                asi.huzinaga_eq[PiS, PiK] = vemb - 0.5 * (((data+vemb) @ dm @ ovlp) + (ovlp @ dm @ (data+vemb)))
 
     except Exception as eee:
         print(f"""Something happened in ASI ham_saving_callback {label}: 
@@ -502,9 +509,9 @@ def matrix_loading_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
                 m = asi.huzinaga_eq([PiS, PiK])
         else:
             if ((ctxt_tag is None) and (descr_tag is None)):
-                m = np.asfortranarray(storage_dict[(iK, iS)]) if asi.scalapack.is_root(descr) else None
+                m = np.asfortranarray(storage_dict[PiS, PiK]) if asi.scalapack.is_root(descr) else None
             else:
-                m = storage_dict[(PiK, PiS)]
+                m = storage_dict[PiS, PiK]
 
         # ASI_STORAGE_TYPE_TRIL,ASI_STORAGE_TYPE_TRIU
         if (matrix_descr_ptr.contents.storage_type not in {1,2}):
