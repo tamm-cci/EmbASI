@@ -740,13 +740,11 @@ class AtomsEmbed():
         self.atoms.calc.asi.ham_count = 0
 
         if (self.flag_huz and emb_pot_scf):
+            self.atoms.calc.asi.huzinaga_eq = {}
             self.atoms.calc.asi.register_hamiltonian_callback(ham_saving_and_huzinaga_callback,
                                                               (self.atoms.calc.asi,
                                                                self.atoms.calc.asi.ham_storage,
                                                                {"atembed": self},
-                                                               #{(1,1): self.fock_embedding_matrix},
-                                                               #{(1,1): self.huzinaga_dm_in},
-                                                               #{(1,1): self.huzinaga_ovlp_in},
                                                                self.atoms.calc.asi.ham_calc_cnt,
                                                                self.blacs_ctxt_tag,
                                                                self.blacs_descr_tag,

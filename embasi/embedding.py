@@ -562,48 +562,6 @@ class ProjectionEmbedding(EmbeddingBase):
         else:
             self.P_b = -0.5 * ( (hamiltonian @ densmat @ overlap.T) + (overlap @ densmat @ hamiltonian.T) )
 
-    def calculate_abs_trunc_huzinaga_projector(self, atomsembed):
-
-        def get_abs_trunc_indices(atomsembed):
-            import numpy as np
-
-            active_atoms = np.array(atomsembed.basis_info.active_atoms_mask)
-
-            # First and last truncated atom
-            trunc_at_first = np.argmax(active_atoms == True)
-            trunc_at_last = len(active_atoms) - 1 - np.argmax((active_atoms == True)[::-1])
-            # Find first and last active atom
-            full_at_first = np.argmax(active_atoms == False)
-            full_at_last = len(active_atoms) - 1 - np.argmax((active_atoms == False)[::-1])
-
-            full_basis_min_idx = atomsembed.basis_info.full_basis_min_idx
-            full_basis_max_idx = atomsembed.basis_info.full_basis_max_idx
-            A_block_min = full_basis_min_idx[trunc_at_first]
-            A_block_max = full_basis_max_idx[trunc_at_last]
-
-            B_block_min = full_basis_min_idx[full_at_first]
-            B_block_max = full_basis_max_idx[full_at_last]
-
-            return A_block_min, A_block_max, B_block_min, B_block_max
-
-        vemb_supermol = atomsembed.fock_embedding_matrix
-        ovlp_supermol = atomsembed.huzinaga_ovlp_in
-        dm_supermol = atomsembed.huzinaga_dm_in
-
-        if atomsembed.abs_truncate:
-            fmat_supermol = atomsembed.embedding_ham_in
-            A_block_min, A_block_max, B_block_min, B_block_max = get_abs_trunc_indices(atomsembed)
-            
-            fmat_supermol = fmat_supermol[A_block_min:A_block_max,B_block_min:B_block_max]
-            dm_supermol = dm_supermol[B_block_min:B_block_max,B_block_min:B_block_max]
-            ovlp_supermol = ovlp_supermol[A_block_min:A_block_max,B_block_min:B_block_max]
-        else:
-            fmat_supermol = (vemb_supermol)
-
-        projector = - 0.5 * ((fmat_supermol @ dm_supermol @ ovlp_supermol.T) + (ovlp_supermol @ dm_supermol @ fmat_supermol.T))
-
-        return atomsembed.truncated_mat_to_full(projector)
-        
     def spade_localisation(self, atomsembed, hamiltonian, overlap):
         """Calculate the localised density matrix with the SPADE method
 
@@ -705,7 +663,7 @@ class ProjectionEmbedding(EmbeddingBase):
         # TODO: @SPIN AND K-POINT LOOP
         def renorm_densmat(densmat, overlap, target_pop):
 
-            pop = op.trace(overlap @ densmat)
+            pop = (overlap @ densmat).trace()
             renorm = target_pop / pop
             root_print(f"pop: {pop}")
             root_print(f"nelec: {target_pop}")
@@ -765,39 +723,8 @@ class ProjectionEmbedding(EmbeddingBase):
             self.output_data_dict["FATCONVINFO"]["SUPSYS_POT_TIME"] += self.AB_LL.last_run_time
             root_print(f"FAT ITERATION {i} AB ENERGY B OPT: {new_energy}")
 
-            # TODO: @SPIN AND K-POINT LOOP
-            if mixing_type=="totham":
-                raise Exception("Only densmat works at the moment")
-                #if i==0:
-                #    tot_ham = self.AB_LL_PP.hamiltonian_total
-                #    diis_emb_ham_a = DIIS(tot_ham, 8, mixing_step_size)
-                #else:
-                #    tot_ham = diis_emb_ham_a.diis_step(self.AB_LL_PP.hamiltonian_total)
-                #
-                #emb_ham_a = tot_ham - self.A_HL_PP.hamiltonian_total
-            else:
-                emb_ham_a = self.AB_LL.hamiltonian_total - self.A_LL.hamiltonian_total
-                self.vemb = emb_ham_a
-            ### A_HL ####################################################
-
-            if mixing_type=="emb_pot":
-                raise Exception("Only densmat works at the moment")
-                #if i==0:
-                #    a_proj = self.vemb + a_proj
-                #    diis_emb_ham_a = DIIS(a_proj, hist_len, mixing_step_size)
-                #else:
-                #    a_proj = self.vemb + a_proj
-                #    a_proj = diis_emb_ham_a.diis_step(a_proj)
-                #self.A_HL.fock_embedding_matrix = a_proj
-
-            if mixing_type=="proj":
-                raise Exception("Only densmat works at the moment")
-                #if i==0:
-                #    diis_emb_ham_a = DIIS(a_proj, hist_len, mixing_step_size)
-                #else:
-                #    a_proj = diis_emb_ham_a.diis_step(a_proj)
-                #
-                #self.A_HL.fock_embedding_matrix = a_proj + self.vemb
+            emb_ham_a = self.AB_LL.hamiltonian_total - self.A_LL.hamiltonian_total
+            self.vemb = emb_ham_a
 
             start_time = time.time()
             # RUN EMBEDDING CALCULATION
@@ -823,39 +750,8 @@ class ProjectionEmbedding(EmbeddingBase):
             #new_energy = self.AB_LL.ev_corr_total_energy
             #root_print(f"FAT ITERATION {i} AB ENERGY A OPT: {new_energy}")
 
-            ### B_LL_PP
-            if mixing_type=="totham":
-                raise Exception("Only densmat works at the moment")
-                #if i==0:
-                #    tot_ham = self.AB_LL_PP.hamiltonian_total
-                #    diis_emb_ham_b = DIIS(tot_ham, hist_len, mixing_step_size)
-                #else:
-                #    tot_ham = diis_emb_ham_b.diis_step(self.AB_LL_PP.hamiltonian_total)
-
-                #emb_ham_b = tot_ham - self.B_LL_PP.hamiltonian_total
-            else:
-                emb_ham_b = self.AB_LL.hamiltonian_total - self.B_LL.hamiltonian_total
-                self.vemb = emb_ham_b
-
-            if mixing_type=="emb_pot":
-                raise Exception("Only densmat works at the moment")
-                #if i==0:
-                #    b_proj = self.vemb + b_proj
-                #    diis_emb_ham_b = DIIS(b_proj, hist_len, mixing_step_size)
-                #else:
-                #    b_proj = self.vemb + b_proj
-                #    b_proj = diis_emb_ham_b.diis_step(b_proj)
-
-                #                self.B_LL.fock_embedding_matrix = b_proj
-
-            if mixing_type=="proj":
-                raise Exception("Only densmat works at the moment")
-                #if i==0:
-                #    diis_emb_ham_b = DIIS(b_proj, hist_len, mixing_step_size)
-                #else:
-                #    b_proj = diis_emb_ham_b.diis_step(b_proj)
-
-                #self.B_LL.fock_embedding_matrix = b_proj + self.vemb
+            emb_ham_b = self.AB_LL.hamiltonian_total - self.B_LL.hamiltonian_total
+            self.vemb = emb_ham_b
 
             start_time = time.time()
             self.B_LL.input_fragment_nelectrons = self.B_pop
@@ -1118,26 +1014,17 @@ class ProjectionEmbedding(EmbeddingBase):
         
             # Initialises the density matrix for subsystem A, and calculated the 
             # hamiltonian components for subsystem A at the low-level reference.
-            # TODO: @SPIN AND K-POINT LOOP - and needs syncing??
             if self.projection == "level-shift":
                 self.calculate_levelshift_projector(densmat_B_LL, overlap)
             elif self.projection == "huzinaga":
                 self.calculate_huzinaga_projector(hamiltonian_AB_total, overlap, densmat_B_LL)
-            elif self.projection == "huzinaga-sc":
-                self.A_HL.huzinaga_dm_in = densmat_B_LL
-                self.A_HL.huzinaga_ovlp_in = overlap
             else:
-                raise Exception("Invalid entry for projection: use 'level-shift', 'huzinaga-sc', or 'huzinaga' ")
+                self.P_b = None
 
             # Registered callbacks in ASI add the above components to the Fock-matrix
             # at every SCF iteration.
-            # TODO: @SPIN AND K-POINT LOOP - and needs syncing??
             self.A_HL.input_fragment_nelectrons = self.A_pop
             self.vemb = self.AB_LL.hamiltonian_estat_plus_xc - self.A_LL.hamiltonian_estat_plus_xc
-
-            if self.projection == "huzinaga-sc":
-                self.A_HL.fock_embedding_matrix = self.vemb
-                self.A_HL.embedding_ham_in = hamiltonian_AB_total - self.A_LL.hamiltonian_estat_plus_xc
 
             self.A_HL.run_emb_scf(dm_in=densmat_A_LL, emb_pot=self.vemb,
                                   sc_huz_dm=densmat_B_LL, sc_huz_ovlp=overlap,

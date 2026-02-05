@@ -366,60 +366,24 @@ def ham_saving_and_huzinaga_callback(aux, iK, iS, descr, data, matrix_descr_ptr)
                                              asi.is_hamiltonian_real, uplo)
 
         if data is not None:
-            #assert len(data.shape) == 2
             if not (asi.ham_count in storage_dict.keys()):
                 storage_dict[asi.ham_count] = {}
 
             if asi.ham_count < 3:
                 storage_dict[asi.ham_count][(PiS, PiK)] = data
-                asi.ham_count = asi.ham_count + 1
+
+                if (iS*iK) == (asi.n_local_ks):
+                    asi.ham_count = asi.ham_count + 1
                 #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
             else:
                 #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
+                storage_dict[0][(PiS, PiK)] = storage_dict[1][(PiS, PiK)]
+                #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
                 storage_dict[1][(PiS, PiK)] = storage_dict[2][(PiS, PiK)]
                 #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
-                storage_dict[2][(PiS, PiK)] = storage_dict[3][(PiS, PiK)]
-                #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
-                storage_dict[3][(PiS, PiK)] = data
+                storage_dict[2][(PiS, PiK)] = data
                 #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
 
-        # TODO: @SPIN AND K-POINT LOOP
-        if ((ctxt_tag is None) and (descr_tag is None)):
-            if MPI.COMM_WORLD.Get_rank() == 0:
-                if atomsembed.truncate:
-                    
-                    vemb_supermol = atomsembed.fock_embedding_matrix[PiS, PiK]
-                    ovlp_supermol = atomsembed.huzinaga_ovlp_in[PiS, PiK]
-                    fock_supermol = atomsembed.truncated_mat_to_full(data)
-                    dm_supermol = atomsembed.huzinaga_dm_in[PiS, PiK]
-
-                    if atomsembed.abs_truncate:
-                        fmat_supermol = atomsembed.embedding_ham_in[PiS, PiK]
-                        A_block_min, A_block_max, B_block_min, B_block_max = get_abs_trunc_indices(atomsembed)
-
-                        fmat_supermol = fmat_supermol[A_block_min:A_block_max,B_block_min:B_block_max]
-                        dm_supermol = dm_supermol[B_block_min:B_block_max,B_block_min:B_block_max]
-                        ovlp_supermol = ovlp_supermol[A_block_min:A_block_max,B_block_min:B_block_max]
-                    else:
-                        fock_supermol = atomsembed.truncated_mat_to_full(data)
-                        fmat_supermol = (fock_supermol + vemb_supermol)
-
-                    projector = - 0.5 * ((fmat_supermol @ dm_supermol @ ovlp_supermol.T) + (ovlp_supermol @ dm_supermol @ fmat_supermol.T))
-
-                    if not(atomsembed.abs_truncate):
-                        projector = atomsembed.full_mat_to_truncated(projector)
-
-                    asi.huzinaga_eq[PiS, PiK] = atomsembed.fock_embedding_matrix_trunc[PiS, PiK] + projector
-
-                else:
-                    vemb = atomsembed.fock_embedding_matrix[PiS, PiK]
-                    ovlp = atomsembed.huzinaga_ovlp_in[PiS, PiK]
-                    dm = atomsembed.huzinaga_dm_in[PiS, PiK]
-                    # BROKEN ATM - FIX LATER
-                    asi.huzinaga_eq = {}
-                    asi.huzinaga_eq[PiS, PiK] = vemb - 0.5 * (((data+vemb) @ dm @ ovlp) + (ovlp @ dm @ (data+vemb)))
-
-        else:
             if atomsembed.truncate:
                 vemb_supermol = atomsembed.fock_embedding_matrix[PiS, PiK]
                 ovlp_supermol = atomsembed.huzinaga_ovlp_in[PiS, PiK]
@@ -434,36 +398,33 @@ def ham_saving_and_huzinaga_callback(aux, iK, iS, descr, data, matrix_descr_ptr)
                     dm_supermol = dm_supermol[B_block_min:B_block_max,B_block_min:B_block_max]
                     ovlp_supermol = ovlp_supermol[A_block_min:A_block_max,B_block_min:B_block_max]
 
-                    projector = - 0.5 * ((fmat_supermol @ dm_supermol @ ovlp_supermol.T) + (ovlp_supermol @ dm_supermol @ fmat_supermol.T))
-
-                    asi.huzinaga_eq[PiS, PiK] = atomsembed.fock_embedding_matrix_trunc + projector
-
-                    #asi.huzinaga_eq = atomsembed.embedding_ham_in_trunc + projector
-
                 else:
                     fock_supermol = atomsembed.truncated_mat_to_full(data)
                     fmat_supermol = (fock_supermol + vemb_supermol)
+                
+                    if atomsembed.fock_embedding_matrix.n_spin > 1:
+                        projector = - 0.5 * ((fmat_supermol @ dm_supermol @ ovlp_supermol.T) + (ovlp_supermol @ dm_supermol @ fmat_supermol.T))
+                    else:
+                        projector = - 1.0 * ((fmat_supermol @ dm_supermol @ ovlp_supermol.T) + (ovlp_supermol @ dm_supermol @ fmat_supermol.T))
 
-                    projector = - 0.5 * ((fmat_supermol @ dm_supermol @ ovlp_supermol.T) + (ovlp_supermol @ dm_supermol @ fmat_supermol.T))
-                    projector = atomsembed.full_mat_to_truncated(projector)
-                    # BROKEN ATM - FIX LATER
-                    asi.huzinaga_eq = {}
-                    asi.huzinaga_eq[PiS, PiK] = atomsembed.fock_embedding_matrix_trunc + projector
+                projector = atomsembed.full_mat_to_truncated(projector)
+                asi.huzinaga_eq[(PiS, PiK)] = atomsembed.fock_embedding_matrix_trunc[PiS, PiK] + projector
 
             else:
                 vemb = atomsembed.fock_embedding_matrix[PiS, PiK]
                 ovlp = atomsembed.huzinaga_ovlp_in[PiS, PiK]
                 dm = atomsembed.huzinaga_dm_in[PiS, PiK]
-                # BROKEN ATM - FIX LATER
-                asi.huzinaga_eq = {}
-                asi.huzinaga_eq[PiS, PiK] = vemb - 0.5 * (((data+vemb) @ dm @ ovlp) + (ovlp @ dm @ (data+vemb)))
+
+                if atomsembed.fock_embedding_matrix.n_spin > 1:
+                    asi.huzinaga_eq[(PiS, PiK)] = vemb - 1.0 * (((data+vemb) @ dm @ ovlp.T) + (ovlp @ dm @ (data+vemb).T))
+                else:
+                    asi.huzinaga_eq[(PiS, PiK)] = vemb - 0.5 * (((data+vemb) @ dm @ ovlp.T) + (ovlp @ dm @ (data+vemb).T))
 
     except Exception as eee:
         print(f"""Something happened in ASI ham_saving_callback {label}: 
                   {eee}\nAborting...""")
         traceback.print_tb(eee.__traceback__, limit=5, file=sys.stdout)
         MPI.COMM_WORLD.Abort(1)
-
 
 def matrix_loading_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
     """Default callback for loading matrices
@@ -501,10 +462,12 @@ def matrix_loading_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
         # This is unfortunately very opaque - essentially, the huzinaga equation is formulated
         # in the hamiltonian saving callback as we need the fock matrix constructed during the
         # SCF cycle, which cannot be set outside of the invoked QM code.
-
         if flag_huz:
             if ((ctxt_tag is None) and (descr_tag is None)):
-                m = np.asfortranarray(asi.huzinaga_eq) if asi.scalapack.is_root(descr) else None
+                if (PiS, PiK) in asi.huzinaga_eq.keys():
+                    m = np.asfortranarray(asi.huzinaga_eq[(PiS, PiK)])
+                else:
+                    m = None
             else:
                 m = asi.huzinaga_eq([PiS, PiK])
         else:
@@ -537,6 +500,8 @@ def matrix_loading_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
             asi.scalapack.scatter_numpy(m, descr, data, asi.hamiltonian_dtype)
             return 1 # signal that  matrix has been loaded
 
+        # Set to empty dictionary again for re-population
+        #asi.huzinaga_eq = {}
 
     except Exception as eee:
         print(f"""Something happened in ASI matrix_loading_callback {label}: 
