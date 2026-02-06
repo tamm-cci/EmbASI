@@ -248,7 +248,7 @@ def ham_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
             if not (asi.ham_count in storage_dict.keys()):
                 storage_dict[asi.ham_count] = {}
 
-            if asi.ham_count < 3:
+            if asi.ham_count <= 2:
                 storage_dict[asi.ham_count][(PiS, PiK)] = data
 
                 if (iS*iK) == (asi.n_local_ks):
@@ -327,7 +327,7 @@ def ham_saving_and_huzinaga_callback(aux, iK, iS, descr, data, matrix_descr_ptr)
         # Python-indexed spin and kpts:
         PiS = iS - 1
         PiK = iK - 1
-        
+
         atomsembed = atomsembed["atembed"]
         
         if asi.is_hamiltonian_real:
@@ -369,7 +369,7 @@ def ham_saving_and_huzinaga_callback(aux, iK, iS, descr, data, matrix_descr_ptr)
             if not (asi.ham_count in storage_dict.keys()):
                 storage_dict[asi.ham_count] = {}
 
-            if asi.ham_count < 3:
+            if asi.ham_count <= 2:
                 storage_dict[asi.ham_count][(PiS, PiK)] = data
 
                 if (iS*iK) == (asi.n_local_ks):
@@ -397,17 +397,18 @@ def ham_saving_and_huzinaga_callback(aux, iK, iS, descr, data, matrix_descr_ptr)
                     fmat_supermol = fock_supermol[A_block_min:A_block_max,B_block_min:B_block_max]
                     dm_supermol = dm_supermol[B_block_min:B_block_max,B_block_min:B_block_max]
                     ovlp_supermol = ovlp_supermol[A_block_min:A_block_max,B_block_min:B_block_max]
-
                 else:
                     fock_supermol = atomsembed.truncated_mat_to_full(data)
                     fmat_supermol = (fock_supermol + vemb_supermol)
                 
-                    if atomsembed.fock_embedding_matrix.n_spin > 1:
-                        projector = - 0.5 * ((fmat_supermol @ dm_supermol @ ovlp_supermol.T) + (ovlp_supermol @ dm_supermol @ fmat_supermol.T))
-                    else:
-                        projector = - 1.0 * ((fmat_supermol @ dm_supermol @ ovlp_supermol.T) + (ovlp_supermol @ dm_supermol @ fmat_supermol.T))
+                if atomsembed.fock_embedding_matrix.n_spins > 1:
+                    projector = - 1.0 * ((fmat_supermol @ dm_supermol @ ovlp_supermol.T) + (ovlp_supermol @ dm_supermol @ fmat_supermol.T))
+                else:
+                    projector = - 0.5 * ((fmat_supermol @ dm_supermol @ ovlp_supermol.T) + (ovlp_supermol @ dm_supermol @ fmat_supermol.T))
 
-                projector = atomsembed.full_mat_to_truncated(projector)
+                if not(atomsembed.abs_truncate):
+                    projector = atomsembed.full_mat_to_truncated(projector)
+
                 asi.huzinaga_eq[(PiS, PiK)] = atomsembed.fock_embedding_matrix_trunc[PiS, PiK] + projector
 
             else:
@@ -415,7 +416,7 @@ def ham_saving_and_huzinaga_callback(aux, iK, iS, descr, data, matrix_descr_ptr)
                 ovlp = atomsembed.huzinaga_ovlp_in[PiS, PiK]
                 dm = atomsembed.huzinaga_dm_in[PiS, PiK]
 
-                if atomsembed.fock_embedding_matrix.n_spin > 1:
+                if atomsembed.fock_embedding_matrix.n_spins > 1:
                     asi.huzinaga_eq[(PiS, PiK)] = vemb - 1.0 * (((data+vemb) @ dm @ ovlp.T) + (ovlp @ dm @ (data+vemb).T))
                 else:
                     asi.huzinaga_eq[(PiS, PiK)] = vemb - 0.5 * (((data+vemb) @ dm @ ovlp.T) + (ovlp @ dm @ (data+vemb).T))
@@ -469,7 +470,7 @@ def matrix_loading_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
                 else:
                     m = None
             else:
-                m = asi.huzinaga_eq([PiS, PiK])
+                m = asi.huzinaga_eq[(PiS, PiK)]
         else:
             if ((ctxt_tag is None) and (descr_tag is None)):
                 m = np.asfortranarray(storage_dict[PiS, PiK]) if asi.scalapack.is_root(descr) else None

@@ -25,12 +25,12 @@ class DIIS():
         
         if len(self.update_matrix_hist) == self.hist_len:
             for idx in range(self.hist_len - 1):
-                self.update_matrix_hist[idx] = self.update_matrix_hist[idx+1]
+                self.update_matrix_hist[idx] = self.update_matrix_hist[idx+1].copy()
             self.update_matrix_hist.pop(self.hist_len - 1)
 
         if len(self.update_matrix_err_hist) == self.hist_len:
             for idx in range(self.hist_len - 1):
-                self.update_matrix_err_hist[idx] = self.update_matrix_err_hist[idx+1]
+                self.update_matrix_err_hist[idx] = self.update_matrix_err_hist[idx+1].copy()
             self.update_matrix_err_hist.pop(self.hist_len - 1)
 
         curr_len = len(self.update_matrix_hist)
@@ -53,15 +53,17 @@ class DIIS():
             self.solve_mat = np.zeros((solve_mat_size,solve_mat_size))
 
         if len(self.update_matrix_err_hist) == self.hist_len:
-
             if np.shape(self.solve_mat)[0] != solve_mat_size:
+                print(f"NO ROLLING")
                 temp_solv_mat = np.zeros((solve_mat_size,solve_mat_size))
                 old_smat_size = np.shape(self.solve_mat)[0]
                 temp_solv_mat[0:old_smat_size, 0:old_smat_size] = self.solve_mat
                 self.solve_mat = temp_solv_mat
             else:
+                print(f"ROLLING NOW")
                 self.solve_mat = np.roll(self.solve_mat, shift=-1, axis=(0,1))
         else:
+            print(f"POPULATING AS NORMAL")
             temp_solv_mat = np.zeros((solve_mat_size,solve_mat_size))
             temp_solv_mat[0:solve_mat_size-2, 0:solve_mat_size-2] = self.solve_mat[0:solve_mat_size-2, 0:solve_mat_size-2]
             self.solve_mat = temp_solv_mat
@@ -70,7 +72,7 @@ class DIIS():
         for idx1 in range(solve_mat_size - 1):
             self.solve_mat[idx1, solve_mat_size-2] = op.trace(self.update_matrix_err_hist[idx1].T @ self.update_matrix_err_hist[solve_mat_size-2])
             self.solve_mat[solve_mat_size-2, idx1] = self.solve_mat[idx1, solve_mat_size-2]
-        root_print(f"Tome for Coeff Calc Matmul: {time.time()-time_s}")
+        root_print(f"Time for Coeff Calc Matmul: {time.time()-time_s}")
         # Assign
         self.solve_mat[-1,:] = -1.0
         self.solve_mat[:,-1] = -1.0
@@ -96,7 +98,7 @@ class DIIS():
             coeffs = coeffs.x
         except:
             raise Exception("DIIS linalg solve failed.")
-        root_print(f"Tome for Coeff Leat squares (if this is the slow step, I am going to flip out): {time.time()-time_s}")
+        root_print(f"Time for Coeff Least squares (if this is the slow step, I am going to flip out): {time.time()-time_s}")
         return coeffs
 
     def diis_step(self, update_matrix, coeff_mat=None):
@@ -119,7 +121,7 @@ class DIIS():
         if (self.iter_mixing_start > self.niter_tot):
             output = self.prev_opt_in + (curr_mixing_step * residual)
             self.prev_opt_in = output.copy()
-            return output
+            return output, None
         else:
             time_s = time.time()
             self.add_history(update_matrix, residual)
@@ -130,7 +132,7 @@ class DIIS():
             coeffs = self.get_coeff_matrix()
         else:
             coeffs = coeff_mat
-        root_print(f"Tome for Coeff Calc: {time.time()-time_s}")
+        root_print(f"Time for Coeff Calc: {time.time()-time_s}")
 
         if self.debug: root_print(f"COEFFS: {coeffs}")
 
@@ -153,5 +155,5 @@ class DIIS():
 
         self.prev_opt_in = output.copy()
 
-        return output
+        return output, coeffs
 

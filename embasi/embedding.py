@@ -124,8 +124,8 @@ class EmbeddingBase(ABC):
 
         """
 
-        # @TODONPSCAL: REPLACE DIRECTIVE
-        basis_charge = op.diag(densmat @ overlap)
+        basis_charge = (densmat @ overlap).diag()
+
         atomic_charge = np.zeros(len(atomsembed.atoms))
 
         for idx, charge in enumerate(basis_charge):
@@ -397,7 +397,7 @@ class ProjectionEmbedding(EmbeddingBase):
                  truncate_basis_thresh=None, truncate_basis_atoms=None,
                  localisation='SPADE', projection="level-shift",
                  mu_val=1.e+06, parallel=False, gc=True, run_dir="./EmbASI_calc",
-                 basis_illcond_thresh=1e-5, scalapack_block_size=16, fat_mixing=0.4):
+                 basis_illcond_thresh=1e-5, scalapack_block_size=16, fat_mixing=0.2):
 
         from copy import copy, deepcopy
         from mpi4py import MPI
@@ -557,7 +557,7 @@ class ProjectionEmbedding(EmbeddingBase):
 
     def calculate_huzinaga_projector(self, hamiltonian, overlap, densmat):
 
-        if hamiltonian.n_spin > 1:
+        if hamiltonian.n_spins > 1:
             self.P_b = -1.0 * ( (hamiltonian @ densmat @ overlap.T) + (overlap @ densmat @ hamiltonian.T) )
         else:
             self.P_b = -0.5 * ( (hamiltonian @ densmat @ overlap.T) + (overlap @ densmat @ hamiltonian.T) )
@@ -583,13 +583,15 @@ class ProjectionEmbedding(EmbeddingBase):
             evals, evecs, occ_mat = hamiltonian_eigensolv_parallel(hamiltonian, \
                                                                    overlap, \
                                                                    nelecs, \
+                                                                   nspins=atomsembed.n_spins, \
+                                                                   nkpts=atomsembed.n_kpoints, \
                                                                    basis_illcond_thresh=self.basis_illcond_thresh)
         else:
             evals, evecs, occ_mat = hamiltonian_eigensolv(hamiltonian, \
                                                           overlap, \
                                                           nelecs, \
                                                           nspins=atomsembed.n_spins,
-                                                          nkpts=atomsembed.n_kpts,
+                                                          nkpts=atomsembed.n_kpoints,
                                                           basis_illcond_thresh=self.basis_illcond_thresh)
 
         mask_val = []
@@ -606,7 +608,7 @@ class ProjectionEmbedding(EmbeddingBase):
         rot_evecs_occ_a = evecs.copy()
 
         for ispin in range(atomsembed.n_spins):
-            for ikpt in range(atomsembed.n_kpts):
+            for ikpt in range(atomsembed.n_kpoints):
                 max_occ_state = np.count_nonzero(occ_mat[ispin,ikpt])
                 evecs_occ = evecs[ispin, ikpt, :, :max_occ_state]
                 evecs_occ_a = evecs_occ[mask_val, :]
@@ -623,23 +625,23 @@ class ProjectionEmbedding(EmbeddingBase):
                 root_print(f'MAX OCC STATE {max_occ_state} for Spin Channel {ispin}')
                 root_print(f'SPADE STATE FOR: Spin Channel {ispin}, K-point {ikpt}')
                 root_print(f'Maximum SPADE state for subsystem A: {max_sval_change_idx}')
-                
+
                 rot_evecs_occ_a[ispin, ikpt] = evecs_occ @ v[:max_sval_change_idx, :].T
-                evecs_occ_ab[ispin, ikpt] = copy.deepcopy(evecs_occ)
+                evecs_occ_ab[ispin, ikpt] = evecs_occ.copy()
 
         # @TODOSPIN: Need to redefine occupancies - this obviously won't work for k-points
         if atomsembed.n_spins == 1:
-            density_matrix_supersystem = 2.0 * (evecs_occ_ab.copy() @ evecs_occ_ab.copy().T)
-            density_matrix_subsys_a = 2.0 * (rot_evecs_occ_a.copy() @ rot_evecs_occ_a.copy().T)
+            density_matrix_supersystem = 2.0 * (evecs_occ_ab @ evecs_occ_ab.copy().T)
+            density_matrix_subsys_a = 2.0 * (rot_evecs_occ_a @ rot_evecs_occ_a.copy().T)
         else:
-            density_matrix_supersystem = (evecs_occ_ab.copy() @ evecs_occ_ab.copy().T)
-            density_matrix_subsys_a = (rot_evecs_occ_a.copy() @ rot_evecs_occ_a.copy().T)
+            density_matrix_supersystem = (evecs_occ_ab @ evecs_occ_ab.copy().T)
+            density_matrix_subsys_a = (rot_evecs_occ_a @ rot_evecs_occ_a.copy().T)
 
         # I don't think this is needed anymore - density matrices should be synched before this
         # point.
         if not(self.parallel):
             for ispin in range(atomsembed.n_spins):
-                for ikpt in range(atomsembed.n_kpts):
+                for ikpt in range(atomsembed.n_kpoints):
                     density_matrix_supersystem[ispin,ikpt] = mpi_bcast_matrix(density_matrix_supersystem[ispin,ikpt])
                     density_matrix_subsys_a[ispin,ikpt] = mpi_bcast_matrix(density_matrix_subsys_a[ispin,ikpt])
 
@@ -660,27 +662,25 @@ class ProjectionEmbedding(EmbeddingBase):
         mixing_step_size = self.fat_mixing
         hist_len = 8
 
-        # TODO: @SPIN AND K-POINT LOOP
         def renorm_densmat(densmat, overlap, target_pop):
-
             pop = (overlap @ densmat).trace()
             renorm = target_pop / pop
             root_print(f"pop: {pop}")
             root_print(f"nelec: {target_pop}")
             root_print(f"renorm: {renorm}")
             root_print(f"renorm charge: {renorm * pop}")
-            return renorm * densmat
+            # I have no idea why, but np.float64 causes the SpinKPointArray to
+            # be cast to a list of nd.arrays.
+            new_densmat = float(renorm) * densmat
+            return new_densmat
 
-        # TODO: @SPIN AND K-POINT LOOP
         def expand_and_truncate_mat(atomemb, mat):
             mat = atomemb.full_mat_to_truncated(mat)
             return  atomemb.truncated_mat_to_full(mat)
 
-        # TODO: @SPIN AND K-POINT LOOP
         densmat_A_LL = expand_and_truncate_mat(self.A_LL, densmat_A_LL)
         densmat_B_LL = expand_and_truncate_mat(self.B_LL, densmat_B_LL)
 
-        # TODO: @SPIN AND K-POINT LOOP
         densmat_A_LL = renorm_densmat(densmat_A_LL, overlap, self.A_pop)
         densmat_B_LL = renorm_densmat(densmat_B_LL, overlap, self.B_pop)
 
@@ -693,9 +693,13 @@ class ProjectionEmbedding(EmbeddingBase):
 
         # TODO: @SPIN AND K-POINT LOOP
         if mixing_type == "densmat":
-            diis_dens_a = DIIS(densmat_A_LL, hist_len, mixing_step_size, debug=False)
-            diis_dens_b = DIIS(densmat_B_LL, hist_len, mixing_step_size, debug=False)
-            diis_dens_ab = DIIS(update_densmat, hist_len, mixing_step_size, debug=False)
+            tot_densmat_ab = update_densmat.spin_kpt_sum()
+            diis_dens_ab = DIIS(tot_densmat_ab, hist_len, mixing_step_size, debug=True)
+
+            diis_spin_k = {}
+            for ispin in range(update_densmat.n_spins):
+                for ikpt in range(update_densmat.n_kpoints):
+                    diis_spin_k[ispin,ikpt] = DIIS(update_densmat[ispin,ikpt], hist_len, mixing_step_size, debug=False)
 
         self.output_data_dict["FATCONVINFO"] = {}
         self.output_data_dict["FATCONVINFO"]["HIST_LEN"] = hist_len
@@ -711,6 +715,7 @@ class ProjectionEmbedding(EmbeddingBase):
 
         for i in range(ncycles):
 
+            root_print(f"ITERATION {i}: STARTED!")
             self.output_data_dict["FATCONVINFO"]["FAT_NCYCLES"] = i
 
             # Calculate AB low-level reference energy
@@ -734,7 +739,7 @@ class ProjectionEmbedding(EmbeddingBase):
                 if i==0:
                     self.A_LL.run_emb_scf(dm_in=densmat_A_LL, emb_pot=self.vemb,
                                           sc_huz_dm=densmat_B_LL, sc_huz_ovlp=overlap,
-                                          sc_huz_ham=self.AB_LL.hamiltonian_total)
+                                          sc_huz_ham=self.AB_LL.hamiltonian_total,)
                 else:
                     self.A_LL.run_embasi_diag_emb_pot(dm_in=densmat_A_LL, emb_pot=self.AB_LL.hamiltonian_total,
                                                       sc_huz_dm=densmat_B_LL, sc_huz_ovlp=overlap,
@@ -744,7 +749,7 @@ class ProjectionEmbedding(EmbeddingBase):
             end_time = time.time()
             self.output_data_dict["FATCONVINFO"]["SUBSYS_A_DIAG_TIME"] += end_time - start_time
 
-            ### B_LL ####################################################            
+            ### B_LL ####################################################
             # Calculate AB low-level reference energy
             #self.AB_LL.run_noscf(dm_in=update_densmat)
             #new_energy = self.AB_LL.ev_corr_total_energy
@@ -786,18 +791,29 @@ class ProjectionEmbedding(EmbeddingBase):
             if mixing_type=="densmat":
                 # TODO: @SPIN AND K-POINT LOOP
                 if i==0:
-                    densmat_A_LL = renorm_densmat(self.A_LL.density_matrices_out[0], overlap, self.A_pop)
-                    densmat_B_LL = renorm_densmat(self.B_LL.density_matrices_out[0], overlap, self.B_pop)
+                    densmat_A_LL = self.A_LL.density_matrices_out.copy()
+                    densmat_B_LL = self.B_LL.density_matrices_out.copy()
                     update_densmat = densmat_A_LL + densmat_B_LL
                 else:
-                    densmat_A_LL = renorm_densmat(self.A_LL.density_matrices_out[0], overlap, self.A_pop)
-                    densmat_B_LL = renorm_densmat(self.B_LL.density_matrices_out[0], overlap, self.B_pop)
+                    densmat_A_LL = self.A_LL.density_matrices_out.copy()
+                    densmat_B_LL = self.B_LL.density_matrices_out.copy()
 
                     time_s = time.time()
                     update_densmat = densmat_A_LL + densmat_B_LL
-                    update_densmat = diis_dens_ab.diis_step(update_densmat)
-                    root_print(f"TIME FOR DIIS {time.time()-time_s}")
-                    self.output_data_dict["FATCONVINFO"]["DIIS_TIME"] += time.time()-time_s
+                    tot_densmat_ab = update_densmat.spin_kpt_sum()
+                    tot_densmat_ab, coeffs = diis_dens_ab.diis_step(tot_densmat_ab)
+
+                    for ispin in range(update_densmat.n_spins):
+                        for ikpts in range(update_densmat.n_kpoints):
+                            update_densmat[ispin,ikpt], _ = \
+                                diis_spin_k[ispin,ikpt].diis_step(update_densmat[ispin,ikpt], \
+                                                                  coeff_mat=coeffs)
+
+            root_print(f"ITERATION {i}: DONE!\n")
+
+                            
+        root_print(f"TIME FOR DIIS {time.time()-time_s}")
+        self.output_data_dict["FATCONVINFO"]["DIIS_TIME"] += time.time()-time_s
 
         self.AB_LL.close_calculator()
         # Finally, run a post-processing step to obtain the high-level
@@ -1084,8 +1100,8 @@ class ProjectionEmbedding(EmbeddingBase):
         if self.total_energy_corr == "1storder" or self.total_energy_corr == "test_1storder":
             # TODO: @SPIN AND K-POINT LOOP - and needs syncing??
             if self.truncate:
-                self.order_1_embedding_corr = op.trace(self.A_HL.full_mat_to_truncated(densmat_A_HL - densmat_A_LL) @ \
-                                                       self.A_HL.full_mat_to_truncated(self.vemb)) * 27.211384500
+                self.order_1_embedding_corr = (self.A_HL.full_mat_to_truncated(densmat_A_HL - densmat_A_LL) @ \
+                                               self.A_HL.full_mat_to_truncated(self.vemb)).trace() * 27.211384500
             else:
                 self.order_1_embedding_corr = ((densmat_A_HL - densmat_A_LL) @ self.vemb).trace() * 27.211384500
 

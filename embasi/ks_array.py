@@ -48,7 +48,7 @@ class SpinKpointArray:
         if n_kpoints < 1:
             raise ValueError(f"n_kpoints must be >= 1, got {n_kpoints}")
         
-        self.n_spin = n_spin
+        self.n_spins = n_spin
         self.n_kpoints = n_kpoints
         self.base_shape = base_array_dict[(0,0)].shape
 
@@ -60,31 +60,7 @@ class SpinKpointArray:
 
         # We don't actually do any transpose operations here - the transpose tag is
         # passed to the relevant scalapack function
-        self.transpose = [False]
-    
-    #@classmethod
-    #def zeros(
-    #    cls,
-    #    base_shape: Tuple[int, int],
-    #    n_spin: int = 2,
-    #    n_kpoints: int = 1,
-    #    dtype: np.dtype = np.float64
-    #) -> 'SpinKpointArray':
-    #    """Create a SpinKpointArray initialized with zeros."""
-    #    base_array = np.zeros(base_shape, dtype=dtype)
-    #    return cls(base_array, n_spin, n_kpoints, dtype)
-    
-    #@classmethod
-    #def ones(
-    #    cls,
-    #    base_shape: Tuple[int, int],
-    #    n_spin: int = 2,
-    #    n_kpoints: int = 1,
-    #    dtype: np.dtype = np.float64
-    #) -> 'SpinKpointArray':
-    #    """Create a SpinKpointArray initialized with ones."""
-    #    base_array = np.ones(base_shape, dtype=dtype)
-    #    return cls(base_array, n_spin, n_kpoints, dtype)
+        self = self.N
     
     def __getitem__(self, key):
         """
@@ -152,7 +128,7 @@ class SpinKpointArray:
             else:
                 spin_slice_min = key[0].start
             if key[0].stop is None:
-                spin_slice_max = self.n_spin
+                spin_slice_max = self.n_spins
             else:
                 spin_slice_max = key[0].stop
 
@@ -226,7 +202,7 @@ class SpinKpointArray:
             else:
                 spin_slice_min = key[0].start
             if key[0].stop is None:
-                spin_slice_max = self.n_spin
+                spin_slice_max = self.n_spins
             else:
                 spin_slice_max = key[0].stop
 
@@ -258,7 +234,7 @@ class SpinKpointArray:
 
     def __repr__(self) -> str:
         """String representation of the SpinKpointArray."""
-        return (f"SpinKpointArray(n_spin={self.n_spin}, "
+        return (f"SpinKpointArray(n_spin={self.n_spins}, "
                 f"n_kpoints={self.n_kpoints}, "
                 f"base_shape={self.base_shape},)")
     
@@ -280,12 +256,20 @@ class SpinKpointArray:
         """Create a deep copy of the SpinKpointArray."""
         import copy
         new_instance = SpinKpointArray.__new__(SpinKpointArray)
-        new_instance.n_spin = self.n_spin
+        new_instance.n_spins = self.n_spins
         new_instance.n_kpoints = self.n_kpoints
         new_instance.base_shape = self.base_shape
         new_instance.ndim = self.ndim
-        new_instance.transpose = [False]
-        new_instance.data = copy.deepcopy(self.data)
+        new_instance.transpose = self.transpose.copy()
+        new_instance = new_instance.N
+        try:
+            new_instance.data = copy.deepcopy(self.data)
+        except:
+            new_instance.data = {}
+            for isp in range(self.n_spins):
+                for ikpt in range(self.n_kpoints):
+                    new_instance.data[isp,ikpt] = self.data[isp,ikpt].copy()
+
         return new_instance
     
     # Add NumPy-like array protocol methods for better integration
@@ -295,40 +279,40 @@ class SpinKpointArray:
 
     def __len__(self):
         """Return the length of the array by the number of spins and number of k-points."""
-        return self.n_spin * self.n_kpoints
+        return self.n_spins * self.n_kpoints
 
     def __iter__(self):
         """Iterate over spin dimension."""
-        for spin in range(self.n_spin):
+        for spin in range(self.n_spins):
             for kpt in range(self.n_kpoints):
                 yield self[spin, kpt]
 
     def __add__(self, val):
         new_data = self.copy()
-        for spin in range(self.n_spin):
+        for spin in range(self.n_spins):
             for kpt in range(self.n_kpoints):
                 new_data[spin, kpt] = self[spin, kpt] + val[spin, kpt]
         return new_data
 
     def __sub__(self, val):
         new_data = self.copy()
-        for spin in range(self.n_spin):
+        for spin in range(self.n_spins):
             for kpt in range(self.n_kpoints):
                 new_data[spin, kpt] = self[spin, kpt] - val[spin, kpt]
         return new_data
 
     def __matmul__(self, val):
         new_data = self.copy()
-        for spin in range(self.n_spin):
+        for spin in range(self.n_spins):
             for kpt in range(self.n_kpoints):
                 if (self.transpose[0]) and (not val.transpose[0]):
-                    new_data[spin, kpt] = self[spin, kpt].T @ val[spin, kpt]
+                    new_data[spin, kpt] = self[spin, kpt].T @ val[spin, kpt].N
                 if (not self.transpose[0]) and (val.transpose[0]):
-                    new_data[spin, kpt] = self[spin, kpt] @ val[spin, kpt].T
+                    new_data[spin, kpt] = self[spin, kpt].N @ val[spin, kpt].T
                 if (self.transpose[0]) and (val.transpose[0]):
                     new_data[spin, kpt] = self[spin, kpt].T @ val[spin, kpt].T
                 if (not self.transpose[0]) and (not val.transpose[0]):
-                    new_data[spin, kpt] = self[spin, kpt] @ val[spin, kpt]
+                    new_data[spin, kpt] = self[spin, kpt].N @ val[spin, kpt].N
 
         new_data = new_data.N
         self = self.N
@@ -338,22 +322,22 @@ class SpinKpointArray:
 
     def __mul__(self, val):
         new_data = self.copy()
-        for spin in range(self.n_spin):
+        for spin in range(self.n_spins):
             for kpt in range(self.n_kpoints):
                 new_data[spin, kpt] = self[spin, kpt] * val
         return new_data
 
     def __rmul__(self, val):
         new_data = self.copy()
-        for spin in range(self.n_spin):
+        for spin in range(self.n_spins):
             for kpt in range(self.n_kpoints):
-                new_data[spin, kpt] = val * self[spin, kpt]
+                new_data[spin, kpt] = self[spin, kpt] * val
         return new_data
 
 
     def __div__(self, val):
         new_data = self.copy()
-        for spin in range(self.n_spin):
+        for spin in range(self.n_spins):
             for kpt in range(self.n_kpoints):
                 new_data[spin, kpt] = self[spin, kpt] / val
         return new_data
@@ -371,6 +355,25 @@ class SpinKpointArray:
     def trace(self):
         return np.sum(np.array(list(map(op.trace, self))))
 
+    def diag(self):
+        diags = np.array(list(map(op.diag, self)))
+
+        diag_sum = diags[0]
+        if len(diags) > 1:
+            for i in diags[1:]:
+                diag_sum += i
+
+        return diag_sum
+
+    def spin_kpt_sum(self):
+        for array in self:
+            try:
+                sum_array += array
+            except NameError:
+                sum_array = array.copy()
+
+        return sum_array
+                
 
 def slice_all_check(slicefuncs):
     for slicefunc in slicefuncs:
