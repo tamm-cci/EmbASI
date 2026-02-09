@@ -54,16 +54,13 @@ class DIIS():
 
         if len(self.update_matrix_err_hist) == self.hist_len:
             if np.shape(self.solve_mat)[0] != solve_mat_size:
-                print(f"NO ROLLING")
                 temp_solv_mat = np.zeros((solve_mat_size,solve_mat_size))
                 old_smat_size = np.shape(self.solve_mat)[0]
                 temp_solv_mat[0:old_smat_size, 0:old_smat_size] = self.solve_mat
                 self.solve_mat = temp_solv_mat
             else:
-                print(f"ROLLING NOW")
                 self.solve_mat = np.roll(self.solve_mat, shift=-1, axis=(0,1))
         else:
-            print(f"POPULATING AS NORMAL")
             temp_solv_mat = np.zeros((solve_mat_size,solve_mat_size))
             temp_solv_mat[0:solve_mat_size-2, 0:solve_mat_size-2] = self.solve_mat[0:solve_mat_size-2, 0:solve_mat_size-2]
             self.solve_mat = temp_solv_mat
@@ -114,6 +111,7 @@ class DIIS():
             curr_mixing_step = self.mixing_step
 
         residual = update_matrix - self.prev_opt_in
+        if self.debug: root_print(f"RESIDUAL AT {self.niter_tot} : {np.sum(residual)}")
 
         # If only two matrices present, just add the 
         # residual between the two matrices scaled 

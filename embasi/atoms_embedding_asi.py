@@ -593,6 +593,8 @@ class AtomsEmbed():
         from copy import copy, deepcopy
         import time
         from embasi.roothan_hall_eigensolver_scalapack import hamiltonian_eigensolv_parallel
+        from embasi.roothan_hall_eigensolver import hamiltonian_eigensolv
+                
 
         def calculate_abs_trunc_huzinaga_projector(atomsembed):
 
@@ -654,7 +656,7 @@ class AtomsEmbed():
         projector = calculate_abs_trunc_huzinaga_projector(self)
 
         emb_ham_trunc = self.full_mat_to_truncated(sc_huz_ham) + projector
-        
+
         ovlp_trunc = self.full_mat_to_truncated(sc_huz_ovlp)
         nelecs = self.input_fragment_nelectrons
         if self.parallel:
@@ -666,19 +668,24 @@ class AtomsEmbed():
                                                                    return_orthog=False, \
                                                                    basis_illcond_thresh=1e-5)
         else:
-            raise Exception("ONLY PARALLEL WORKS NOW!")
+            evals, evecs, occ_mat = hamiltonian_eigensolv(emb_ham_trunc, \
+                                                          ovlp_trunc, \
+                                                          nelecs, \
+                                                          nspins=self.n_spins, \
+                                                          nkpts=self.n_kpoints, \
+                                                          basis_illcond_thresh=1e-5)
 
         dm_out = {}
-
         for ispin in range(self.n_spins):
             for ikpt in range(self.n_kpoints):
                 max_occ_state = np.count_nonzero(occ_mat[ispin,ikpt])
+                #root_print(f"MAX OCC STATE {max_occ_state}")
                 evecs_occ = evecs[ispin, ikpt, :, :max_occ_state]
 
                 if self.n_spins > 1:
-                    dm_out[(ispin, ikpt)] = evecs_occ @ evecs_occ.copy().T
+                    dm_out[(ispin, ikpt)] = evecs_occ.copy() @ evecs_occ.copy().T
                 else:
-                    dm_out[(ispin, ikpt)] = 2.0 * (evecs_occ @ evecs_occ.copy().T)
+                    dm_out[(ispin, ikpt)] = 2.0 * (evecs_occ.copy() @ evecs_occ.copy().T)
 
         self._dm = self.truncated_mat_to_full(SpinKpointArray(dm_out, self.n_spins, self.n_kpoints))
 

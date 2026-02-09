@@ -306,13 +306,13 @@ class SpinKpointArray:
         for spin in range(self.n_spins):
             for kpt in range(self.n_kpoints):
                 if (self.transpose[0]) and (not val.transpose[0]):
-                    new_data[spin, kpt] = self[spin, kpt].T @ val[spin, kpt].N
+                    new_data[spin, kpt] = self[spin, kpt].T @ val[spin, kpt]
                 if (not self.transpose[0]) and (val.transpose[0]):
-                    new_data[spin, kpt] = self[spin, kpt].N @ val[spin, kpt].T
+                    new_data[spin, kpt] = self[spin, kpt] @ val[spin, kpt].T
                 if (self.transpose[0]) and (val.transpose[0]):
                     new_data[spin, kpt] = self[spin, kpt].T @ val[spin, kpt].T
                 if (not self.transpose[0]) and (not val.transpose[0]):
-                    new_data[spin, kpt] = self[spin, kpt].N @ val[spin, kpt].N
+                    new_data[spin, kpt] = self[spin, kpt] @ val[spin, kpt]
 
         new_data = new_data.N
         self = self.N

@@ -692,14 +692,6 @@ class ProjectionEmbedding(EmbeddingBase):
         self.B_LL.run_noscf(dm_in=densmat_B_LL)
 
         # TODO: @SPIN AND K-POINT LOOP
-        if mixing_type == "densmat":
-            tot_densmat_ab = update_densmat.spin_kpt_sum()
-            diis_dens_ab = DIIS(tot_densmat_ab, hist_len, mixing_step_size, debug=True)
-
-            diis_spin_k = {}
-            for ispin in range(update_densmat.n_spins):
-                for ikpt in range(update_densmat.n_kpoints):
-                    diis_spin_k[ispin,ikpt] = DIIS(update_densmat[ispin,ikpt], hist_len, mixing_step_size, debug=False)
 
         self.output_data_dict["FATCONVINFO"] = {}
         self.output_data_dict["FATCONVINFO"]["HIST_LEN"] = hist_len
@@ -793,10 +785,27 @@ class ProjectionEmbedding(EmbeddingBase):
                 if i==0:
                     densmat_A_LL = self.A_LL.density_matrices_out.copy()
                     densmat_B_LL = self.B_LL.density_matrices_out.copy()
+
+                    densmat_A_LL = renorm_densmat(densmat_A_LL, overlap, self.A_pop)
+                    densmat_B_LL = renorm_densmat(densmat_B_LL, overlap, self.B_pop)
+                    
                     update_densmat = densmat_A_LL + densmat_B_LL
+
+                    if mixing_type == "densmat":
+                        tot_densmat_ab = update_densmat.spin_kpt_sum()
+                        diis_dens_ab = DIIS(tot_densmat_ab, hist_len, mixing_step_size, debug=True)
+
+                        diis_spin_k = {}
+                        for ispin in range(update_densmat.n_spins):
+                            for ikpt in range(update_densmat.n_kpoints):
+                                diis_spin_k[(ispin,ikpt)] = DIIS(update_densmat[ispin,ikpt], hist_len, mixing_step_size, debug=True)
+
                 else:
                     densmat_A_LL = self.A_LL.density_matrices_out.copy()
                     densmat_B_LL = self.B_LL.density_matrices_out.copy()
+
+                    densmat_A_LL = renorm_densmat(densmat_A_LL, overlap, self.A_pop)
+                    densmat_B_LL = renorm_densmat(densmat_B_LL, overlap, self.B_pop)
 
                     time_s = time.time()
                     update_densmat = densmat_A_LL + densmat_B_LL
@@ -806,7 +815,7 @@ class ProjectionEmbedding(EmbeddingBase):
                     for ispin in range(update_densmat.n_spins):
                         for ikpts in range(update_densmat.n_kpoints):
                             update_densmat[ispin,ikpt], _ = \
-                                diis_spin_k[ispin,ikpt].diis_step(update_densmat[ispin,ikpt], \
+                                diis_spin_k[(ispin,ikpt)].diis_step(update_densmat[ispin,ikpt], \
                                                                   coeff_mat=coeffs)
 
             root_print(f"ITERATION {i}: DONE!\n")
