@@ -106,7 +106,7 @@ def hamiltonian_eigensolv_parallel(hamiltonian, overlap, nelec, nspins=1, nkpts=
     # compare eigenvalues
     occ_mat = {}
     if nspins > 1:
-        remaining_electrons = nelec
+        remaining_electrons = int(round(nelec))
         alpha_nelecs = 0
         beta_nelecs = 0
         occ_mat[(0,0)] = np.zeros(np.size(evals[(0,0)]))

@@ -8,10 +8,45 @@ from scalapack4py.npscal import NPScal
 from scalapack4py.npscal.blacs_ctxt_management import DESCR_Register, CTXT_Register
 from scalapack4py.npscal.blacs_ctxt_management import BLACSContextManager, BLACSDESCRManager
 from scalapack4py.array_types import nullable_ndpointer, ctypes2ndarray
+import traceback, sys
 import tracemalloc
 import numpy as np
-import traceback, sys
+import time
 
+def timing_val(func):
+    def wrapper(*args, **kwargs):
+        '''source: http://www.daniweb.com/code/snippet368.html'''
+        t1 = time.time()
+        try:
+            func(*args, **kwargs)
+        except Exception as eee:
+            print(f"""Something happened in {func.__name__} ASI 
+                  {label}: {eee}\nAborting...""")
+            traceback.print_tb(eee.__traceback__, limit=5, file=sys.stdout)
+            MPI.COMM_WORLD.Abort(1)
+        t2 = time.time()
+        total_time = t2 - t1
+        #root_print(f'Function {func.__name__} Took {total_time:.4f} seconds')
+    return wrapper
+
+def timing_val_ret(func):
+    def wrapper(*args, **kwargs):
+        '''source: http://www.daniweb.com/code/snippet368.html'''
+        t1 = time.time()
+        try:
+            result = func(*args, **kwargs)
+        except Exception as eee:
+            print(f"""Something happened in {func.__name__} ASI 
+                  {label}: {eee}\nAborting...""")
+            traceback.print_tb(eee.__traceback__, limit=5, file=sys.stdout)
+            MPI.COMM_WORLD.Abort(1)
+        t2 = time.time()
+        total_time = t2 - t1
+        #root_print(f'Function {func.__name__} Took {total_time:.4f} seconds')
+        return result
+    return wrapper
+
+@timing_val
 def dm_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
     """Default callback for saving density matrices
 
@@ -40,7 +75,6 @@ def dm_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
     """
     try:
         asi, storage_dict, cnt_dict, ctxt_tag, descr_tag, label = cast(aux, py_object).value
-
         # Python-indexed spin and kpts:
         PiS = iS - 1
         PiK = iK - 1        
@@ -97,6 +131,7 @@ def dm_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
         traceback.print_tb(eee.__traceback__, limit=5, file=sys.stdout)
         MPI.COMM_WORLD.Abort(1)
 
+@timing_val
 def ovlp_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
     """Default callback for saving density matrices
 
@@ -175,6 +210,7 @@ def ovlp_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
         traceback.print_tb(eee.__traceback__, limit=5, file=sys.stdout)
         MPI.COMM_WORLD.Abort(1)
 
+@timing_val
 def ham_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
     """Default callback for saving hamiltonian matrices
 
@@ -268,6 +304,7 @@ def ham_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
         traceback.print_tb(eee.__traceback__, limit=5, file=sys.stdout)
         MPI.COMM_WORLD.Abort(1)
 
+@timing_val
 def ham_saving_and_huzinaga_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
     """Default callback for saving hamiltonian matrices
 
@@ -427,6 +464,7 @@ def ham_saving_and_huzinaga_callback(aux, iK, iS, descr, data, matrix_descr_ptr)
         traceback.print_tb(eee.__traceback__, limit=5, file=sys.stdout)
         MPI.COMM_WORLD.Abort(1)
 
+@timing_val_ret
 def matrix_loading_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
     """Default callback for loading matrices
 
@@ -452,14 +490,13 @@ def matrix_loading_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
         Numerical value indexing matrix shape (See: ASI docs)
 
     """
-
     try:
         asi, storage_dict, flag_huz, ctxt_tag, descr_tag, label = cast(aux, py_object).value
 
         # Python-indexed spin and kpts:
         PiS = iS - 1
         PiK = iK - 1
-        
+
         # This is unfortunately very opaque - essentially, the huzinaga equation is formulated
         # in the hamiltonian saving callback as we need the fock matrix constructed during the
         # SCF cycle, which cannot be set outside of the invoked QM code.
@@ -492,6 +529,7 @@ def matrix_loading_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
                 dest_descr = asi.scalapack.wrap_blacs_desc(descr)
 
                 data = ctypes2ndarray(data, shape=(dest_descr.locrow, dest_descr.loccol)).T
+
                 asi.scalapack.pdgemr2d(asi.n_basis, asi.n_basis,
                                        m.loc_array, 1, 1, src_descr,
                                        data, 1, 1, dest_descr,

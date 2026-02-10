@@ -798,14 +798,11 @@ class ProjectionEmbedding(EmbeddingBase):
                         diis_spin_k = {}
                         for ispin in range(update_densmat.n_spins):
                             for ikpt in range(update_densmat.n_kpoints):
-                                diis_spin_k[(ispin,ikpt)] = DIIS(update_densmat[ispin,ikpt], hist_len, mixing_step_size, debug=True)
+                                diis_spin_k[(ispin,ikpt)] = DIIS(update_densmat[ispin,ikpt], hist_len, mixing_step_size, debug=False)
 
                 else:
                     densmat_A_LL = self.A_LL.density_matrices_out.copy()
                     densmat_B_LL = self.B_LL.density_matrices_out.copy()
-
-                    densmat_A_LL = renorm_densmat(densmat_A_LL, overlap, self.A_pop)
-                    densmat_B_LL = renorm_densmat(densmat_B_LL, overlap, self.B_pop)
 
                     time_s = time.time()
                     update_densmat = densmat_A_LL + densmat_B_LL

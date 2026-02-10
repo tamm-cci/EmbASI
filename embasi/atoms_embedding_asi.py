@@ -1055,17 +1055,6 @@ class AtomsEmbed():
     def huzinaga_dm_in(self, huzinaga_dm_in):
         self._huzinaga_dm_in = huzinaga_dm_in
 
-        if ((huzinaga_dm_in is not None) and (self.truncate)):
-            self.huzinaga_dm_in_trunc = self.full_mat_to_truncated(huzinaga_dm_in)
-
-    @property
-    def huzinaga_dm_in_trunc(self):
-        return self._huzinaga_dm_in_trunc
-
-    @huzinaga_dm_in_trunc.setter
-    def huzinaga_dm_in_trunc(self, huzinaga_dm_in):
-        self._huzinaga_dm_in_trunc = huzinaga_dm_in
-
     @property
     def huzinaga_ovlp_in(self):
         return self._huzinaga_ovlp_in
@@ -1074,17 +1063,6 @@ class AtomsEmbed():
     def huzinaga_ovlp_in(self, huzinaga_ovlp_in):
         self._huzinaga_ovlp_in = huzinaga_ovlp_in
 
-        if ((huzinaga_ovlp_in is not None) and (self.truncate)):
-            self.huzinaga_ovlp_in_trunc = self.full_mat_to_truncated(huzinaga_ovlp_in)
-
-    @property
-    def huzinaga_ovlp_in_trunc(self):
-        return self._huzinaga_ovlp_in_trunc
-
-    @huzinaga_ovlp_in_trunc.setter
-    def huzinaga_ovlp_in_trunc(self, huzinaga_ovlp_in):
-        self._huzinaga_ovlp_in_trunc = huzinaga_ovlp_in
-
     @property
     def embedding_ham_in(self):
         return self._embedding_ham_in
@@ -1092,17 +1070,6 @@ class AtomsEmbed():
     @embedding_ham_in.setter
     def embedding_ham_in(self, embedding_ham_in):
         self._embedding_ham_in = embedding_ham_in
-
-        if ((embedding_ham_in is not None) and (self.truncate)):
-            self.embedding_ham_in_trunc = self.full_mat_to_truncated(embedding_ham_in)
-
-    @property
-    def embedding_ham_in_trunc(self):
-        return self._embedding_ham_in_trunc
-
-    @embedding_ham_in_trunc.setter
-    def embedding_ham_in_trunc(self, embedding_ham_in):
-        self._embedding_ham_in_trunc = embedding_ham_in
 
     @property
     def density_matrix_in(self):

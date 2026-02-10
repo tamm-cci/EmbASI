@@ -65,11 +65,11 @@ class DIIS():
             temp_solv_mat[0:solve_mat_size-2, 0:solve_mat_size-2] = self.solve_mat[0:solve_mat_size-2, 0:solve_mat_size-2]
             self.solve_mat = temp_solv_mat
 
-        time_s = time.time()            
+        time_s = time.time()
         for idx1 in range(solve_mat_size - 1):
             self.solve_mat[idx1, solve_mat_size-2] = op.trace(self.update_matrix_err_hist[idx1].T @ self.update_matrix_err_hist[solve_mat_size-2])
             self.solve_mat[solve_mat_size-2, idx1] = self.solve_mat[idx1, solve_mat_size-2]
-        root_print(f"Time for Coeff Calc Matmul: {time.time()-time_s}")
+        if self.debug: root_print(f"Time for Coeff Calc Matmul: {time.time()-time_s}")
         # Assign
         self.solve_mat[-1,:] = -1.0
         self.solve_mat[:,-1] = -1.0
@@ -95,7 +95,6 @@ class DIIS():
             coeffs = coeffs.x
         except:
             raise Exception("DIIS linalg solve failed.")
-        root_print(f"Time for Coeff Least squares (if this is the slow step, I am going to flip out): {time.time()-time_s}")
         return coeffs
 
     def diis_step(self, update_matrix, coeff_mat=None):
@@ -111,7 +110,6 @@ class DIIS():
             curr_mixing_step = self.mixing_step
 
         residual = update_matrix - self.prev_opt_in
-        if self.debug: root_print(f"RESIDUAL AT {self.niter_tot} : {np.sum(residual)}")
 
         # If only two matrices present, just add the 
         # residual between the two matrices scaled 
@@ -123,15 +121,15 @@ class DIIS():
         else:
             time_s = time.time()
             self.add_history(update_matrix, residual)
-            root_print(f"Time for history add: {time.time()-time_s}")
+            if self.debug: root_print(f"Time for history add: {time.time()-time_s}")
 
         time_s = time.time()            
         if coeff_mat is None:
             coeffs = self.get_coeff_matrix()
         else:
             coeffs = coeff_mat
-        root_print(f"Time for Coeff Calc: {time.time()-time_s}")
 
+        if self.debug: root_print(f"Time for Coeff Calc: {time.time()-time_s}")
         if self.debug: root_print(f"COEFFS: {coeffs}")
 
         # Output extrpolated DIIS step
@@ -149,7 +147,7 @@ class DIIS():
                 output += curr_it
                 output += curr_his
                 #output += (coeffs[idx] * (self.update_matrix_hist[idx] + (curr_mixing_step * self.update_matrix_err_hist[idx])))
-        root_print(f"Time for extrapolation: {time.time()-time_s}")
+        if self.debug: root_print(f"Time for extrapolation: {time.time()-time_s}")
 
         self.prev_opt_in = output.copy()
 
