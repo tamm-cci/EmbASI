@@ -357,7 +357,7 @@ class StandardDFT(EmbeddingBase):
 
 
 class ProjectionEmbedding(EmbeddingBase):
-    """Implementation of Projeciton-Based Embedding with ASI communication
+    """Implementation of Projection-Based Embedding with ASI communication
 
     A class controlling the interaction between two subsystems calculated at
     two levels of theory (low-level and high-level) with the
@@ -677,7 +677,11 @@ class ProjectionEmbedding(EmbeddingBase):
         return density_matrix_subsys_a, density_matrix_subsys_b
 
     def freeze_and_thaw(self, densmat_A_LL, densmat_B_LL, overlap, ncycles=5, mixing_type="emb_pot"):
+        """ Freeze-and-thaw absolute basis truncation algorithm of Graham et al.[1]
 
+        [1] Graham, D. S.; Wen, X.; Chulhai, D. V.; Goodpaster, J. D.,
+        J. Chem. Theory Comput. 2020, 16 (4), 2284–2295. 
+        """
         from .diis import DIIS
 
         # mixing_type options: update_densmat, emb_pot, subsys_dens
