@@ -26,7 +26,7 @@ def timing_val(func):
             MPI.COMM_WORLD.Abort(1)
         t2 = time.time()
         total_time = t2 - t1
-        #root_print(f'Function {func.__name__} Took {total_time:.4f} seconds')
+        #root_print(f'Invoking Callback {func.__name__} Took {total_time:.4f} seconds')
     return wrapper
 
 def timing_val_ret(func):
@@ -42,7 +42,7 @@ def timing_val_ret(func):
             MPI.COMM_WORLD.Abort(1)
         t2 = time.time()
         total_time = t2 - t1
-        #root_print(f'Function {func.__name__} Took {total_time:.4f} seconds')
+        #root_print(f'Invoking Callback {func.__name__} Took {total_time:.4f} seconds')
         return result
     return wrapper
 

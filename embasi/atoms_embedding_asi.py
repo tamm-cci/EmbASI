@@ -543,9 +543,9 @@ class AtomsEmbed():
 
         time_s = time.time()
         self.run(ev_corr_scf=True, close_calc=close_calc)
+
         # HACKY WAY TO INDUCE ASE TO RECALCULATE ENERGIES - DO NOT TO THIS
-        self.atoms.calc.atoms.positions[0,0] = self.atoms.calc.atoms.positions[0,0] + 0.00000001
-        root_print(f"TIME FOR HAM CALC {time.time() - time_s} s")
+        #self.atoms.calc.atoms.positions[0,0] = self.atoms.calc.atoms.positions[0,0] + 0.00000001
 
         self.density_matrix_in = None
 
@@ -559,8 +559,8 @@ class AtomsEmbed():
         self.runtime_calc.parameters['qm_embedding_calc'] = 3
 
         # TODO: REMOVE FHI-AIMS SPECIFIC DIRECTIVES - LEAVE WF CALCULATION TO POSTPROC
-        if "total_energy_method" in self.runtime_calc.parameters:
-            self.runtime_calc.parameters["total_energy_method"] = self.runtime_calc.parameters["xc"]
+        #if "total_energy_method" in self.runtime_calc.parameters:
+        #    self.runtime_calc.parameters["total_energy_method"] = self.runtime_calc.parameters["xc"]
 
         self.density_matrix_in = dm_in
 
@@ -621,26 +621,38 @@ class AtomsEmbed():
                 return A_block_min, A_block_max, B_block_min, B_block_max
 
             projector = {}
-            
-            for PiS in range(self.n_spins):
-                for PiK in range(self.n_kpoints):
-                    vemb_supermol = atomsembed.fock_embedding_matrix[PiS, PiK]
-                    ovlp_supermol = atomsembed.huzinaga_ovlp_in[PiS, PiK]
-                    dm_supermol = atomsembed.huzinaga_dm_in[PiS, PiK]
 
-                    fock_supermol = atomsembed.embedding_ham_in[PiS, PiK]
-
-                    A_block_min, A_block_max, B_block_min, B_block_max = get_abs_trunc_indices(atomsembed)
-
-                    fmat_supermol = fock_supermol[A_block_min:A_block_max,B_block_min:B_block_max]
-                    dm_supermol = dm_supermol[B_block_min:B_block_max,B_block_min:B_block_max]
-                    ovlp_supermol = ovlp_supermol[A_block_min:A_block_max,B_block_min:B_block_max]
-                
-                    if atomsembed.fock_embedding_matrix.n_spins > 1:
-                        projector[(PiS,PiK)] = - 1.0 * ((fmat_supermol @ dm_supermol @ ovlp_supermol.T) + (ovlp_supermol @ dm_supermol @ fmat_supermol.T))
-                    else:
-                        projector[(PiS,PiK)] = - 0.5 * ((fmat_supermol @ dm_supermol @ ovlp_supermol.T) + (ovlp_supermol @ dm_supermol @ fmat_supermol.T))
+            if self.truncate:
+                for PiS in range(self.n_spins):
+                    for PiK in range(self.n_kpoints):
+                        ovlp_supermol = atomsembed.huzinaga_ovlp_in[PiS, PiK]
+                        dm_supermol = atomsembed.huzinaga_dm_in[PiS, PiK]
                         
+                        fock_supermol = atomsembed.embedding_ham_in[PiS, PiK]
+
+                        A_block_min, A_block_max, B_block_min, B_block_max = get_abs_trunc_indices(atomsembed)
+
+                        fmat_supermol = fock_supermol[A_block_min:A_block_max,B_block_min:B_block_max]
+                        dm_supermol = dm_supermol[B_block_min:B_block_max,B_block_min:B_block_max]
+                        ovlp_supermol = ovlp_supermol[A_block_min:A_block_max,B_block_min:B_block_max]
+                
+                        if atomsembed.huzinaga_dm_in.n_spins > 1:
+                            projector[(PiS,PiK)] = - 1.0 * ((fmat_supermol @ dm_supermol @ ovlp_supermol.T) + (ovlp_supermol @ dm_supermol @ fmat_supermol.T))
+                        else:
+                            projector[(PiS,PiK)] = - 0.5 * ((fmat_supermol @ dm_supermol @ ovlp_supermol.T) + (ovlp_supermol @ dm_supermol @ fmat_supermol.T))
+
+            else:
+                for PiS in range(self.n_spins):
+                    for PiK in range(self.n_kpoints):
+                        fock_supermol = atomsembed.embedding_ham_in[PiS, PiK]
+                        ovlp = atomsembed.huzinaga_ovlp_in[PiS, PiK]
+                        dm = atomsembed.huzinaga_dm_in[PiS, PiK]
+
+                        if atomsembed.embedding_ham_in.n_spins > 1:
+                            projector[(PiS,PiK)] = - 1.0 * ((fock_supermol @ dm @ ovlp.T) + (ovlp @ dm @ fock_supermol.T))
+                        else:
+                            projector[(PiS,PiK)] = - 0.5 * (((fock_supermol) @ dm @ ovlp.T) + (ovlp @ dm @ (fock_supermol).T))
+            
 
             return SpinKpointArray(projector, self.n_spins, self.n_kpoints)
         
@@ -649,27 +661,29 @@ class AtomsEmbed():
         self.embedding_ham_in = sc_huz_ham
 
         if self.flag_huz:
-            self.fock_embedding_matrix = emb_pot
+            projector = calculate_abs_trunc_huzinaga_projector(self)
         else:
-            self.fock_embedding_matrix = emb_pot + proj_pot
+            projector = proj_pot
 
-        projector = calculate_abs_trunc_huzinaga_projector(self)
+        if self.truncate:
+            emb_ham = self.full_mat_to_truncated(sc_huz_ham) + projector
+            ovlp = self.full_mat_to_truncated(sc_huz_ovlp)
+        else:
+            emb_ham = sc_huz_ham + projector
+            ovlp = sc_huz_ovlp
 
-        emb_ham_trunc = self.full_mat_to_truncated(sc_huz_ham) + projector
-
-        ovlp_trunc = self.full_mat_to_truncated(sc_huz_ovlp)
         nelecs = self.input_fragment_nelectrons
         if self.parallel:
-            evals, evecs, occ_mat = hamiltonian_eigensolv_parallel(emb_ham_trunc, \
-                                                                   ovlp_trunc, \
+            evals, evecs, occ_mat = hamiltonian_eigensolv_parallel(emb_ham, \
+                                                                   ovlp, \
                                                                    nelecs, \
                                                                    nspins=self.n_spins, \
                                                                    nkpts=self.n_kpoints, \
                                                                    return_orthog=False, \
                                                                    basis_illcond_thresh=1e-5)
         else:
-            evals, evecs, occ_mat = hamiltonian_eigensolv(emb_ham_trunc, \
-                                                          ovlp_trunc, \
+            evals, evecs, occ_mat = hamiltonian_eigensolv(emb_ham, \
+                                                          ovlp, \
                                                           nelecs, \
                                                           nspins=self.n_spins, \
                                                           nkpts=self.n_kpoints, \
@@ -679,7 +693,6 @@ class AtomsEmbed():
         for ispin in range(self.n_spins):
             for ikpt in range(self.n_kpoints):
                 max_occ_state = np.count_nonzero(occ_mat[ispin,ikpt])
-                #root_print(f"MAX OCC STATE {max_occ_state}")
                 evecs_occ = evecs[ispin, ikpt, :, :max_occ_state]
 
                 if self.n_spins > 1:
@@ -687,7 +700,10 @@ class AtomsEmbed():
                 else:
                     dm_out[(ispin, ikpt)] = 2.0 * (evecs_occ.copy() @ evecs_occ.copy().T)
 
-        self._dm = self.truncated_mat_to_full(SpinKpointArray(dm_out, self.n_spins, self.n_kpoints))
+        if self.truncate:
+            self._dm = self.truncated_mat_to_full(SpinKpointArray(dm_out, self.n_spins, self.n_kpoints))
+        else:
+            self._dm = SpinKpointArray(dm_out, self.n_spins, self.n_kpoints)
 
         # Unset all for clarity
         self.huzinaga_dm_in = None
@@ -883,7 +899,12 @@ class AtomsEmbed():
         self._ham_tot = SpinKpointArray(self.atoms.calc.asi.ham_storage[2], self.n_spins, self.n_kpoints)
         self._ovlp = SpinKpointArray(self.atoms.calc.asi.overlap_storage, self.n_spins, self.n_kpoints)
         # THIS IS CODE BREAKING FOR QM CODE LOCALISATION - I WILL NEED A FIX TO RESTORE
-        self._dm = SpinKpointArray(self.atoms.calc.asi.dm_storage[0], self.n_spins, self.n_kpoints)
+        if (1 in self.atoms.calc.asi.dm_storage.keys()):
+            self._dm = []
+            self._dm.append(SpinKpointArray(self.atoms.calc.asi.dm_storage[0], self.n_spins, self.n_kpoints))
+            self._dm.append(SpinKpointArray(self.atoms.calc.asi.dm_storage[1], self.n_spins, self.n_kpoints))
+        else:
+            self._dm = SpinKpointArray(self.atoms.calc.asi.dm_storage[0], self.n_spins, self.n_kpoints)
                 
         if close_calc:
             self.atoms.calc.asi.close()
@@ -917,12 +938,10 @@ class AtomsEmbed():
         # set of KS-eigenvectors resulting from the DFT code.
         if ev_corr_scf:
             if self.truncate:
-                # @TODONPSCAL: REPLACE NP DIRECTIVE
                 self.ev_corr_energy = \
                     27.211384500 * \
                     (self.density_matrix_in @ self.full_mat_to_truncated(self.hamiltonian_total)).trace()
             else:
-                # @TODONPSCAL: REPLACE NP DIRECTIVE
                 self.ev_corr_energy = \
                     27.211384500 * (self.density_matrix_in @ self.hamiltonian_total).trace()
 
@@ -930,21 +949,17 @@ class AtomsEmbed():
                 self.total_energy - self.ev_sum + self.ev_corr_energy
 
         if ev_corr_scf_final_density:
-
             if self.truncate:
-                # @TODONPSCAL: REPLACE NP DIRECTIVE
                 self.ev_corr_energy = \
                     27.211384500 * (self.full_mat_to_truncated(self.density_matrices_out) @ 
-                                        self.full_mat_to_truncated(self.hamiltonian_total)).trace()
+                                self.full_mat_to_truncated(self.hamiltonian_total)).trace()
             else:
-                # @TODONPSCAL: REPLACE NP DIRECTIVE
                 self.ev_corr_energy = \
                     27.211384500 * (self.density_matrices_out @ self.hamiltonian_total).trace()
 
-            self.ev_corr_total_energy = \
-                self.total_energy - self.ev_sum + self.ev_corr_energy
-
-
+                self.ev_corr_total_energy = \
+                    self.total_energy - self.ev_sum + self.ev_corr_energy
+                
     def close_calculator(self):
         self.atoms.calc.asi.close()
 

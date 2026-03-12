@@ -4,7 +4,7 @@ import time
 
 class DIIS():
 
-    def __init__(self, init_update_matrix, hist_len=5, mixing_step=1.0, iter_mixing_start=4, debug=False):
+    def __init__(self, init_update_matrix, hist_len=5, mixing_step=1.0, iter_mixing_start=8, debug=False):
 
         self.hist_len = hist_len
         self.niter_tot = 0
@@ -80,17 +80,9 @@ class DIIS():
         rhs = np.zeros(solve_mat_size)
         rhs[-1] = -1
 
-        #w, v = scipy.linalg.eigh(solve_mat)
-
-        #if np.any(abs(w)<1e-14):
-        #    root_print(f"Linear dependence in DIIS error vectors")
-        #    idx = abs(w)>1e-14
-        #    coeffs = np.dot(v[:,idx]*(1./w[idx]), np.dot(v[:,idx].T.conj(), rhs))
-        #else:
         time_s = time.time()
         try:
             import scipy
-            #coeffs = np.linalg.solve(solve_mat, rhs)
             coeffs = scipy.optimize.lsq_linear(self.solve_mat, rhs)
             coeffs = coeffs.x
         except:

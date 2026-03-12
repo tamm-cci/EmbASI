@@ -353,7 +353,12 @@ class SpinKpointArray:
         return self
 
     def trace(self):
-        return np.sum(np.array(list(map(op.trace, self))))
+        trace_sum = 0
+        for spin in range(self.n_spins):
+            for kpt in range(self.n_kpoints):
+                trace_sum += op.trace(self[spin,kpt])
+
+        return trace_sum
 
     def diag(self):
         diags = np.array(list(map(op.diag, self)))
