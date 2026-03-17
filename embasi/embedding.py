@@ -395,9 +395,10 @@ class ProjectionEmbedding(EmbeddingBase):
     def __init__(self, atoms, embed_mask, calc_base_ll, calc_base_hl,
                  total_charge=0, post_scf=None, total_energy_corr="1storder",
                  truncate_basis_thresh=None, truncate_basis_atoms=None,
-                 localisation='SPADE', projection="level-shift", freeze_and_thaw=False,
-                 mu_val=1.e+06, parallel=False, gc=True, run_dir="./EmbASI_calc",
-                 basis_illcond_thresh=1e-5, scalapack_block_size=16, fat_mixing=0.2):
+                 localisation='SPADE', spade_manual_state=0, projection="level-shift",
+                 freeze_and_thaw=False, mu_val=1.e+06, parallel=False, gc=True,
+                 run_dir="./EmbASI_calc", basis_illcond_thresh=1e-5,
+                 scalapack_block_size=16, fat_mixing=0.2):
 
         from copy import copy, deepcopy
         from mpi4py import MPI
@@ -432,6 +433,8 @@ class ProjectionEmbedding(EmbeddingBase):
             root_print(f"which can in some circumstances improve the rate convergence.")
             root_print(f"")
             self.fat_on = True
+
+        self.spade_manual_state = spade_manual_state
 
         if ((self.abs_truncate) and (not self.fat_on)):
             raise Exception("Absolute truncation can only be run with 'freeze_and_thaw=True' ")
@@ -528,16 +531,16 @@ class ProjectionEmbedding(EmbeddingBase):
                        ctxt_tag=subsys_ctxt_tag,
                        descr_tag=subsys_descr_tag,
                        huzinaga=self.flag_huz_sc)
-        self.A_LL = self.abs_truncate
-        self.A_LL = self.truncate
+        self.A_LL.abs_truncate = self.abs_truncate
+        self.A_LL.truncate = self.truncate
 
         self.set_layer(atoms, "A_HL", high_level_calculator_1,
                        embed_mask, ghosts=2, no_scf=False,
                        ctxt_tag=subsys_ctxt_tag,
                        descr_tag=subsys_descr_tag,
                        huzinaga=self.flag_huz_sc)
-        self.A_HL = self.abs_truncate
-        self.A_HL = self.truncate
+        self.A_HL.abs_truncate = self.abs_truncate
+        self.A_HL.truncate = self.truncate
         
         if self.fat_on:
             self.set_layer(atoms, "B_LL", low_level_calculator_1,
@@ -545,8 +548,8 @@ class ProjectionEmbedding(EmbeddingBase):
                            ctxt_tag=supersys_ctxt_tag,
                            descr_tag=subsys_B_descr_tag,
                            huzinaga=self.flag_huz_sc)
-            self.B_LL = self.abs_truncate
-            self.B_LL = self.truncate
+            self.B_LL.abs_truncate = self.abs_truncate
+            self.B_LL.truncate = self.truncate
 
         self.mu_val = mu_val
         self.rank = MPI.COMM_WORLD.Get_rank()
@@ -642,7 +645,7 @@ class ProjectionEmbedding(EmbeddingBase):
                     u, svals, v = np.linalg.svd(evecs_occ_a, full_matrices=True)
 
                 svals_diff = np.ediff1d(svals**2.0)
-                max_sval_change_idx = np.argmax(np.abs(svals_diff)) + 1
+                max_sval_change_idx = np.argmax(np.abs(svals_diff)) + self.spade_manual_state + 1
 
                 root_print(f'MAX OCC STATE {max_occ_state} for Spin Channel {ispin}')
                 root_print(f'SPADE STATE FOR: Spin Channel {ispin}, K-point {ikpt}')
@@ -916,6 +919,7 @@ class ProjectionEmbedding(EmbeddingBase):
         """
         import numpy as np
         import tracemalloc
+        import time
 
         tracemalloc.start(50)
 
