@@ -5,7 +5,6 @@
 
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
-
 project = 'embasi'
 copyright = '2024, Gabriel A. Bramley'
 author = 'Gabriel A. Bramley'
@@ -18,11 +17,13 @@ extensions = [
     'sphinx.ext.autodoc',
     'sphinx.ext.viewcode',
     'sphinx.ext.napoleon',
+    'sphinxcontrib.bibtex',
 ]
 
 templates_path = ['_templates']
 exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 
+bibtex_bibfiles = ["references.bib"]
 
 
 # -- Options for HTML output -------------------------------------------------
