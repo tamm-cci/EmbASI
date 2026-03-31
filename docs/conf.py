@@ -23,8 +23,6 @@ extensions = [
 templates_path = ['_templates']
 exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 
-CONF_DIR = Path(__file__).parent
-#bibtex_bibfiles = [str(CONF_DIR / "references.bib")]
 bibtex_bibfiles = ["references.bib"]
 
 
