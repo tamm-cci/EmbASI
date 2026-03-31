@@ -21,7 +21,7 @@ jobs:
         uses: peaceiris/actions-gh-pages@v3
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/EmbASI_template_documentation' }}
         with:
-          publish_branch: EmbASI_template_documentation
+          publish_branch: gh-docs
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: _build
           force_orphan: true
