@@ -18,6 +18,7 @@ The software is currently under active development and is subject to major chang
    explainer
    codeintegration
    modules
+   dev_guide
 
 Indices and tables
 ==================

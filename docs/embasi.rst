@@ -1,37 +1,37 @@
-ASI Embedding Package
-=====================
+EmbASI Package
+==============
 
 Submodules
 ----------
 
-asiembedding.atoms\_embedding\_asi module
+embasi.atoms\_embedding\_asi module
 -------------------------------------------
 
-.. automodule:: asiembedding.atoms_embedding_asi
+.. automodule:: embasi.atoms_embedding_asi
    :members:
    :undoc-members:
    :show-inheritance:
 
-asiembedding.basis\_info module
+embasi.basis\_info module
 ---------------------------------
 
-.. automodule:: asiembedding.basis_info
+.. automodule:: embasi.basis_info
    :members:
    :undoc-members:
    :show-inheritance:
 
-asiembedding.embedding module
+embasi.embedding module
 -------------------------------
 
-.. automodule:: asiembedding.embedding
+.. automodule:: embasi.embedding
    :members:
    :undoc-members:
    :show-inheritance:
 
-asiembedding.parallel\_utils module
+embasi.parallel\_utils module
 -------------------------------------
 
-.. automodule:: asiembedding.parallel_utils
+.. automodule:: embasi.parallel_utils
    :members:
    :undoc-members:
    :show-inheritance:
@@ -39,7 +39,7 @@ asiembedding.parallel\_utils module
 Module contents
 ---------------
 
-.. automodule:: asiembedding
+.. automodule:: embasi
    :members:
    :undoc-members:
    :show-inheritance:

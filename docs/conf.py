@@ -2,10 +2,10 @@
 #
 # For the full list of built-in configuration values, see the documentation:
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
+from pathlib import Path
 
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
-
 project = 'embasi'
 copyright = '2024, Gabriel A. Bramley'
 author = 'Gabriel A. Bramley'
@@ -18,11 +18,15 @@ extensions = [
     'sphinx.ext.autodoc',
     'sphinx.ext.viewcode',
     'sphinx.ext.napoleon',
+    'sphinxcontrib.bibtex',
 ]
 
 templates_path = ['_templates']
 exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 
+CONF_DIR = Path(__file__).parent
+#bibtex_bibfiles = [str(CONF_DIR / "references.bib")]
+bibtex_bibfiles = ["references.bib"]
 
 
 # -- Options for HTML output -------------------------------------------------

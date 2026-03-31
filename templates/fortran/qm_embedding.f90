@@ -30,6 +30,14 @@ module EmbASI_qm_embedding_interface
 
   type :: EmbASI_qm_embedding
 
+     ! Parameters for control flow
+     ! Full self-consistent Kohn-Sham calculation
+     integer, parameter :: EMBASI_SC_KS_CALC = 1
+     ! Non-self-consistent energy calculation for reference
+     integer, parameter :: EMBASI_NONSC_CALC = 2
+     ! Embedded self-consistent calculation
+     integer, parameter :: EMBASI_SC_EMBEDDED_CALC = 3
+
    contains
 
      procedure :: export_overlap => export_EmbASI_overlap
@@ -51,9 +59,7 @@ module EmbASI_qm_embedding_interface
 contains
 
   subroutine export_EmbASI_overlap(this, iS, iK, overlap, blacs_descr)
-    !
-    !
-    !
+    !> Wrapper for export of the overlap matrix with ASI
     use asi_callbacks, only : MyCode_ASI_Callbacks
 
     class(EmbASI_qm_embedding) :: this
@@ -74,10 +80,9 @@ contains
   end subroutine export_EmbASI_overlap
 
 
-  subroutine export_EmbASI_densmat(this, iS, iK, outdensmat, blacs_descr)
-    !
-    !
-    !
+  subroutine export_EmbASI_densmat(this, iS, iK, outdensmat,&
+       & blacs_descr)
+    !> Wrapper for ASI export function of the density matrix
     use asi_callbacks, only : MyCode_ASI_Callbacks
 
     class(EmbASI_qm_embedding) :: this
@@ -99,9 +104,7 @@ contains
 
 
   subroutine import_EmbASI_densmat(this, iS, iK, outdensmat, blacs_descr)
-    !
-    !
-    !
+    !> Wrapper for ASI import function of the density matrix
     use asi_callbacks, only : MyCode_ASI_Callbacks
 
     class(EmbASI_qm_embedding) :: this
@@ -123,9 +126,7 @@ contains
 
 
   subroutine export_EmbASI_H1e(this, iS, iK, H1e, blacs_descr)
-    !
-    !
-    !
+    !> Wrapper for ASI export function of the one-electron Hamiltonian
     use asi_callbacks, only : MyCode_ASI_Callbacks
 
     class(EmbASI_qm_embedding) :: this
@@ -147,6 +148,8 @@ contains
 
 
   subroutine export_EmbASI_H2e(this, iS, iK, H2e, blacs_descr)
+    !> Wrapper for ASI export function of the two-electron
+    !  Hamiltonian components
     use asi_callbacks, only : MyCode_ASI_Callbacks
 
     class(EmbASI_qm_embedding) :: this
@@ -164,8 +167,11 @@ contains
        call MyCode_ASI_Callbacks%invokeH(iS, iK, H2e)
     end if
 
+  end subroutine export_EmbASI_H2e
+
 
   subroutine export_EmbASI_Htot(this, iS, iK, Htot, blacs_descr)
+    !> Wrapper for ASI export function of the total Hamiltonian.
     use asi_callbacks, only : MyCode_ASI_Callbacks
 
     class(EmbASI_qm_embedding) :: this
@@ -186,7 +192,8 @@ contains
   end subroutine export_EmbASI_Htot
 
   subroutine export_EmbASI_all_H(this, iS, iK, H1e, H2e, Htot, blacs_descr)
-
+    !> Wrapper for ASI export of the one-electron and two-electron
+    !  components of the Hamiltonian and the total Hamiltonian
     class(EmbASI_qm_embedding) :: this
 
     real(8), intent(in) :: H1e(:,:)
@@ -213,6 +220,7 @@ contains
 
   subroutine set_EmbASI_embedding_H(this, iS, iK,&
        & embedding_hamiltonian, blacs_descr)
+    !> Wrapper for the construction of the embedding Hamiltonian
     use asi_callbacks, only : MyCode_ASI_Callbacks
     class(EmbASI_qm_embedding) :: this
 
