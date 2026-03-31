@@ -1,3 +1,5 @@
+.. _tut2:
+
 **Tutorial: Advanced Usage of EmbASI for QM/QM Embedding**
 ==========================================================
 

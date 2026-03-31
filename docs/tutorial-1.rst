@@ -196,5 +196,5 @@ the metanol monomer and evaluated the dimer dissociation energy:
 
    dimer_dissociation_energy = meoh_dimer_pbe0inpbe_energy - (2 * meoh_monomer_pbe0inpbe_energy)
 
-And we’re done! For advanced usage, please move onto `Part 2 <XXX>`__
+And we’re done! For advanced usage, please move onto :ref:`tut2`.
 
