@@ -1,0 +1,227 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Developer Guide to Implementing EmbASI &mdash; embasi 00.00.01 documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=80d5e7a1" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=d7bb8d4d"></script>
+      <script src="_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
+      <script defer="defer" src="https://cdn.jsdelivr.net/npm/mathjax@4/tex-mml-chtml.js"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="prev" title="EmbASI Package" href="embasi.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            embasi
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="explainer.html">How It Works</a></li>
+<li class="toctree-l1"><a class="reference internal" href="codeintegration.html">QM Drivers</a></li>
+<li class="toctree-l1"><a class="reference internal" href="modules.html">ASI Embedding Modules</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Developer Guide to Implementing EmbASI</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#introduction">Introduction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#atomic-simulation-interface-asi-api">Atomic Simulation Interface (ASI) API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#implementing-the-embasi-workflow">Implementing the EmbASI Workflow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#expected-matrix-exports">Expected Matrix Exports</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#expected-matrix-imports">Expected Matrix Imports</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#keyword-modification">Keyword Modification</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#references">References</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">embasi</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Developer Guide to Implementing EmbASI</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/dev_guide.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="developer-guide-to-implementing-embasi">
+<h1>Developer Guide to Implementing EmbASI<a class="headerlink" href="#developer-guide-to-implementing-embasi" title="Link to this heading"></a></h1>
+<section id="introduction">
+<h2>Introduction<a class="headerlink" href="#introduction" title="Link to this heading"></a></h2>
+<p>EmbASI is designed as a minimal workflow for abstracting the tasks associated
+with embedding to the Pythonic wrapper. The modification to the host codebase
+should be small, but some familiarity with your codebase is desirable to
+implement the required control flow mechanisms.</p>
+<p>Where possible, we have provided template routines in <code class="docutils literal notranslate"><span class="pre">&lt;EmbASI_ROOT&gt;/templates/fortran/qm_embedding.f90</span></code>
+which wrap around the expected import and export routines for each
+matrix quantity.</p>
+</section>
+<section id="atomic-simulation-interface-asi-api">
+<h2>Atomic Simulation Interface (ASI) API<a class="headerlink" href="#atomic-simulation-interface-asi-api" title="Link to this heading"></a></h2>
+<p>ASI is a C-based API which manages the transfer of data structures
+to and from the QM driver. The vast majority of development work
+required to implement EmbASI will involve implementing the C-based
+callback infrastructure of ASI. Template routines and an installation
+guide are included in the ASI API documentation. Other than stating
+where certain matrix dimensions are stored in your codebase, the
+callback routines should hopefully work out of the box with the
+templates provided.</p>
+</section>
+<section id="implementing-the-embasi-workflow">
+<h2>Implementing the EmbASI Workflow<a class="headerlink" href="#implementing-the-embasi-workflow" title="Link to this heading"></a></h2>
+<p>The following is a guidance for implementing the projection-based
+embedding scheme of Manby et al. <span id="id1">[<a class="reference internal" href="#id4" title="Frederick R. Manby, Martina Stella, Jason D. Goodpaster, and Thomas F. III Miller. A simple, exact density-functional-theory embedding scheme. Journal of Chemical Theory and Computation, 8(8):2564–2568, 2012. doi:10.1021/ct300544e.">MSGM12</a>]</span> The workflow below shows the calling
+pattern for each respective supersystem/subsystem as well as the
+quantities expected for each total energy calculation. <span id="id2">[<a class="reference internal" href="#id5" title="Gabriel Bramley, Pavel Stishenko, Oscar van Vuren, Volker Blum, and Andrew James Logsdail. A general pythonic framework for DFT-in-DFT and WF-in-DFT embedding.">BSV+</a>]</span></p>
+<a class="reference internal image-reference" href="_images/EmbASIWorkflow.png"><img alt="_images/EmbASIWorkflow.png" src="_images/EmbASIWorkflow.png" width="800" />
+</a>
+<dl class="simple">
+<dt>The projection-based embedding procedure calls the QM driver to:</dt><dd><ol class="arabic simple">
+<li><p>Perform a full SCF calculation for the whole supersystem (AB) at the low-level of theory (<span class="math notranslate nohighlight">\(\mathcal{L}\)</span>).</p></li>
+<li><p>Perform a total energy evaluation for the embedded subsystem (A) at the low-level of theory with the localised density matrix (<span class="math notranslate nohighlight">\(\gamma^{\mathrm{A}}\)</span>).</p></li>
+<li><p>Perform a SCF calculation for the embedded subsytem at the high level of theory (<span class="math notranslate nohighlight">\(\mathcal{H}\)</span>) subject to the embedded Hamiltonian (<span class="math notranslate nohighlight">\(\mathbf{H}^{\mathrm{AB}}_{\mathrm{emb}}[\tilde{\gamma}^{\mathrm{A}}]\)</span>).</p></li>
+</ol>
+</dd>
+</dl>
+</section>
+<section id="expected-matrix-exports">
+<h2>Expected Matrix Exports<a class="headerlink" href="#expected-matrix-exports" title="Link to this heading"></a></h2>
+<p>At each calculation stage, it is expected that upon completion, four
+matrices are output to the EmbASI wrapper:</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li><p>The total overlap matrix (<span class="math notranslate nohighlight">\(\mathbf{S}^{\mathrm{AB}}\)</span>)</p></li>
+<li><p>The one-electron Hamiltonian (<span class="math notranslate nohighlight">\(\mathbf{h}_{\mathrm{core}}\)</span>).</p></li>
+<li><p>The two-electron potential (<span class="math notranslate nohighlight">\(\mathbf{v}_{\mathrm{2e}}\)</span>).</p></li>
+<li><p>The total Hamiltonian (<span class="math notranslate nohighlight">\(\mathbf{H}_{\mathrm{tot}}\)</span>).</p></li>
+<li><p>The density matrix for the appropriate subsystem (<span class="math notranslate nohighlight">\(\mathbf{\gamma}^{\mathrm{AB}}, \mathbf{\gamma}^{\mathrm{A}}, \tilde{\mathbf{\gamma}}^{\mathrm{A}}\)</span>,
+where <span class="math notranslate nohighlight">\(\tilde{\gamma}\)</span> represents the converged density matrix evaluated at the high-level of theory).</p></li>
+</ol>
+</div></blockquote>
+<p>To integrate these routines within your workflow, the following routines
+from the <code class="docutils literal notranslate"><span class="pre">qm_embedding</span></code> template should be added in the following parts of your code:</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">export_overlap</span></code>: after the construction of the overlap matrix.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">export_allH</span></code>: after the final interation of the SCF cycle.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">export_densmat</span></code>: after the final interation of the SCF cycle.</p></li>
+</ol>
+</div></blockquote>
+</section>
+<section id="expected-matrix-imports">
+<h2>Expected Matrix Imports<a class="headerlink" href="#expected-matrix-imports" title="Link to this heading"></a></h2>
+<dl class="simple">
+<dt>Two import callbacks should be integrated into the SCF cycle:</dt><dd><ol class="arabic simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">import_EmbASI_densmat</span></code>: Imports the externally constructed density matrix. This routine
+should be called the construction of the terms required for the Hamiltonian.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">set_embedding_H</span></code>: Imports the embedding potential and the projection matrix and adds them
+to your Hamiltonian. This statement should be added before the entry of the Hamiltonian into
+the eigensolver routine.</p></li>
+</ol>
+</dd>
+</dl>
+</section>
+<section id="keyword-modification">
+<h2>Keyword Modification<a class="headerlink" href="#keyword-modification" title="Link to this heading"></a></h2>
+<p>At the wrapper level, callbacks should only be registered when they are
+required. However, implementing the following keywords
+should be done to enable extra control flow mechanisms and error checking.</p>
+<p>At present, the keyword <code class="docutils literal notranslate"><span class="pre">qm_embedding_calc</span></code> is used as an input to
+modify the control flow of the calculation. The expected arguments for
+this keyword are:</p>
+<blockquote>
+<div><ol class="arabic simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">qm_embedding_calc</span> <span class="pre">=</span> <span class="pre">1</span></code>: Full SCF with no modification.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">qm_embedding_calc</span> <span class="pre">=</span> <span class="pre">2</span></code>: Total energy calculation that skips the SCF cycle. The total energy evaluation for the low-level reference of the embedded subsystem (<span class="math notranslate nohighlight">\(E_{\mathcal{L}}[\gamma^{\mathrm{A}}]\)</span>) requires only the total energy corresponding to <span class="math notranslate nohighlight">\(\gamma^{\mathrm{A}}\)</span>. In effect, this corresponds to running the SCF cycle for a single iteration and calculating the total energies as the expectation value of the input Hamiltonian.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">qm_embedding_calc</span> <span class="pre">=</span> <span class="pre">3</span></code>: Full SCF with the embedded Hamiltonian. This keyword indicates that <code class="docutils literal notranslate"><span class="pre">set_embedding_H</span></code> should be invoked for the given QM driver call.</p></li>
+</ol>
+</div></blockquote>
+</section>
+<section id="references">
+<h2>References<a class="headerlink" href="#references" title="Link to this heading"></a></h2>
+<div class="docutils container" id="id3">
+<div role="list" class="citation-list">
+<div class="citation" id="id5" role="doc-biblioentry">
+<span class="label"><span class="fn-bracket">[</span><a role="doc-backlink" href="#id2">BSV+</a><span class="fn-bracket">]</span></span>
+<p>Gabriel Bramley, Pavel Stishenko, Oscar van Vuren, Volker Blum, and Andrew James Logsdail. A general pythonic framework for DFT-in-DFT and WF-in-DFT embedding.</p>
+</div>
+<div class="citation" id="id4" role="doc-biblioentry">
+<span class="label"><span class="fn-bracket">[</span><a role="doc-backlink" href="#id1">MSGM12</a><span class="fn-bracket">]</span></span>
+<p>Frederick R. Manby, Martina Stella, Jason D. Goodpaster, and Thomas F. III Miller. A simple, exact density-functional-theory embedding scheme. <em>Journal of Chemical Theory and Computation</em>, 8(8):2564–2568, 2012. <a class="reference external" href="https://doi.org/10.1021/ct300544e">doi:10.1021/ct300544e</a>.</p>
+</div>
+</div>
+</div>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="embasi.html" class="btn btn-neutral float-left" title="EmbASI Package" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024, Gabriel A. Bramley.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
