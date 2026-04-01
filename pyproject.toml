@@ -27,3 +27,6 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/logsdail/EmbASI"
 Issues = "https://github.com/logsdail/EmbASI/issues"
+
+[tool.setuptools]
+packages = ["embasi"]

@@ -51,7 +51,6 @@ calc_hl = Aims(xc='PBE', profile=AimsProfile(command="asi-doesnt-need-command"),
     override_initial_charge_check=True,)
 
 # Import dimer from s26 test set
-os.chdir('MeOH_dimer')
 methanol_dimer_idx = s26[22]
 methanol_dimer = create_s22_system(methanol_dimer_idx)
 
@@ -65,9 +64,9 @@ Projection = ProjectionEmbedding(methanol_dimer,
                                  calc_base_ll=calc_ll,
                                  calc_base_hl=calc_hl,
                                  mu_val=1.e+6,
-                                 truncate_basis_thresh=0.001,
+                                 truncate_basis_thresh=0.1,
                                  projection="huzinaga-sc",
-                                 parallel=False)
+                                 parallel=True)
 
 # Now run the simulation!
 root_print('\nRunning MeOH dimer \n')
@@ -87,9 +86,9 @@ Projection = ProjectionEmbedding(methanol_dimer[:6],
                                  calc_base_ll=calc_ll,
                                  calc_base_hl=calc_hl,
                                  mu_val=1.e+6,
-                                 truncate_basis_thresh=0.001,
+                                 truncate_basis_thresh=0.1,
                                  projection="huzinaga-sc",
-                                 parallel=False)
+                                 parallel=True)
 
 # Now run the simulation!
 root_print('\nRunning MeOH dimer \n')
