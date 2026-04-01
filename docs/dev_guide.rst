@@ -21,8 +21,8 @@ Atomic Simulation Interface (ASI) API
 ASI is a C-based API which manages the transfer of data structures
 to and from the QM driver. The vast majority of development work
 required to implement EmbASI will involve implementing the C-based
-callback infrastructure of ASI. Template routines and an installation
-guide are included in the ASI API documentation. Other than stating
+callback infrastructure of ASI. `Template routines and an installation
+guide are included in the ASI API documentation. <https://gitlab.com/pvst/asi/-/tree/main/src/dev_templates/fortran?ref_type=heads>`__
 where certain matrix dimensions are stored in your codebase, the
 callback routines should hopefully work out of the box with the
 templates provided.
