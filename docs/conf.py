@@ -5,7 +5,7 @@
 
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
-project = 'embasi'
+project = 'EmbASI'
 copyright = '2024, Gabriel A. Bramley'
 author = 'Gabriel A. Bramley'
 release = '00.00.01'
@@ -14,6 +14,7 @@ release = '00.00.01'
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
 extensions = [
+    'myst_parser',
     'sphinx.ext.autodoc',
     'sphinx.ext.viewcode',
     'sphinx.ext.napoleon',
