@@ -85,6 +85,17 @@ this keyword are:
    2. ``qm_embedding_calc = 2``: Total energy calculation that skips the SCF cycle. The total energy evaluation for the low-level reference of the embedded subsystem (:math:`E_{\mathcal{L}}[\gamma^{\mathrm{A}}]`) requires only the total energy corresponding to :math:`\gamma^{\mathrm{A}}`. In effect, this corresponds to running the SCF cycle for a single iteration and calculating the total energies as the expectation value of the input Hamiltonian.
    3. ``qm_embedding_calc = 3``: Full SCF with the embedded Hamiltonian. This keyword indicates that ``set_embedding_H`` should be invoked for the given QM driver call.
 
+Python Interface Modifications
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**In progress**
+
+As calculation input file generation and output file parsing is performed with `ASE <https://ase-lib.org/>__, some modification to the Pythonic wrapper may be needed to support the specification of ghost basis functions. As this syntax is different for each calculator object, ``embasi/qmcode_input_directives.py`` will need to be modified to provide the correct syntax for:
+
+   1. Setting the number of SCF cycles to 0.
+   2. Creating an input file with ghost basis functions.
+   3. Keyword modifications for calling post-HF calculations.
+
 References
 ~~~~~~~~~~
 .. bibliography::
