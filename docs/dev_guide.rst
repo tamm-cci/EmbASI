@@ -88,13 +88,14 @@ this keyword are:
 Python Interface Modifications
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**In progress**
-
-As calculation input file generation and output file parsing is performed with `ASE <https://ase-lib.org/>__, some modification to the Pythonic wrapper may be needed to support the specification of ghost basis functions. As this syntax is different for each calculator object, ``embasi/qmcode_input_directives.py`` will need to be modified to provide the correct syntax for:
+Input file generation and output file parsing is performed with `ASE <https://ase-lib.org/>__. The syntax for some input parameters, including total charge and specifying ghost sites, differs between each calculator. To support these inputs, EmbASI requires some modification (``embasi/qmcode_input_directives.py``). This module contains the abstract ``ase_calc_parameter_setter``, which supports the following workflows for different ASE calculators:
 
    1. Setting the number of SCF cycles to 0.
    2. Creating an input file with ghost basis functions.
    3. Keyword modifications for calling post-HF calculations.
+   4. Setting keywqords for setting the ScaLAPACK block size (Parallel only).
+
+To support a new calculator, a concrete implementation of ``ase_calc_parameter_setter`` must be provided, and the name of your calculator added to ``implemented_calculators``. Please refer to the FHI-aims implementation (``Aims_param_setter``) for direction.
 
 References
 ~~~~~~~~~~
