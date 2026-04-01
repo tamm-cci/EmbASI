@@ -8,10 +8,45 @@ from scalapack4py.npscal import NPScal
 from scalapack4py.npscal.blacs_ctxt_management import DESCR_Register, CTXT_Register
 from scalapack4py.npscal.blacs_ctxt_management import BLACSContextManager, BLACSDESCRManager
 from scalapack4py.array_types import nullable_ndpointer, ctypes2ndarray
+import traceback, sys
 import tracemalloc
 import numpy as np
-import traceback, sys
+import time
 
+def timing_val(func):
+    def wrapper(*args, **kwargs):
+        '''source: http://www.daniweb.com/code/snippet368.html'''
+        t1 = time.time()
+        try:
+            func(*args, **kwargs)
+        except Exception as eee:
+            print(f"""Something happened in {func.__name__} ASI 
+                  {label}: {eee}\nAborting...""")
+            traceback.print_tb(eee.__traceback__, limit=5, file=sys.stdout)
+            MPI.COMM_WORLD.Abort(1)
+        t2 = time.time()
+        total_time = t2 - t1
+        #root_print(f'Invoking Callback {func.__name__} Took {total_time:.4f} seconds')
+    return wrapper
+
+def timing_val_ret(func):
+    def wrapper(*args, **kwargs):
+        '''source: http://www.daniweb.com/code/snippet368.html'''
+        t1 = time.time()
+        try:
+            result = func(*args, **kwargs)
+        except Exception as eee:
+            print(f"""Something happened in {func.__name__} ASI 
+                  {label}: {eee}\nAborting...""")
+            traceback.print_tb(eee.__traceback__, limit=5, file=sys.stdout)
+            MPI.COMM_WORLD.Abort(1)
+        t2 = time.time()
+        total_time = t2 - t1
+        #root_print(f'Invoking Callback {func.__name__} Took {total_time:.4f} seconds')
+        return result
+    return wrapper
+
+@timing_val
 def dm_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
     """Default callback for saving density matrices
 
@@ -40,6 +75,9 @@ def dm_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
     """
     try:
         asi, storage_dict, cnt_dict, ctxt_tag, descr_tag, label = cast(aux, py_object).value
+        # Python-indexed spin and kpts:
+        PiS = iS - 1
+        PiK = iK - 1        
 
         if asi.is_hamiltonian_real:
             data_shape = (asi.n_basis,asi.n_basis)
@@ -81,15 +119,19 @@ def dm_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
                                              asi.is_hamiltonian_real, uplo)
 
         if data is not None:
+            if not (asi.dm_count in storage_dict.keys()):
+                storage_dict[asi.dm_count] = {}
             #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
-            asi.dm_count += 1
-            storage_dict[(asi.dm_count, iK, iS)] = data
+            storage_dict[asi.dm_count][(PiS, PiK)] = data
+            if (iS*iK) == (asi.n_local_ks):
+                asi.dm_count = asi.dm_count + 1
     except Exception as eee:
         print(f"""Something happened in ASI dm_saving_callback
                   {label}: {eee}\nAborting...""")
         traceback.print_tb(eee.__traceback__, limit=5, file=sys.stdout)
         MPI.COMM_WORLD.Abort(1)
 
+@timing_val
 def ovlp_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
     """Default callback for saving density matrices
 
@@ -118,6 +160,10 @@ def ovlp_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
     """
     try:
         asi, storage_dict, ctxt_tag, descr_tag, label = cast(aux, py_object).value
+
+        # Python-indexed spin and kpts:
+        PiS = iS - 1
+        PiK = iK - 1
 
         if asi.is_hamiltonian_real:
             data_shape = (asi.n_basis,asi.n_basis)
@@ -156,7 +202,7 @@ def ovlp_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
 
         if data is not None:
             #assert len(data.shape) == 2
-            storage_dict[(iK, iS)] = data
+            storage_dict[(PiS, PiK)] = data
             #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
     except Exception as eee:
         print(f"""Something happened in ASI ovlp_saving_callback 
@@ -164,6 +210,7 @@ def ovlp_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
         traceback.print_tb(eee.__traceback__, limit=5, file=sys.stdout)
         MPI.COMM_WORLD.Abort(1)
 
+@timing_val
 def ham_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
     """Default callback for saving hamiltonian matrices
 
@@ -198,6 +245,10 @@ def ham_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
         else:
             data_shape = (asi.n_basis,asi.n_basis, 2)
 
+        # Python-indexed spin and kpts:
+        PiS = iS - 1
+        PiK = iK - 1
+
         # ASI_STORAGE_TYPE_TRIL,ASI_STORAGE_TYPE_TRIU
         if (matrix_descr_ptr.contents.storage_type not in {1,2}):
             if ((ctxt_tag is None) and (descr_tag is None)):
@@ -230,18 +281,22 @@ def ham_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
 
         if data is not None:
             #assert len(data.shape) == 2
-            if asi.ham_count < 3:
-                asi.ham_count = asi.ham_count + 1
-                storage_dict[(asi.ham_count, iK, iS)] = data
+            if not (asi.ham_count in storage_dict.keys()):
+                storage_dict[asi.ham_count] = {}
+
+            if asi.ham_count <= 2:
+                storage_dict[asi.ham_count][(PiS, PiK)] = data
+
+                if (iS*iK) == (asi.n_local_ks):
+                    asi.ham_count = asi.ham_count + 1
                 #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
             else:
-                storage_dict.pop((1, iK, iS))
                 #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
-                storage_dict[(1, iK, iS)] = storage_dict[(2, iK, iS)]
+                storage_dict[0][(PiS, PiK)] = storage_dict[1][(PiS, PiK)]
                 #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
-                storage_dict[(2, iK, iS)] = storage_dict[(3, iK, iS)]
+                storage_dict[1][(PiS, PiK)] = storage_dict[2][(PiS, PiK)]
                 #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
-                storage_dict[(3, iK, iS)] = data
+                storage_dict[2][(PiS, PiK)] = data
                 #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
     except Exception as eee:
         print(f"""Something happened in ASI ham_saving_callback {label}: 
@@ -249,6 +304,7 @@ def ham_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
         traceback.print_tb(eee.__traceback__, limit=5, file=sys.stdout)
         MPI.COMM_WORLD.Abort(1)
 
+@timing_val
 def ham_saving_and_huzinaga_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
     """Default callback for saving hamiltonian matrices
 
@@ -278,9 +334,36 @@ def ham_saving_and_huzinaga_callback(aux, iK, iS, descr, data, matrix_descr_ptr)
         Numerical value indexing matrix shape (See: ASI docs)
 
     """
+    def get_abs_trunc_indices(atomsembed):
+        import numpy as np
+
+        active_atoms = np.array(atomsembed.basis_info.active_atoms_mask)
+
+        # First and last truncated atom
+        trunc_at_first = np.argmax(active_atoms == True)
+        trunc_at_last = len(active_atoms) - 1 - np.argmax((active_atoms == True)[::-1])
+        # Find first and last active atom
+        full_at_first = np.argmax(active_atoms == False)
+        full_at_last = len(active_atoms) - 1 - np.argmax((active_atoms == False)[::-1])
+
+        full_basis_min_idx = atomsembed.basis_info.full_basis_min_idx
+        full_basis_max_idx = atomsembed.basis_info.full_basis_max_idx
+        A_block_min = full_basis_min_idx[trunc_at_first]
+        A_block_max = full_basis_max_idx[trunc_at_last]
+
+        B_block_min = full_basis_min_idx[full_at_first]
+        B_block_max = full_basis_max_idx[full_at_last]
+
+
+        return A_block_min, A_block_max, B_block_min, B_block_max
+
     try:
         #asi, storage_dict, vemb, huz_dm, huz_ovlp, cnt_dict, ctxt_tag, descr_tag, label = cast(aux, py_object).value
         asi, storage_dict, atomsembed, cnt_dict, ctxt_tag, descr_tag, label = cast(aux, py_object).value
+
+        # Python-indexed spin and kpts:
+        PiS = iS - 1
+        PiK = iK - 1
 
         atomsembed = atomsembed["atembed"]
         
@@ -320,63 +403,60 @@ def ham_saving_and_huzinaga_callback(aux, iK, iS, descr, data, matrix_descr_ptr)
                                              asi.is_hamiltonian_real, uplo)
 
         if data is not None:
-            #assert len(data.shape) == 2
-            if asi.ham_count < 3:
-                asi.ham_count = asi.ham_count + 1
-                storage_dict[(asi.ham_count, iK, iS)] = data
+            if not (asi.ham_count in storage_dict.keys()):
+                storage_dict[asi.ham_count] = {}
+
+            if asi.ham_count <= 2:
+                storage_dict[asi.ham_count][(PiS, PiK)] = data
+
+                if (iS*iK) == (asi.n_local_ks):
+                    asi.ham_count = asi.ham_count + 1
                 #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
             else:
-                storage_dict.pop((1, iK, iS))
                 #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
-                storage_dict[(1, iK, iS)] = storage_dict[(2, iK, iS)]
+                storage_dict[0][(PiS, PiK)] = storage_dict[1][(PiS, PiK)]
                 #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
-                storage_dict[(2, iK, iS)] = storage_dict[(3, iK, iS)]
+                storage_dict[1][(PiS, PiK)] = storage_dict[2][(PiS, PiK)]
                 #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
-                storage_dict[(3, iK, iS)] = data
+                storage_dict[2][(PiS, PiK)] = data
                 #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
 
-        if ((ctxt_tag is None) and (descr_tag is None)):
-            if MPI.COMM_WORLD.Get_rank() == 0:
-                if atomsembed.truncate:
-
-                    vemb_supermol = atomsembed.fock_embedding_matrix
-                    ovlp_supermol = atomsembed.huzinaga_ovlp_in
-                    fock_supermol = atomsembed.truncated_mat_to_full(data)
-                    dm_supermol = atomsembed.huzinaga_dm_in
-
-                    fmat_supermol = (fock_supermol + vemb_supermol)
-
-                    projector = - 0.5 * ((fmat_supermol @ dm_supermol @ ovlp_supermol.T) + (ovlp_supermol @ dm_supermol @ fmat_supermol.T))
-                    projector = atomsembed.full_mat_to_truncated(projector)
-                    asi.huzinaga_eq = atomsembed.fock_embedding_matrix_trunc + projector
-
-
-                else:
-                    vemb = atomsembed.fock_embedding_matrix
-                    ovlp = atomsembed.huzinaga_ovlp_in
-                    dm = atomsembed.huzinaga_dm_in
-
-                    asi.huzinaga_eq = vemb - 0.5 * (((data+vemb) @ dm @ ovlp) + (ovlp @ dm @ (data+vemb)))
-
-        else:
             if atomsembed.truncate:
-                vemb_supermol = atomsembed.fock_embedding_matrix
-                ovlp_supermol = atomsembed.huzinaga_ovlp_in
-                fock_supermol = atomsembed.truncated_mat_to_full(data)
-                dm_supermol = atomsembed.huzinaga_dm_in
-                
-                fmat_supermol = (fock_supermol + vemb_supermol)
+                vemb_supermol = atomsembed.fock_embedding_matrix[PiS, PiK]
+                ovlp_supermol = atomsembed.huzinaga_ovlp_in[PiS, PiK]
+                dm_supermol = atomsembed.huzinaga_dm_in[PiS, PiK]
 
-                projector = - 0.5 * ((fmat_supermol @ dm_supermol @ ovlp_supermol.T) + (ovlp_supermol @ dm_supermol @ fmat_supermol.T))
-                projector = atomsembed.full_mat_to_truncated(projector)
-                asi.huzinaga_eq = atomsembed.fock_embedding_matrix_trunc + projector
+                if atomsembed.abs_truncate:
+                    fock_supermol = atomsembed.embedding_ham_in[PiS, PiK]
+
+                    A_block_min, A_block_max, B_block_min, B_block_max = get_abs_trunc_indices(atomsembed)
+
+                    fmat_supermol = fock_supermol[A_block_min:A_block_max,B_block_min:B_block_max]
+                    dm_supermol = dm_supermol[B_block_min:B_block_max,B_block_min:B_block_max]
+                    ovlp_supermol = ovlp_supermol[A_block_min:A_block_max,B_block_min:B_block_max]
+                else:
+                    fock_supermol = atomsembed.truncated_mat_to_full(data)
+                    fmat_supermol = (fock_supermol + vemb_supermol)
+                
+                if atomsembed.fock_embedding_matrix.n_spins > 1:
+                    projector = - 1.0 * ((fmat_supermol @ dm_supermol @ ovlp_supermol.T) + (ovlp_supermol @ dm_supermol @ fmat_supermol.T))
+                else:
+                    projector = - 0.5 * ((fmat_supermol @ dm_supermol @ ovlp_supermol.T) + (ovlp_supermol @ dm_supermol @ fmat_supermol.T))
+
+                if not(atomsembed.abs_truncate):
+                    projector = atomsembed.full_mat_to_truncated(projector)
+
+                asi.huzinaga_eq[(PiS, PiK)] = atomsembed.fock_embedding_matrix_trunc[PiS, PiK] + projector
 
             else:
-                vemb = atomsembed.fock_embedding_matrix
-                ovlp = atomsembed.huzinaga_ovlp_in
-                dm = atomsembed.huzinaga_dm_in
+                vemb = atomsembed.fock_embedding_matrix[PiS, PiK]
+                ovlp = atomsembed.huzinaga_ovlp_in[PiS, PiK]
+                dm = atomsembed.huzinaga_dm_in[PiS, PiK]
 
-                asi.huzinaga_eq = vemb - 0.5 * (((data+vemb) @ dm @ ovlp) + (ovlp @ dm @ (data+vemb)))
+                if atomsembed.fock_embedding_matrix.n_spins > 1:
+                    asi.huzinaga_eq[(PiS, PiK)] = vemb - 1.0 * (((data+vemb) @ dm @ ovlp.T) + (ovlp @ dm @ (data+vemb).T))
+                else:
+                    asi.huzinaga_eq[(PiS, PiK)] = vemb - 0.5 * (((data+vemb) @ dm @ ovlp.T) + (ovlp @ dm @ (data+vemb).T))
 
     except Exception as eee:
         print(f"""Something happened in ASI ham_saving_callback {label}: 
@@ -384,7 +464,7 @@ def ham_saving_and_huzinaga_callback(aux, iK, iS, descr, data, matrix_descr_ptr)
         traceback.print_tb(eee.__traceback__, limit=5, file=sys.stdout)
         MPI.COMM_WORLD.Abort(1)
 
-
+@timing_val_ret
 def matrix_loading_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
     """Default callback for loading matrices
 
@@ -410,23 +490,29 @@ def matrix_loading_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
         Numerical value indexing matrix shape (See: ASI docs)
 
     """
-
     try:
         asi, storage_dict, flag_huz, ctxt_tag, descr_tag, label = cast(aux, py_object).value
+
+        # Python-indexed spin and kpts:
+        PiS = iS - 1
+        PiK = iK - 1
 
         # This is unfortunately very opaque - essentially, the huzinaga equation is formulated
         # in the hamiltonian saving callback as we need the fock matrix constructed during the
         # SCF cycle, which cannot be set outside of the invoked QM code.
         if flag_huz:
             if ((ctxt_tag is None) and (descr_tag is None)):
-                m = np.asfortranarray(asi.huzinaga_eq) if asi.scalapack.is_root(descr) else None
+                if (PiS, PiK) in asi.huzinaga_eq.keys():
+                    m = np.asfortranarray(asi.huzinaga_eq[(PiS, PiK)])
+                else:
+                    m = None
             else:
-                m = asi.huzinaga_eq
+                m = asi.huzinaga_eq[(PiS, PiK)]
         else:
             if ((ctxt_tag is None) and (descr_tag is None)):
-                m = np.asfortranarray(storage_dict[(iK, iS)]) if asi.scalapack.is_root(descr) else None
+                m = np.asfortranarray(storage_dict[PiS, PiK]) if asi.scalapack.is_root(descr) else None
             else:
-                m = storage_dict[(iK, iS)]
+                m = storage_dict[PiS, PiK]
 
         # ASI_STORAGE_TYPE_TRIL,ASI_STORAGE_TYPE_TRIU
         if (matrix_descr_ptr.contents.storage_type not in {1,2}):
@@ -448,12 +534,13 @@ def matrix_loading_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
                                        m.loc_array, 1, 1, src_descr,
                                        data, 1, 1, dest_descr,
                                        dest_descr.ctxt)
-
             return 1
         else:
             asi.scalapack.scatter_numpy(m, descr, data, asi.hamiltonian_dtype)
             return 1 # signal that  matrix has been loaded
 
+        # Set to empty dictionary again for re-population
+        #asi.huzinaga_eq = {}
 
     except Exception as eee:
         print(f"""Something happened in ASI matrix_loading_callback {label}: 

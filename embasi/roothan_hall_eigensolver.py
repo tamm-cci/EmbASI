@@ -23,10 +23,14 @@ def sort_eigvals_and_evecs(eigenvalues, eigenvectors):
     
     return eigenvalues[idx], eigenvectors[:,idx]
 
-def calculate_occ_mat(eigenvalues, nelec):
-
+def calculate_occ_mat(eigenvalues, nelec, nspin):
+    # This obviously won't work for smeared occupancies
+    # Only valid for insulators
     occ_mat = np.zeros(np.size(eigenvalues))
-    occ_mat[:int(nelec/2)] = 2.0
+    if nspin == 1:
+        occ_mat[:int(nelec/2)] = 2.0
+    if nspin == 2:
+        occ_mat[:int(nelec/2)] = 1.0
 
     return occ_mat
 
@@ -79,28 +83,55 @@ def overlap_illcondition_check(overlap, thresh, inv=True, return_mask=False):
     else:
         return ovlp_filtered, n_bad
 
-def hamiltonian_eigensolv(hamiltonian, overlap, nelec, return_orthog=False, basis_illcond_thresh=1e-5):
+def hamiltonian_eigensolv(hamiltonian, overlap, nelec, nspins=1, nkpts=1, basis_illcond_thresh=1e-5):
 
     from embasi.parallel_utils import root_print
+    from .ks_array import SpinKpointArray
 
     thresh = basis_illcond_thresh
-    n_basis = np.shape(overlap)[0]
-    xform_mat, n_bad = overlap_illcondition_check(overlap, thresh)
-    n_good = n_basis - n_bad
+    n_basis = np.shape(overlap[0,0])[0]
 
-    evals, evecs = np.linalg.eig(xform_hamiltonian(hamiltonian, xform_mat))
+    evals = {}
+    evecs = {}
+    for ispin in range(nspins):
+        for ikpt in range(nkpts):
+            xform_mat, n_bad = overlap_illcondition_check(overlap[ispin,ikpt], thresh)
+            n_good = n_basis - n_bad
 
-    if return_orthog:
-        evals, evecs = sort_eigvals_and_evecs(evals, evecs)
-        occ_mat = calculate_occ_mat(evals, nelec)
-        
-        return evals, evecs, occ_mat, xform_mat
+            evals[(ispin,ikpt)], evecs[(ispin,ikpt)] = np.linalg.eig(xform_hamiltonian(hamiltonian[ispin,ikpt], xform_mat))
 
+            evecs[(ispin,ikpt)] = back_xform_evecs(evecs[(ispin,ikpt)], xform_mat)
+            evals[(ispin,ikpt)], evecs[(ispin,ikpt)] = sort_eigvals_and_evecs(evals[(ispin,ikpt)], evecs[(ispin,ikpt)])
+
+    # Just assume we're dealing with simple insulators for now
+    # - fill from the bottom up
+
+    # Only deal with spins for now - kpoints will need some way
+    # to communicate k-indexed evals between nodes and also intelligently
+    # compare eigenvalues
+    occ_mat = {}
+    if nspins > 1:
+        remaining_electrons = int(round(nelec))
+        alpha_nelecs = 0
+        beta_nelecs = 0
+        occ_mat[(0,0)] = np.zeros(np.size(evals[(0,0)]))
+        occ_mat[(1,0)] = np.zeros(np.size(evals[(0,0)]))
+
+        while remaining_electrons > 0:
+            if evals[(0,0)][alpha_nelecs] < evals[(1,0)][beta_nelecs]:
+                occ_mat[(0,0)][alpha_nelecs] = 1.0
+                alpha_nelecs += 1
+            else:
+                occ_mat[(1,0)][beta_nelecs] = 1.0
+                beta_nelecs += 1
+
+            remaining_electrons += -1
     else:
-        evecs = back_xform_evecs(evecs, xform_mat)
+        occ_mat[(0,0)] = np.zeros(np.size(evals[(0,0)]))
+        occ_mat[(0,0)][:int(round(nelec/2))] = 2.0
 
-        evals, evecs = sort_eigvals_and_evecs(evals, evecs)
-        occ_mat = calculate_occ_mat(evals, nelec)
+    evecs = SpinKpointArray(evecs, nspins, nkpts)
+    evals = SpinKpointArray(evals, nspins, nkpts)
+    occ_mat = SpinKpointArray(occ_mat, nspins, nkpts)
 
-        return evals, evecs, occ_mat
-
+    return evals, evecs, occ_mat

@@ -92,7 +92,7 @@ class EmbeddingBase(ABC):
 
         setattr(self, layer_name, layer)
 
-    def select_atoms_basis_truncation(self, atomsembed, densmat, overlap, thresh):
+    def select_atoms_basis_truncation(self, atomsembed, densmat, overlap, thresh, layer):
         """Lists atomic centers significant charge for a given density matrix
 
         Returns a list of corresponding atoms for which the total contribution 
@@ -124,8 +124,8 @@ class EmbeddingBase(ABC):
 
         """
 
-        # @TODONPSCAL: REPLACE DIRECTIVE
-        basis_charge = op.diag(densmat @ overlap)
+        basis_charge = (densmat @ overlap).diag()
+
         atomic_charge = np.zeros(len(atomsembed.atoms))
 
         for idx, charge in enumerate(basis_charge):
@@ -135,7 +135,7 @@ class EmbeddingBase(ABC):
 
         # Corner case where HL atoms can be excluded for high charge thresholds
         for idx, atom_active in enumerate(atomsembed.embed_mask):
-            if atom_active == 1:
+            if atom_active == layer:
                 active_atom_mask[idx] = True
 
         return active_atom_mask
@@ -175,7 +175,7 @@ class EmbeddingBase(ABC):
 
         return BasisInfo
 
-    def set_truncation_defaults(self, atomsembed, active_atom_mask):
+    def set_truncation_defaults(self, atomsembed, active_atom_mask, layer):
         """Sets default BasisInfo objects for each embedding layer
 
         Necessary to maintain consistency in values needed for matrix truncation
@@ -201,14 +201,14 @@ class EmbeddingBase(ABC):
         # truncated matrix
         active_atoms = np.array([ idx for idx, maskval 
                                   in enumerate(active_atom_mask) 
-                                  if (maskval or atomsembed.embed_mask[idx] == 1) ])
+                                  if (maskval or atomsembed.embed_mask[idx] == layer) ])
 
         hl_atoms = np.array([ idx for idx, maskval 
                                   in enumerate(active_atom_mask) 
                                   if (atomsembed.embed_mask[idx] == 1) ])
         env_atoms = np.array([ idx for idx, maskval 
                                   in enumerate(active_atom_mask) 
-                                  if (maskval and (not atomsembed.embed_mask[idx] == 1)) ])
+                                  if (maskval and (not atomsembed.embed_mask[idx] == layer)) ])
 
         # Remove non-active atoms from basis_atoms to form a truncated
         # analogue
@@ -236,6 +236,7 @@ class EmbeddingBase(ABC):
         BasisInfo = Basis_info()
         BasisInfo.full_natoms = len(active_atom_mask)
         BasisInfo.trunc_natoms = len(active_atoms)
+        BasisInfo.active_atoms_mask = active_atom_mask
         BasisInfo.active_atoms = active_atoms
         BasisInfo.full_basis_atoms = atomsembed.basis_atoms
         BasisInfo.trunc_basis_atoms = trunc_basis_atoms
@@ -269,7 +270,7 @@ class EmbeddingBase(ABC):
         """
 
         # @TODONPSCAL: REPLACE DIRECTIVE
-        population = op.trace(overlap_matrix @ (density_matrix))
+        population = (overlap_matrix @ density_matrix).trace()
 
         return population
     
@@ -347,7 +348,7 @@ class StandardDFT(EmbeddingBase):
     def run(self):
 
         start = time.time()
-        self.AB_LL.run()
+        self.AB_LL.run_scf()
         end = time.time()
         self.time_tot = end - start
         root_print(f" -----------======================--------- " )
@@ -356,7 +357,7 @@ class StandardDFT(EmbeddingBase):
 
 
 class ProjectionEmbedding(EmbeddingBase):
-    """Implementation of Projeciton-Based Embedding with ASI communication
+    """Implementation of Projection-Based Embedding with ASI communication
 
     A class controlling the interaction between two subsystems calculated at
     two levels of theory (low-level and high-level) with the
@@ -394,41 +395,83 @@ class ProjectionEmbedding(EmbeddingBase):
     def __init__(self, atoms, embed_mask, calc_base_ll, calc_base_hl,
                  total_charge=0, post_scf=None, total_energy_corr="1storder",
                  truncate_basis_thresh=None, truncate_basis_atoms=None,
-                 localisation='SPADE', projection="level-shift",
-                 mu_val=1.e+06, parallel=False, gc=True, run_dir="./EmbASI_calc",
-                 basis_illcond_thresh=1e-5):
+                 localisation='SPADE', spade_manual_state=0, projection="level-shift",
+                 freeze_and_thaw=False, mu_val=1.e+06, parallel=False, gc=True,
+                 run_dir="./EmbASI_calc", basis_illcond_thresh=1e-5,
+                 scalapack_block_size=16, fat_mixing=0.2):
 
         from copy import copy, deepcopy
         from mpi4py import MPI
 
+        # Set truncation keywords
+        self.truncate = False
+        self.abs_truncate = False
+        self.fat_on = False
+        self.truncate_basis_thresh = truncate_basis_thresh
+        self.truncate_basis_atoms = truncate_basis_atoms
+
+        if (truncate_basis_thresh is not None) and (truncate_basis_atoms is not None):
+            raise Exception("Please only specific truncate_basis_thresh OR truncate_basis_atoms")
+        
+        if (truncate_basis_thresh is not None) or (truncate_basis_atoms is not None):
+            self.truncate_basis_thresh = truncate_basis_thresh
+            self.truncate_basis_atoms = truncate_basis_atoms
+
+            self.truncate = True
+
+            if truncate_basis_thresh == "absolute":
+                # Set truncation treshold to high value for absolute truncation
+                self.truncate_basis_thresh = 1000
+                self.abs_truncate = True
+
+        if freeze_and_thaw:
+            root_print(f"WARNING - You have set 'freeze_and_thaw' to True.")
+            root_print(f"The convergence for freeze and thaw can be unreliable.")
+            root_print(f"So do not be surprised if the calculation takes a substantial")
+            root_print(f"number of freeze and thaw cycles to reach convergence.")
+            root_print(f"You can reduce the freeze and thaw mixing parameter (mixing_parameter)")
+            root_print(f"which can in some circumstances improve the rate convergence.")
+            root_print(f"")
+            self.fat_on = True
+
+        self.spade_manual_state = spade_manual_state
+
+        if ((self.abs_truncate) and (not self.fat_on)):
+            raise Exception("Absolute truncation can only be run with 'freeze_and_thaw=True' ")
+
         self.total_energy_corr = total_energy_corr
 
+        # Set calculators for a given method of calculating the total embedding energy
+        if self.abs_truncate and (not (self.total_energy_corr == "nonscf")):
+            raise Exception("total_energy_corr must be set to 'nonscf' if truncate_basis_thresh is 'absolute'")
+
         if self.total_energy_corr == "1storder":
-            self.calc_names = ["AB_LL","A_LL","A_HL","A_HL_PP"]
+            self.calc_names = ["AB_LL","A_LL","A_HL"]
         elif self.total_energy_corr == "nonscf": 
-            self.calc_names = ["AB_LL","A_LL","A_HL","A_HL_PP","AB_LL_PP"]
+            self.calc_names = ["AB_LL","A_LL","A_HL","B_LL"]
         else:
             raise Exception("Invalid entry for total_energy_corr: use '1storder' or 'nonscf' ")
 
+        # Initialise the ProjectionEmbedding object given EmbeddingBase
         super(ProjectionEmbedding, self).__init__(atoms, embed_mask,
                                                   calc_base_ll, calc_base_hl,
                                                   run_dir=run_dir)
 
         # Determines whether arrays will be communicated in parallel
         self.parallel = parallel
+        # Legacy option for when there were many more AtomsEmbedding objects - we
+        # now keep them persistent in memory, but use far fewer.
         self.gc = gc
 
-        self.localisation = localisation
-        if self.localisation == "SPADE":
-            self.calculator_ll.parameters['qm_embedding_mo_localise']=".false."
-            self.calculator_hl.parameters['qm_embedding_mo_localise']=".false."
-        elif self.localisation == "qmcode":
-            self.calculator_ll.parameters['qm_embedding_mo_localise']=".true."
-            self.calculator_hl.parameters['qm_embedding_mo_localise']=".true."
-        else:
-            raise Exception("Invalid entry for localisation: use 'SPADE' or 'qmcode' ")
-        #self.calculator_ll.parameters['override_default_empty_basis_order']=".true."
-        #self.calculator_hl.parameters['override_default_empty_basis_order']=".true."
+        if self.parallel:
+            self.calculator_ll.parameters['scalapack_block_size'] = scalapack_block_size
+            self.calculator_hl.parameters['scalapack_block_size'] = scalapack_block_size
+
+        self.calculator_ll.parameters['override_default_empty_basis_order']=".true."
+        self.calculator_hl.parameters['override_default_empty_basis_order']=".true."
+
+        self.calculator_ll.parameters['qm_embedding_mo_localise']=".false."
+        self.calculator_hl.parameters['qm_embedding_mo_localise']=".false."
 
         self.projection = projection
         if self.projection == "level-shift":
@@ -445,13 +488,17 @@ class ProjectionEmbedding(EmbeddingBase):
 
         low_level_calculator_1 = deepcopy(self.calculator_ll)
         low_level_calculator_2 = deepcopy(self.calculator_ll)
-        
         high_level_calculator_1 = deepcopy(self.calculator_hl)
-        high_level_calculator_2 = deepcopy(self.calculator_hl)
 
-        if self.total_energy_corr == "nonscf":
-            low_level_calculator_3 = deepcopy(self.calculator_ll)
+        self.localisation = localisation
+        if self.localisation == "SPADE":
+            low_level_calculator_2.parameters['qm_embedding_mo_localise']=".false."
+        elif self.localisation == "qmcode":
+            low_level_calculator_2.parameters['qm_embedding_mo_localise']=".true."
+        else:
+            raise Exception("Invalid entry for localisation: use 'SPADE' or 'qmcode' ")
 
+        
         # Determines the BLACS context and descriptors used for the communication
         # and storage of arrays in the NPScal registry structure
         if self.parallel:
@@ -459,74 +506,64 @@ class ProjectionEmbedding(EmbeddingBase):
             subsys_ctxt_tag = "main"
             supersys_descr_tag = "supersystem"
             subsys_descr_tag = "subsystem"
+            subsys_B_descr_tag = "subsystem_B"
         else:
             supersys_ctxt_tag = None
             subsys_ctxt_tag = None
             supersys_descr_tag = None
             subsys_descr_tag = None
+            subsys_B_descr_tag = None
 
         # Add AtomEmbedding objects assigned to each stage of the Projection
         # embedding workflow, where:
         # AB_LL:    Low-level supersystem reference
         # A_LL:     Low-level subsystem reference
-        # A_HL:     High-level subsystem reference, w/ embedding pot
-        # A_HL_PP:  High-level subsystem reference, post-processed w/o embedding pot
-        low_level_calculator_1.parameters['qm_embedding_calc'] = 1
-        self.set_layer(atoms, "AB_LL", low_level_calculator_1, 
+        # A_HL:     High-level subsystem reference
+        # B_LL:     Low-level subsystem reference for environment
+        self.set_layer(atoms, "AB_LL", low_level_calculator_2,
                        embed_mask, ghosts=0, no_scf=False,
                        ctxt_tag=supersys_ctxt_tag,
                        descr_tag=supersys_descr_tag)
         self.AB_LL.input_total_charge = total_charge
 
-        low_level_calculator_2.parameters['qm_embedding_calc'] = 2
-        low_level_calculator_2.parameters['charge_mix_param'] = 0.
-        low_level_calculator_2.parameters['sc_iter_limit'] = 0
-        self.set_layer(atoms, "A_LL", low_level_calculator_2,
+        self.set_layer(atoms, "A_LL", low_level_calculator_1,
                        embed_mask, ghosts=2, no_scf=False,
                        ctxt_tag=subsys_ctxt_tag,
-                       descr_tag=subsys_descr_tag)
+                       descr_tag=subsys_descr_tag,
+                       huzinaga=self.flag_huz_sc)
+        self.A_LL.abs_truncate = self.abs_truncate
+        self.A_LL.truncate = self.truncate
 
-        high_level_calculator_1.parameters['qm_embedding_calc'] = 3
         self.set_layer(atoms, "A_HL", high_level_calculator_1,
                        embed_mask, ghosts=2, no_scf=False,
                        ctxt_tag=subsys_ctxt_tag,
                        descr_tag=subsys_descr_tag,
                        huzinaga=self.flag_huz_sc)
-
-        high_level_calculator_2.parameters['qm_embedding_calc'] = 2
-        high_level_calculator_2.parameters['charge_mix_param'] = 0.
-        high_level_calculator_2.parameters['sc_iter_limit'] = 0
-        if "total_energy_method" in high_level_calculator_2.parameters:
-            high_level_calculator_2.parameters['total_energy_method'] = high_level_calculator_2.parameters["xc"]
-        self.set_layer(atoms, "A_HL_PP", high_level_calculator_2,
-                       embed_mask, ghosts=2, no_scf=False,
-                       ctxt_tag=subsys_ctxt_tag,
-                       descr_tag=subsys_descr_tag)
-
-        if self.total_energy_corr == "nonscf":
-            low_level_calculator_3.parameters['qm_embedding_calc'] = 2
-            low_level_calculator_3.parameters['charge_mix_param'] = 0.
-            self.set_layer(atoms, "AB_LL_PP", low_level_calculator_3,
-                           embed_mask, ghosts=0, no_scf=False,
+        self.A_HL.abs_truncate = self.abs_truncate
+        self.A_HL.truncate = self.truncate
+        
+        if self.fat_on:
+            self.set_layer(atoms, "B_LL", low_level_calculator_1,
+                           embed_mask, ghosts=1, no_scf=False,
                            ctxt_tag=supersys_ctxt_tag,
-                           descr_tag=supersys_descr_tag)
-            self.AB_LL.input_total_charge = total_charge
+                           descr_tag=subsys_B_descr_tag,
+                           huzinaga=self.flag_huz_sc)
+            self.B_LL.abs_truncate = self.abs_truncate
+            self.B_LL.truncate = self.truncate
 
         self.mu_val = mu_val
         self.rank = MPI.COMM_WORLD.Get_rank()
         self.ntasks = MPI.COMM_WORLD.Get_size()
 
-        self.truncate = False
-        if (truncate_basis_thresh is not None) and (truncate_basis_atoms is not None):
-            raise Exception("Please only specific truncate_basis_thresh OR truncate_basis_atoms")
-        
-        if (truncate_basis_thresh is not None) or (truncate_basis_atoms is not None):
-            self.truncate = True
-
-        self.truncate_basis_thresh = truncate_basis_thresh
-        self.truncate_basis_atoms = truncate_basis_atoms
-
         self.basis_illcond_thresh = basis_illcond_thresh
+
+        self.fat_mixing = fat_mixing
+
+        # A temporary solution to storing data output data
+        self.output_data_dict = {}
+        self.output_data_dict["TOTALENERGY"] = {}
+        self.output_data_dict["CHARGEDAT"] = {}
+        self.output_timing_dict = {}
 
     def calculate_levelshift_projector(self, densmat, overlap):
         """Calculates level-shift projection operator
@@ -546,9 +583,11 @@ class ProjectionEmbedding(EmbeddingBase):
 
     def calculate_huzinaga_projector(self, hamiltonian, overlap, densmat):
 
-        #self.P_b = -0.5*( (hamiltonian @ densmat @ overlap.T) + (overlap @ densmat @ hamiltonian.T) )
-        self.P_b = -0.5*( (hamiltonian @ densmat @ overlap.T) + (overlap @ densmat @ hamiltonian.T) )
-        
+        if hamiltonian.n_spins > 1:
+            self.P_b = -1.0 * ( (hamiltonian @ densmat @ overlap.T) + (overlap @ densmat @ hamiltonian.T) )
+        else:
+            self.P_b = -0.5 * ( (hamiltonian @ densmat @ overlap.T) + (overlap @ densmat @ hamiltonian.T) )
+
     def spade_localisation(self, atomsembed, hamiltonian, overlap):
         """Calculate the localised density matrix with the SPADE method
 
@@ -562,20 +601,23 @@ class ProjectionEmbedding(EmbeddingBase):
         from scalapack4py.npscal.math_utils.npscal2npscal import eig, svd
         from embasi.parallel_utils import mpi_bcast_matrix
         import copy
-
+        # TODO: @SPIN AND K-POINT LOOP - and needs syncing?? - SHOULD WE JUST PLACE THE LOOP AROUND THIS ROUTINE?
         root_print('Starting SPADE localisation...')
+
         nelecs = atomsembed.free_atom_nelectrons - atomsembed.input_total_charge
         if self.parallel:
             evals, evecs, occ_mat = hamiltonian_eigensolv_parallel(hamiltonian, \
                                                                    overlap, \
                                                                    nelecs, \
-                                                                   return_orthog=False, \
+                                                                   nspins=atomsembed.n_spins, \
+                                                                   nkpts=atomsembed.n_kpoints, \
                                                                    basis_illcond_thresh=self.basis_illcond_thresh)
         else:
             evals, evecs, occ_mat = hamiltonian_eigensolv(hamiltonian, \
                                                           overlap, \
                                                           nelecs, \
-                                                          return_orthog=False, \
+                                                          nspins=atomsembed.n_spins,
+                                                          nkpts=atomsembed.n_kpoints,
                                                           basis_illcond_thresh=self.basis_illcond_thresh)
 
         mask_val = []
@@ -588,39 +630,247 @@ class ProjectionEmbedding(EmbeddingBase):
 
         mask_val = np.array(mask_val)
 
-        max_occ_state = np.count_nonzero(occ_mat)
-        evecs_occ = evecs[:, :max_occ_state]
-        evecs_occ_a = evecs_occ[mask_val, :max_occ_state]
+        evecs_occ_ab = evecs.copy()
+        rot_evecs_occ_a = evecs.copy()
 
-        if self.parallel:
-            u, svals, v = svd(evecs_occ_a)
+        for ispin in range(atomsembed.n_spins):
+            for ikpt in range(atomsembed.n_kpoints):
+                max_occ_state = np.count_nonzero(occ_mat[ispin,ikpt])
+                evecs_occ = evecs[ispin, ikpt, :, :max_occ_state]
+                evecs_occ_a = evecs_occ[mask_val, :]
+
+                if self.parallel:
+                    u, svals, v = svd(evecs_occ_a)
+                else:
+                    u, svals, v = np.linalg.svd(evecs_occ_a, full_matrices=True)
+
+                svals_diff = np.ediff1d(svals**2.0)
+                max_sval_change_idx = np.argmax(np.abs(svals_diff)) + self.spade_manual_state + 1
+
+                root_print(f'MAX OCC STATE {max_occ_state} for Spin Channel {ispin}')
+                root_print(f'SPADE STATE FOR: Spin Channel {ispin}, K-point {ikpt}')
+                root_print(f'Maximum SPADE state for subsystem A: {max_sval_change_idx}')
+
+                rot_evecs_occ_a[ispin, ikpt] = evecs_occ @ v[:max_sval_change_idx, :].T
+                evecs_occ_ab[ispin, ikpt] = evecs_occ.copy()
+
+        # @TODOSPIN: Need to redefine occupancies - this obviously won't work for k-points
+        if atomsembed.n_spins == 1:
+            density_matrix_supersystem = 2.0 * (evecs_occ_ab @ evecs_occ_ab.copy().T)
+            density_matrix_subsys_a = 2.0 * (rot_evecs_occ_a @ rot_evecs_occ_a.copy().T)
         else:
-            u, svals, v = np.linalg.svd(evecs_occ_a, full_matrices=True)
-
-        svals_diff = np.ediff1d(svals**2.0)
-        max_sval_change_idx = np.argmax(np.abs(svals_diff)) + 1
-
-        root_print(f'Maximum SPADE state for subsystem A: {max_sval_change_idx}')
-
-        evecs_occ_a = evecs_occ @ v[:max_sval_change_idx, :].T
-        evecs_occ_ab = evecs_occ.copy()
-
-        # @TODOSPIN: Need to redefine occupancies
-        density_matrix_supersystem = 2.0 * (evecs_occ_ab.copy() @ evecs_occ_ab.copy().T)
-        density_matrix_subsys_a = 2.0 * (evecs_occ_a.copy() @ evecs_occ_a.copy().T)
-
+            density_matrix_supersystem = (evecs_occ_ab @ evecs_occ_ab.copy().T)
+            density_matrix_subsys_a = (rot_evecs_occ_a @ rot_evecs_occ_a.copy().T)
+            
+        # I don't think this is needed anymore - density matrices should be synched before this
+        # point.
         if not(self.parallel):
-            density_matrix_supersystem = mpi_bcast_matrix(density_matrix_supersystem)
-            density_matrix_subsys_a = mpi_bcast_matrix(density_matrix_subsys_a)
+            for ispin in range(atomsembed.n_spins):
+                for ikpt in range(atomsembed.n_kpoints):
+                    density_matrix_supersystem[ispin,ikpt] = mpi_bcast_matrix(density_matrix_supersystem[ispin,ikpt])
+                    density_matrix_subsys_a[ispin,ikpt] = mpi_bcast_matrix(density_matrix_subsys_a[ispin,ikpt])
 
         density_matrix_subsys_b = density_matrix_supersystem - density_matrix_subsys_a
-        root_print(f'SPADE total supersystem A+B charge: {op.trace(overlap @ density_matrix_supersystem)}')
-        root_print(f'SPADE localised subsystem A charge: {op.trace(overlap @ density_matrix_subsys_a)}')
-        root_print(f'SPADE localised subsystem B charge: {op.trace(overlap @ density_matrix_subsys_b)}')
+        root_print(f'SPADE total supersystem A+B charge: {(overlap @ density_matrix_supersystem).trace()}')
+        root_print(f'SPADE localised subsystem A charge: {(overlap @ density_matrix_subsys_a).trace()}')
+        root_print(f'SPADE localised subsystem B charge: {(overlap @ density_matrix_subsys_b).trace()}')
 
         root_print('Exiting SPADE localisation...')
 
         return density_matrix_subsys_a, density_matrix_subsys_b
+
+    def freeze_and_thaw(self, densmat_A_LL, densmat_B_LL, overlap, ncycles=5, mixing_type="emb_pot"):
+        """ Freeze-and-thaw absolute basis truncation algorithm of Graham et al.[1]
+
+        [1] Graham, D. S.; Wen, X.; Chulhai, D. V.; Goodpaster, J. D.,
+        J. Chem. Theory Comput. 2020, 16 (4), 2284–2295. 
+        """
+        from .diis import DIIS
+
+        # mixing_type options: update_densmat, emb_pot, subsys_dens
+        mixing_step_size = self.fat_mixing
+        hist_len = 12
+
+        def renorm_densmat(densmat, overlap, target_pop):
+            pop = (overlap @ densmat).trace()
+            renorm = target_pop / pop
+            root_print(f"pop: {pop}")
+            root_print(f"nelec: {target_pop}")
+            root_print(f"renorm: {renorm}")
+            root_print(f"renorm charge: {renorm * pop}")
+            # I have no idea why, but np.float64 causes the SpinKPointArray to
+            # be cast to a list of nd.arrays.
+            new_densmat = float(renorm) * densmat
+            return new_densmat
+
+        def expand_and_truncate_mat(atomemb, mat):
+            mat = atomemb.full_mat_to_truncated(mat)
+            return  atomemb.truncated_mat_to_full(mat)
+
+        if self.abs_truncate:
+            densmat_A_LL = expand_and_truncate_mat(self.A_LL, densmat_A_LL)
+            densmat_B_LL = expand_and_truncate_mat(self.B_LL, densmat_B_LL)
+
+        densmat_A_LL = renorm_densmat(densmat_A_LL, overlap, self.A_pop)
+        densmat_B_LL = renorm_densmat(densmat_B_LL, overlap, self.B_pop)
+
+        update_densmat = densmat_A_LL + densmat_B_LL
+
+        self.A_LL.input_fragment_nelectrons = self.A_pop
+        self.A_LL.run_noscf(dm_in=densmat_A_LL)
+        self.B_LL.input_fragment_nelectrons = self.B_pop
+        self.B_LL.run_noscf(dm_in=densmat_B_LL)
+
+        # TODO: @SPIN AND K-POINT LOOP
+
+        self.output_data_dict["FATCONVINFO"] = {}
+        self.output_data_dict["FATCONVINFO"]["HIST_LEN"] = hist_len
+        self.output_data_dict["FATCONVINFO"]["MIXING_SIZE"] = mixing_step_size
+
+        self.output_data_dict["FATCONVINFO"]["DFTINDFT_ENERGIES"] = []
+        self.output_data_dict["FATCONVINFO"]["DFTINDFT_DELTAENERGIES"] = []
+        self.output_data_dict["FATCONVINFO"]["FAT_NCYCLES"] = 0
+        self.output_data_dict["FATCONVINFO"]["SUPSYS_POT_TIME"] = 0.
+        self.output_data_dict["FATCONVINFO"]["SUBSYS_A_DIAG_TIME"] = 0.
+        self.output_data_dict["FATCONVINFO"]["SUBSYS_B_DIAG_TIME"] = 0.
+        self.output_data_dict["FATCONVINFO"]["DIIS_TIME"] = 0.
+
+        for i in range(ncycles):
+
+            root_print(f"ITERATION {i}: STARTED!")
+            self.output_data_dict["FATCONVINFO"]["FAT_NCYCLES"] = i
+
+            # Calculate AB low-level reference energy
+            #if i==0:
+            self.AB_LL.run_noscf(dm_in=update_densmat, close_calc=True)
+            #else:
+            #    self.AB_LL.run_noscf(dm_in=update_densmat, close_calc=False)
+            new_energy = self.AB_LL.ev_corr_total_energy
+            self.output_data_dict["FATCONVINFO"]["DFTINDFT_ENERGIES"].append(new_energy)
+            self.output_data_dict["FATCONVINFO"]["SUPSYS_POT_TIME"] += self.AB_LL.last_run_time
+            root_print(f"FAT ITERATION {i} AB ENERGY B OPT: {new_energy}")
+
+            emb_ham_a = self.AB_LL.hamiltonian_total - self.A_LL.hamiltonian_total
+            self.vemb = emb_ham_a
+
+            start_time = time.time()
+            # RUN EMBEDDING CALCULATION
+            self.A_LL.input_fragment_nelectrons = self.A_pop
+            if self.projection == "huzinaga-sc":
+                # Produces a converged initial density for future iterations
+                if i==0:
+                    self.A_LL.run_emb_scf(dm_in=densmat_A_LL, emb_pot=self.vemb,
+                                          sc_huz_dm=densmat_B_LL, sc_huz_ovlp=overlap,
+                                          sc_huz_ham=self.AB_LL.hamiltonian_total,)
+                else:
+                    self.A_LL.run_embasi_diag_emb_pot(dm_in=densmat_A_LL, emb_pot=self.AB_LL.hamiltonian_total,
+                                                      sc_huz_dm=densmat_B_LL, sc_huz_ovlp=overlap,
+                                                      sc_huz_ham=self.AB_LL.hamiltonian_total)
+            else:
+                raise Exception("Only 'huzinaga-sc' is valid in freeze-and-thaw.")
+            end_time = time.time()
+            self.output_data_dict["FATCONVINFO"]["SUBSYS_A_DIAG_TIME"] += end_time - start_time
+
+            ### B_LL ####################################################
+            emb_ham_b = self.AB_LL.hamiltonian_total - self.B_LL.hamiltonian_total
+            self.vemb = emb_ham_b
+
+            start_time = time.time()
+            self.B_LL.input_fragment_nelectrons = self.B_pop
+            if self.projection == "huzinaga-sc":
+                if i==0:
+                    self.B_LL.run_emb_scf(dm_in=densmat_B_LL, emb_pot=self.vemb,
+                                          sc_huz_dm=densmat_A_LL, sc_huz_ovlp=overlap,
+                                          sc_huz_ham=self.AB_LL.hamiltonian_total)
+                else:
+                    self.B_LL.run_embasi_diag_emb_pot(dm_in=densmat_B_LL, emb_pot=self.AB_LL.hamiltonian_total,
+                                                      sc_huz_dm=densmat_A_LL, sc_huz_ovlp=overlap,
+                                                      sc_huz_ham=self.AB_LL.hamiltonian_total)
+            else:
+                raise Exception("Only 'huzinaga-sc' is valid in freeze-and-thaw.")
+            end_time = time.time()
+            self.output_data_dict["FATCONVINFO"]["SUBSYS_B_DIAG_TIME"] += end_time - start_time
+
+            # UPDATE DENSITY
+            if i == 0:
+                delta_energy = new_energy - self.AB_LL.total_energy
+            else:
+                delta_energy = new_energy - old_energy
+
+            self.output_data_dict["FATCONVINFO"]["DFTINDFT_DELTAENERGIES"].append(delta_energy)
+            root_print(f"ITERATION {i}: DELTA ENERGY - {delta_energy} eV")
+            old_energy = new_energy
+            
+            if np.abs(delta_energy) < 1e-6 and i != 0:
+                root_print(f"FAT CONVERGED!")
+                break
+
+            if mixing_type=="densmat":
+                # TODO: @SPIN AND K-POINT LOOP
+                if i==0:
+                    densmat_A_LL = self.A_LL.density_matrices_out.copy()
+                    densmat_B_LL = self.B_LL.density_matrices_out.copy()
+
+                    densmat_A_LL = renorm_densmat(densmat_A_LL, overlap, self.A_pop)
+                    densmat_B_LL = renorm_densmat(densmat_B_LL, overlap, self.B_pop)
+                    
+                    update_densmat = densmat_A_LL + densmat_B_LL
+
+                    if mixing_type == "densmat":
+                        tot_densmat_ab = update_densmat.spin_kpt_sum()
+                        diis_dens_ab = DIIS(tot_densmat_ab, hist_len, mixing_step_size, debug=True)
+
+                        diis_spin_k = {}
+                        for ispin in range(update_densmat.n_spins):
+                            for ikpt in range(update_densmat.n_kpoints):
+                                diis_spin_k[(ispin,ikpt)] = DIIS(update_densmat[ispin,ikpt], hist_len, mixing_step_size, debug=False)
+
+                else:
+                    densmat_A_LL = self.A_LL.density_matrices_out.copy()
+                    densmat_B_LL = self.B_LL.density_matrices_out.copy()
+
+                    time_s = time.time()
+                    update_densmat = densmat_A_LL + densmat_B_LL
+                    tot_densmat_ab = update_densmat.spin_kpt_sum()
+                    tot_densmat_ab, coeffs = diis_dens_ab.diis_step(tot_densmat_ab)
+
+                    for ispin in range(update_densmat.n_spins):
+                        for ikpts in range(update_densmat.n_kpoints):
+                            update_densmat[ispin,ikpt], _ = \
+                                diis_spin_k[(ispin,ikpt)].diis_step(update_densmat[ispin,ikpt], \
+                                                                    coeff_mat=coeffs)
+
+                    root_print(f"TIME FOR DIIS {time.time()-time_s}")
+                    self.output_data_dict["FATCONVINFO"]["DIIS_TIME"] += time.time()-time_s
+
+            root_print(f"ITERATION {i}: DONE!\n")
+  
+        self.AB_LL.close_calculator()
+        # Finally, run a post-processing step to obtain the high-level
+        # energy in the potential of the frozen, absolutely localised
+        # environment
+        if self.projection == "huzinaga-sc":
+            self.A_LL.input_fragment_nelectrons = self.A_pop
+            self.A_LL.run_noscf(dm_in=densmat_A_LL)
+
+            emb_ham_a = self.AB_LL.hamiltonian_total - self.A_LL.hamiltonian_total
+
+            self.vemb = emb_ham_a
+            
+            self.A_HL.input_fragment_nelectrons = self.A_pop
+            self.A_HL.run_emb_scf(dm_in=densmat_A_LL, emb_pot=emb_ham_a,
+                                  sc_huz_dm=densmat_B_LL, sc_huz_ovlp=overlap,
+                                  sc_huz_ham=self.AB_LL.hamiltonian_total)
+
+            self.subsys_A_highlvl_totalen = self.A_HL.ev_corr_total_energy
+
+            self.order_1_embedding_corr = ( (self.A_HL.density_matrices_out - densmat_A_LL) @ self.vemb).trace() * 27.211384500
+
+        else:
+            raise Exception("Only 'huzinaga-sc' is valid in freeze-and-thaw.")
+
+
+        return densmat_A_LL, densmat_B_LL
 
     def run(self):
         """ Summary
@@ -669,6 +919,8 @@ class ProjectionEmbedding(EmbeddingBase):
         """
         import numpy as np
         import tracemalloc
+        import time
+
         tracemalloc.start(50)
 
         root_print("Embedding calculation begun...")
@@ -677,12 +929,13 @@ class ProjectionEmbedding(EmbeddingBase):
         # and B. Returns localised density matrices for subsystems A and B, and
         # the two-electron components of the hamiltonian (combined with
         # nuclear-electron potential).
-        start = time.time()
-        self.AB_LL.run()
-        self.subsys_AB_lowlvl_totalen = self.AB_LL.total_energy
-        end = time.time()
-        self.time_ab_lowlevel = end - start
+        self.AB_LL.run_scf()
+        self.subsys_AB_lowlvl_scftotalen = self.AB_LL.total_energy
+        self.time_ab_lowlevel = self.AB_LL.last_run_time
+        self.output_timing_dict["AB_LL_SCF"] = self.time_ab_lowlevel
+        self.output_data_dict["TOTALENERGY"]["AB_LL"] = self.AB_LL.total_energy
 
+        # TODO: @SPIN AND K-POINT LOOP
         if self.parallel:
             overlap = self.AB_LL.overlap.copy()
             hamiltonian_AB_total = self.AB_LL.hamiltonian_total.copy()
@@ -694,62 +947,59 @@ class ProjectionEmbedding(EmbeddingBase):
 
         # Read the localised density matrices output by the QM code or
         # perform SPADE localisation on the wrapper level.
+        # TODO: @SPIN AND K-POINT LOOP
         basis_info = self.set_basis_info(self.AB_LL)
         self.AB_LL.basis_info = basis_info
         if self.localisation == "SPADE":
-            if self.gc:
-                root_print(f"Pre-GC AB_LL: {tracemalloc.get_traced_memory()}")
-                self.AB_LL.garbage_collect()
             start = time.time()
             densmat_A_LL, densmat_B_LL = self.spade_localisation(self.AB_LL, hamiltonian_AB_total, overlap)
             end = time.time()
             self.time_spade = end - start
+            self.output_timing_dict["SPADE_LOCALISATION"] = self.time_spade
         else:
             densmat_A_LL = self.AB_LL.density_matrices_out[0]
             densmat_B_LL = self.AB_LL.density_matrices_out[1]
-            if self.gc:
-                self.AB_LL.garbage_collect()
-
 
         # Initialises the density matrix for subsystem A, and calculates the
         # hamiltonian components for subsystem A at the low-level reference.
         if self.truncate:
-
+            # TODO: @SPIN AND K-POINT LOOP
             if (self.truncate_basis_thresh is not None):
                 self.basis_mask = self.select_atoms_basis_truncation(self.AB_LL,
                                                                 densmat_A_LL,
                                                                 overlap,
-                                                                self.truncate_basis_thresh)
+                                                                self.truncate_basis_thresh,
+                                                                1)
             elif (self.truncate_basis_atoms is not None):
                 self.basis_mask = [ x in self.truncate_basis_atoms for x in np.arange(len(self.AB_LL.atoms)) ]
             else:
                 raise Exception("self.truncate is True, but neither self.truncate_basis_thresh or self.truncate_basis_atoms are set")
 
-            self.basis_info = self.set_truncation_defaults(self.AB_LL, self.basis_mask)
+            self.basis_info = self.set_truncation_defaults(self.AB_LL, self.basis_mask, 1)
             self.trunc_basis_atoms = self.basis_info.trunc_basis_atoms
-
-            self.AB_LL.truncate = False
-            self.A_LL.truncate = True
-            self.A_HL.truncate = True
-            self.A_HL_PP.truncate = True
         else:
             self.basis_info = self.set_basis_info(self.AB_LL)
-            self.AB_LL.truncate = False
-            self.A_LL.truncate = False
-            self.A_HL.truncate = False
-            self.A_HL_PP.truncate = False
-
-        if self.total_energy_corr == "nonscf":
-            self.AB_LL_PP.truncate = False
-            self.AB_LL_PP.basis_info = basis_info
 
         self.AB_LL.basis_info = self.basis_info
         self.A_LL.basis_info = self.basis_info
         self.A_HL.basis_info = self.basis_info
-        self.A_HL_PP.basis_info = self.basis_info
-
+            
+        if self.fat_on:
+            if self.abs_truncate:
+                self.basis_mask = self.select_atoms_basis_truncation(self.AB_LL,
+                                                                 densmat_B_LL,
+                                                                 overlap,
+                                                                 self.truncate_basis_thresh,
+                                                                 2)
+                basis_info_B = self.set_truncation_defaults(self.AB_LL, self.basis_mask, 2)
+                self.B_LL.basis_info = basis_info_B
+            else:
+                self.basis_info = self.set_basis_info(self.AB_LL)
+                self.B_LL.basis_info = basis_info_B
+                
         # Calculates the electron count for the combined (A+B) and separated 
         # subsystems (A and B).
+        # TODO: @SPIN AND K-POINT LOOP - and needs syncing??
         self.AB_pop = self.calc_subsys_pop(overlap, \
                                            (densmat_A_LL + densmat_B_LL))
 
@@ -760,30 +1010,9 @@ class ProjectionEmbedding(EmbeddingBase):
         root_print(f" Population of Subsystem AB: {self.AB_pop}")
         root_print(f" Population of Subsystem A: {self.A_pop}")
         root_print(f" Population of Subsystem B: {self.B_pop}")
-
-        # Calculate the energy for subsystem A with the lower level of theory
-        self.A_LL.density_matrix_in = densmat_A_LL
-        if self.truncate:
-            trunc_densmat_A_LL = self.A_LL.full_mat_to_truncated(densmat_A_LL)
-
-        self.A_LL.input_fragment_nelectrons = self.A_pop
-        start = time.time()
-        self.A_LL.run(ev_corr_scf=True)
-        self.subsys_A_lowlvl_totalen = self.A_LL.ev_corr_total_energy
-        end = time.time()
-        self.time_a_lowlevel = end - start
-
-        # Initialises the density matrix for subsystem A, and calculated the 
-        # hamiltonian components for subsystem A at the low-level reference.
-        if self.projection == "level-shift":
-            self.calculate_levelshift_projector(densmat_B_LL, overlap)
-        elif self.projection == "huzinaga":
-            self.calculate_huzinaga_projector(hamiltonian_AB_total, overlap, densmat_B_LL)
-        elif self.projection == "huzinaga-sc":
-            self.A_HL.huzinaga_dm_in = densmat_B_LL
-            self.A_HL.huzinaga_ovlp_in = overlap
-        else:
-            raise Exception("Invalid entry for projection: use 'level-shift', 'huzinaga-sc', or 'huzinaga' ")
+        self.output_data_dict["CHARGEDAT"]["AB_POPULATION"] = self.AB_pop
+        self.output_data_dict["CHARGEDAT"]["A_POPULATION"] = self.A_pop
+        self.output_data_dict["CHARGEDAT"]["B_POPULATION"] = self.B_pop
 
         # Calculate density matrix for subsystem A at the higher level of 
         # theory. Two terms are added to the hamiltonian matrix of the embedded
@@ -798,119 +1027,100 @@ class ProjectionEmbedding(EmbeddingBase):
         #    functions associated with the environment (subsystem B) from the 
         #    embedded subsystem by adding a large energy penalty to hamiltonian
         #    components associated with subsystem B.
-        #
-        # Registered callbacks in ASI add the above components to the Fock-matrix
-        # at every SCF iteration.
-        self.A_HL.density_matrix_in = densmat_A_LL
-        self.A_HL.input_fragment_nelectrons = self.A_pop
-
-        self.vemb = AB_hamiltonian_estat_plus_xc - self.A_LL.hamiltonian_estat_plus_xc
-        if self.projection == "huzinaga-sc":
-            self.A_HL.fock_embedding_matrix = self.vemb
+        if self.fat_on:
+            start = time.time()
+            densmat_A_HL, densmat_B_LL = self.freeze_and_thaw(densmat_A_LL, densmat_B_LL, overlap, ncycles=200, mixing_type="densmat")
+            end = time.time()
+            self.fat_total_time = end - start
+            self.output_timing_dict["FAT_Total"] = self.fat_total_time
         else:
-            self.A_HL.fock_embedding_matrix = self.vemb + self.P_b
-
-        if self.gc:
-            root_print(f"Pre-GC A_LL: {tracemalloc.get_traced_memory()}")
-            self.A_LL.garbage_collect()
-            root_print(f"Post-GC A_LL: {tracemalloc.get_traced_memory()}")
+            # Calculate the energy for subsystem A with the lower level of theory
+            self.A_LL.density_matrix_in = densmat_A_LL
+            self.A_LL.input_fragment_nelectrons = self.A_pop
+            self.A_LL.run_noscf(dm_in=densmat_A_LL)
+            self.subsys_A_lowlvl_totalen = self.A_LL.ev_corr_total_energy
+            self.time_a_lowlevel = self.A_LL.last_run_time
+            self.output_timing_dict["A_LL_NONSCF"] = self.time_a_lowlevel
+            self.output_data_dict["TOTALENERGY"]["A_LL"] = self.subsys_A_lowlvl_totalen
         
-        start = time.time()
-        self.A_HL.run()
-        end = time.time()
-        self.time_a_highlevel = end - start
+            # Initialises the density matrix for subsystem A, and calculated the 
+            # hamiltonian components for subsystem A at the low-level reference.
+            if self.projection == "level-shift":
+                self.calculate_levelshift_projector(densmat_B_LL, overlap)
+            elif self.projection == "huzinaga":
+                self.calculate_huzinaga_projector(hamiltonian_AB_total, overlap, densmat_B_LL)
+            else:
+                self.P_b = None
 
-        densmat_A_HL = copy.copy(self.A_HL.density_matrices_out[0])
+            # Registered callbacks in ASI add the above components to the Fock-matrix
+            # at every SCF iteration.
+            self.A_HL.input_fragment_nelectrons = self.A_pop
+            #self.vemb = self.AB_LL.hamiltonian_total - self.A_LL.hamiltonian_total
+            self.vemb = self.AB_LL.hamiltonian_estat_plus_xc - self.A_LL.hamiltonian_estat_plus_xc
 
-        if self.truncate:
-            trunc_vemb = self.A_HL.full_mat_to_truncated(self.vemb)
-            #trunc_P_b = self.A_HL.full_mat_to_truncated(self.P_b)
-            trunc_densmat_A_HL = self.A_HL.full_mat_to_truncated(densmat_A_HL)
-        
-        if self.gc:
-            root_print(f"Pre-GC A_HL: {tracemalloc.get_traced_memory()}")
-            self.A_HL.garbage_collect()
-            root_print(f"Post-GC A_HL: {tracemalloc.get_traced_memory()}")
-                
-        # Calculate the total energy of the embedded subsystem A at the high
-        # level of theory without the associated embedding potential.        
-        self.A_HL_PP.density_matrix_in = densmat_A_HL
-        self.A_HL_PP.input_fragment_nelectrons = self.A_pop
-        start = time.time()
-        self.A_HL_PP.run(ev_corr_scf=True)
-        self.subsys_A_highlvl_totalen = self.A_HL_PP.ev_corr_total_energy
-        end = time.time()
-        self.time_a_highlevel_pp = end - start
+            self.A_HL.run_emb_scf(dm_in=densmat_A_LL, emb_pot=self.vemb,
+                                  sc_huz_dm=densmat_B_LL, sc_huz_ovlp=overlap,
+                                  sc_huz_ham=self.vemb, proj_pot=self.P_b)
 
-        if self.gc:
-            root_print(f"Pre-GC A_HL_PP: {tracemalloc.get_traced_memory()}")
-            self.A_HL_PP.garbage_collect()
-            root_print(f"Post-GC A_HL_PP: {tracemalloc.get_traced_memory()}")
+            self.time_a_highlevel = self.A_HL.last_run_time
+            self.subsys_A_highlvl_totalen = self.A_HL.ev_corr_total_energy
+            self.output_timing_dict["A_HL_SCF"] = self.time_a_highlevel
+            self.output_data_dict["TOTALENERGY"]["A_HL"] = self.A_HL.ev_corr_total_energy
+
+            # TODO: @SPIN AND K-POINT LOOP - and needs syncing??
+            densmat_A_HL = self.A_HL.density_matrices_out.copy()
 
         if self.total_energy_corr == "nonscf":
-            # A terrible cludge which requires improvement.
-            # Re-normalising charge for differing atomic solvers (bad cludge)
-            # root_print(f" Normalizing density matrix from high-level reference...")
-            # self.A_HL_pop = self.calc_subsys_pop(self.AB_LL.overlap, 
-            #                                 self.A_HL.density_matrices_out[0])
-            # root_print(f" Population of Subystem A^[HL]: {self.A_HL_pop}")
-            # self.charge_renorm = (self.A_pop/self.A_HL_pop)
-            # root_print(f" Population of Subystem A^[HL] (post-norm): 
-            #             {self.calc_subsys_pop(self.AB_LL.overlap, 
-            #             self.charge_renorm*self.A_HL.density_matrices_out[0])}")
-            self.charge_renorm = 1.0
-
             # Calculate A low-level reference energy
-            self.A_LL.density_matrix_in = self.charge_renorm * \
-                                        self.A_HL.density_matrices_out[0]
-            self.A_LL.run(ev_corr_scf=True)
-            start = time.time()
+            self.A_LL.input_fragment_nelectrons = self.A_pop
+            self.A_LL.run_noscf(dm_in=densmat_A_HL)
             self.subsys_A_lowlvl_totalen = self.A_LL.ev_corr_total_energy
-            end = time.time()
-            self.time_a_lowlevel_pp = end - start
+            self.time_a_lowlevel_pp = self.A_LL.last_run_time
+            self.output_timing_dict["A_LL_NONSCF_POSTPROC"] = self.time_a_lowlevel_pp
+            self.output_data_dict["TOTALENERGY"]["A_LL_PP"] = self.subsys_A_lowlvl_totalen
 
             # Calculate AB low-level reference energy
-            self.AB_LL_PP.density_matrix_in = \
-                (self.charge_renorm * self.A_HL.density_matrices_out[0]) + densmat_B_LL
-
-            start = time.time()
-            self.AB_LL_PP.run(ev_corr_scf=True)
-            self.subsys_AB_lowlvl_totalen = self.AB_LL_PP.ev_corr_total_energy
-            end = time.time()
-            self.time_ab_lowlevel_pp = end - start
+            dm_tot = densmat_A_HL + densmat_B_LL
+            self.AB_LL.run_noscf(dm_in=dm_tot)
+            self.subsys_AB_lowlvl_nonscftotalen = self.AB_LL.ev_corr_total_energy
+            self.time_ab_lowlevel_pp = self.AB_LL.last_run_time
+            self.output_timing_dict["AB_LL_NONSCF_POSTPROC"] = self.time_ab_lowlevel_pp
+            self.output_data_dict["TOTALENERGY"]["AB_LL_PP"] = self.subsys_AB_lowlvl_nonscftotalen
 
         # Calculate projected density correction to total energy
         if self.truncate and self.projection == "level-shift":
             self.PB_corr = \
-                (op.trace(trunc_P_b @ trunc_densmat_A_HL) * 27.211384500)
+                ((trunc_P_b @ trunc_densmat_A_HL).trace() * 27.211384500)
         elif (not self.truncate) and self.projection == "level-shift":
             self.PB_corr = \
-                (op.trace(self.P_b @ densmat_A_HL) * 27.211384500)
+                ((self.P_b @ densmat_A_HL).trace() * 27.211384500)
         else:
             self.PB_corr = 0
-    
 
-
-
+        self.output_data_dict["TOTALENERGY"]["PB_CORR"] = self.PB_corr
         if "total_energy_method" in self.A_HL.initial_calc.parameters:
             self.subsys_A_highlvl_totalen = self.subsys_A_highlvl_totalen + \
                 self.A_HL.post_scf_corr_energy - self.A_HL.dft_energy
 
         if self.total_energy_corr == "1storder":
             if self.truncate:
-                self.order_1_embedding_corr = op.trace((trunc_densmat_A_HL - trunc_densmat_A_LL) @ \
-                                                       (trunc_vemb)) * 27.211384500
+                self.order_1_embedding_corr = (self.A_HL.full_mat_to_truncated(densmat_A_HL - densmat_A_LL) @ \
+                                               self.A_HL.full_mat_to_truncated(self.vemb)).trace() * 27.211384500
             else:
-                self.order_1_embedding_corr = op.trace((densmat_A_HL - densmat_A_LL) @ \
-                                                       (self.vemb)) * 27.211384500
+                self.order_1_embedding_corr = ((densmat_A_HL - densmat_A_LL) @ self.vemb).trace() * 27.211384500
 
-            self.DFT_AinB_total_energy = self.subsys_A_highlvl_totalen - \
-                                       self.subsys_A_lowlvl_totalen + self.subsys_AB_lowlvl_totalen + \
+            self.DFT_AinB_total_energy = self.subsys_AB_lowlvl_scftotalen - \
+                                       self.subsys_A_lowlvl_totalen + self.subsys_A_highlvl_totalen + \
                                        self.order_1_embedding_corr + self.PB_corr
 
-        if self.total_energy_corr == "nonscf":
+        if self.abs_truncate:
             self.DFT_AinB_total_energy = self.subsys_A_highlvl_totalen - \
-                self.subsys_A_lowlvl_totalen + self.subsys_AB_lowlvl_totalen + self.PB_corr
+                self.subsys_A_lowlvl_totalen + self.subsys_AB_lowlvl_scftotalen + self.PB_corr + self.order_1_embedding_corr            
+        elif self.total_energy_corr == "nonscf":
+            self.DFT_AinB_total_energy = self.subsys_A_highlvl_totalen - \
+                self.subsys_A_lowlvl_totalen + self.subsys_AB_lowlvl_nonscftotalen + self.PB_corr
+            
+        self.output_data_dict["TOTALENERGY"]["AinB_FINAL_EMBEEDING"] = self.DFT_AinB_total_energy
 
         root_print( f" ----------- FINAL         OUTPUTS --------- " )
         root_print(f" ")
@@ -920,10 +1130,11 @@ class ProjectionEmbedding(EmbeddingBase):
         root_print(f" Population of Subsystem B: {self.B_pop}")
         root_print(f" ")
         root_print( f" ----------- TIMING    INFORMATION --------- " )
-        if self.localisation == "SPADE":
-            root_print(f" Total time: {self.time_a_lowlevel + self.time_ab_lowlevel + self.time_a_highlevel + self.time_a_highlevel_pp + self.time_spade} s")
-        else:
-            root_print(f" Total time: {self.time_a_lowlevel + self.time_ab_lowlevel + self.time_a_highlevel + self.time_a_highlevel_pp} s")
+        root_print(f" TIMING USELESS AT THE MOMENT - GOING TO REWORK")
+        time_tot = 0
+        for time in self.output_timing_dict.values():
+            time_tot += time
+        root_print(f" Total time: {time_tot} s")
         root_print(f" Peak memory usage: {tracemalloc.get_traced_memory()[1]/(1024*1024)} MB")        
         root_print( f" ------------------------------------------- " )
         root_print(f" Intermediate Information:")
@@ -932,7 +1143,9 @@ class ProjectionEmbedding(EmbeddingBase):
         root_print(f" density components of the high-level energy reference for fragment A. ")
         root_print(f" Do not naively use these energies unless you are comfortable with ")
         root_print(f" their true definition. ")
-        root_print(f" Total Energy (A+B Low-Level): {self.subsys_AB_lowlvl_totalen} eV" )
+        root_print(f" Self-consistent Total Energy (A+B Low-Level): {self.subsys_AB_lowlvl_scftotalen} eV" )
+        if self.total_energy_corr == "nonscf":
+            root_print(f" Non Self-consistent Total Energy (A+B Low-Level): {self.subsys_AB_lowlvl_nonscftotalen} eV" )
         root_print(f" Total Energy (A Low-Level): {self.subsys_A_lowlvl_totalen} eV" )
         root_print(f" Total Energy (A High-Level): {self.subsys_A_highlvl_totalen} eV" )
         root_print(f" Projection operator energy correction DM^(A_HL) @ Pb: {self.PB_corr} eV" )
