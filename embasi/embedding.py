@@ -1,6 +1,7 @@
 # ~ Overall Embedding object
 from abc import ABC, abstractmethod
 from embasi.parallel_utils import root_print
+from embasi.qmcode_input_directives import ase_calc_parameter_setter
 import scalapack4py.npscal.math_utils.operations as op
 import copy
 import time
@@ -42,6 +43,9 @@ class EmbeddingBase(ABC):
         self.calculator_ll = calc_base_ll
         self.calculator_hl = calc_base_hl
         self.run_dir=run_dir
+
+        self.param_setter_ll = ase_calc_parameter_setter(self.calculator_ll)
+        self.param_setter_hl = ase_calc_parameter_setter(self.calculator_hl)
 
         try:
             os.makedirs(self.run_dir, exist_ok=True)
@@ -96,19 +100,19 @@ class EmbeddingBase(ABC):
         """Lists atomic centers significant charge for a given density matrix
 
         Returns a list of corresponding atoms for which the total contribution 
-        of an atoms constituent basis functions to the total charge of subsystem 
+        of an atoms constituent basis functions to the total charge of subsystem
         A, q^{A}:
 
                q^{A}_{/mu, /nu} = /gamma^{A}_{/mu, /nu} S_{/mu, /nu}
 
         exceeds the threshold, thresh:
 
-                      thresh < q_{/mu, /nu} 
+                      thresh < q_{/mu, /nu}
 
         This is unfortunately just Mulliken analysis. Future work could use
         more sophisticated charge techniques, but this would require
         volumetric charge data.
-        
+
         Parameters
         ----------
         atomsembed: AtomsEmbed
@@ -116,7 +120,7 @@ class EmbeddingBase(ABC):
         densmat: np.ndarray
             Corresponding density matrix to AtomsEmbed
         thresh: float
-            Mulliken charge threshold for 
+            Mulliken charge threshold for assigning an atom's basis funciton to a region
         Returns
         -------
         active_atom_mask: bool list
@@ -144,7 +148,7 @@ class EmbeddingBase(ABC):
         """Sets default BasisInfo objects for each embedding layer
 
         Necessary to maintain consistency in values needed for matrix truncation
-        /expansion between the AtomsEmbed objects (eg., self.basis_atoms, 
+        /expansion between the AtomsEmbed objects (eg., self.basis_atoms,
         self.n_atoms). Failure to do so leads to unexpected behaviour.
 
         Parameters
@@ -179,7 +183,7 @@ class EmbeddingBase(ABC):
         """Sets default BasisInfo objects for each embedding layer
 
         Necessary to maintain consistency in values needed for matrix truncation
-        /expansion between the AtomsEmbed objects (eg., self.basis_atoms, 
+        /expansion between the AtomsEmbed objects (eg., self.basis_atoms,
         self.n_atoms). Failure to do so leads to unexpected behaviour.
 
         Parameters
@@ -197,22 +201,22 @@ class EmbeddingBase(ABC):
         """
         from embasi.basis_info import Basis_info
 
-        # Establish mapping corresponding to each new atom from the 
+        # Establish mapping corresponding to each new atom from the
         # truncated matrix
-        active_atoms = np.array([ idx for idx, maskval 
-                                  in enumerate(active_atom_mask) 
+        active_atoms = np.array([ idx for idx, maskval
+                                  in enumerate(active_atom_mask)
                                   if (maskval or atomsembed.embed_mask[idx] == layer) ])
 
-        hl_atoms = np.array([ idx for idx, maskval 
-                                  in enumerate(active_atom_mask) 
+        hl_atoms = np.array([ idx for idx, maskval
+                                  in enumerate(active_atom_mask)
                                   if (atomsembed.embed_mask[idx] == 1) ])
-        env_atoms = np.array([ idx for idx, maskval 
-                                  in enumerate(active_atom_mask) 
+        env_atoms = np.array([ idx for idx, maskval
+                                  in enumerate(active_atom_mask)
                                   if (maskval and (not atomsembed.embed_mask[idx] == layer)) ])
 
         # Remove non-active atoms from basis_atoms to form a truncated
         # analogue
-        trunc_basis_atoms = np.array([atom for atom in atomsembed.basis_atoms 
+        trunc_basis_atoms = np.array([atom for atom in atomsembed.basis_atoms
                                       if atom in active_atoms])
 
         # Count number of basis functions included in truncation calculations
@@ -220,7 +224,7 @@ class EmbeddingBase(ABC):
         for atom in atomsembed.basis_atoms:
             if active_atom_mask[atom]:
                 new_nbasis +=1
-        
+
         root_print(f" " )
         root_print( f" ----------- Performing Truncation --------- " )
         root_print(f" ")
@@ -248,7 +252,7 @@ class EmbeddingBase(ABC):
 
     def calc_subsys_pop(self, overlap_matrix, density_matrix):
         """Calculated number of electrons in a subsystem
-        
+
         Calculates the overall electron population of a given subsystem
         through the following relation:
                         P_{pop} = tr[S^{AB}/gamma]
@@ -257,14 +261,14 @@ class EmbeddingBase(ABC):
 
         Parameters
         ----------
-        overlap_matrix: np.ndarray 
+        overlap_matrix: np.ndarray
             Supersystem overlap matrix in AO basis.
-        density_matrix: np.ndarray 
+        density_matrix: np.ndarray
             Subsystem density matrix in AO basis,
 
         Returns
         -------
-        population: float 
+        population: float
             Overall electronic population of subsystem
 
         """
@@ -273,7 +277,7 @@ class EmbeddingBase(ABC):
         population = (overlap_matrix @ density_matrix).trace()
 
         return population
-    
+
     @abstractmethod
     def run(self):
         pass
@@ -308,6 +312,10 @@ class EmbeddingBase(ABC):
         for scf in val:
             self._scf_methods.append(scf)
 
+
+
+
+
 class StandardDFT(EmbeddingBase):
 
     def __init__(self, atoms, calc_base_ll, embed_mask=None, calc_base_hl=None, run_dir="./EmbASI_calc"):
@@ -323,7 +331,7 @@ class StandardDFT(EmbeddingBase):
         calc_base_ll: ASE FileIOCalculator
             Calculator object for layer 1
         embed_mask: int or list
-            Number of atoms from index 0 in layer 1, or list of reigons assigned 
+            Number of atoms from index 0 in layer 1, or list of reigons assigned
             to each atom (i.e., [1,1,1,2,2,2]) - does nothing for StandardDFT
         calc_base_hl: ASE FileIOCalculator
             Calculator object for layer 2 - does nothing for StandardDFT
@@ -336,13 +344,13 @@ class StandardDFT(EmbeddingBase):
 
         self.calc_names = ["AB_LL"]
 
-        super(StandardDFT, self).__init__(atoms, embed_mask, calc_base_ll, 
+        super(StandardDFT, self).__init__(atoms, embed_mask, calc_base_ll,
                                           calc_base_hl, run_dir=run_dir)
-        low_level_calculator_1 = deepcopy(self.calculator_ll)
+        calc_ll = deepcopy(self.ll_calc)
 
-        low_level_calculator_1.parameters['qm_embedding_calc'] = 1
-        self.set_layer(atoms, self.calc_names[0], low_level_calculator_1, 
-                       embed_mask, ghosts=0, no_scf=False, 
+        calc_ll = self.param_setter_ll.set_full_scf_calc(calc_ll)
+        self.set_layer(atoms, self.calc_names[0], low_level_calc_1,
+                       embed_mask, ghosts=0, no_scf=False,
                        insert_embedding_region=False)
 
     def run(self):
@@ -354,6 +362,9 @@ class StandardDFT(EmbeddingBase):
         root_print(f" -----------======================--------- " )
         root_print(f" Total Energy (AB High-Level): {self.AB_LL.total_energy} eV" )
         root_print(f" -----------======================--------- " )
+
+
+
 
 
 class ProjectionEmbedding(EmbeddingBase):
@@ -412,7 +423,7 @@ class ProjectionEmbedding(EmbeddingBase):
 
         if (truncate_basis_thresh is not None) and (truncate_basis_atoms is not None):
             raise Exception("Please only specific truncate_basis_thresh OR truncate_basis_atoms")
-        
+
         if (truncate_basis_thresh is not None) or (truncate_basis_atoms is not None):
             self.truncate_basis_thresh = truncate_basis_thresh
             self.truncate_basis_atoms = truncate_basis_atoms
@@ -447,7 +458,7 @@ class ProjectionEmbedding(EmbeddingBase):
 
         if self.total_energy_corr == "1storder":
             self.calc_names = ["AB_LL","A_LL","A_HL"]
-        elif self.total_energy_corr == "nonscf": 
+        elif self.total_energy_corr == "nonscf":
             self.calc_names = ["AB_LL","A_LL","A_HL","B_LL"]
         else:
             raise Exception("Invalid entry for total_energy_corr: use '1storder' or 'nonscf' ")
@@ -463,16 +474,22 @@ class ProjectionEmbedding(EmbeddingBase):
         # now keep them persistent in memory, but use far fewer.
         self.gc = gc
 
+        # Set calculator keywords. This is very verbose - maybe the
+        # calculator should be set as an attribute of the param_setter
+        # classes...
         if self.parallel:
-            self.calculator_ll.parameters['scalapack_block_size'] = scalapack_block_size
-            self.calculator_hl.parameters['scalapack_block_size'] = scalapack_block_size
+            self.calculator_ll = \
+                self.param_setter_ll.set_scalapack_blocksize(self.calculator_ll,
+                                                             scalapack_block_size)
+            self.calculator_hl = \
+                self.param_setter_ll.set_scalapack_blocksize(self.calculator_hl,
+                                                             scalapack_block_size)
+        self.calculator_ll = \
+            self.param_setter_ll.override_basis_order(self.calculator_ll)
+        self.calculator_hl = \
+            self.param_setter_hl.override_basis_order(self.calculator_hl)
 
-        self.calculator_ll.parameters['override_default_empty_basis_order']=".true."
-        self.calculator_hl.parameters['override_default_empty_basis_order']=".true."
-
-        self.calculator_ll.parameters['qm_embedding_mo_localise']=".false."
-        self.calculator_hl.parameters['qm_embedding_mo_localise']=".false."
-
+        # Set the projection keywords
         self.projection = projection
         if self.projection == "level-shift":
             root_print(f"MO projection performed with: level-shift")
@@ -486,19 +503,23 @@ class ProjectionEmbedding(EmbeddingBase):
         else:
             raise Exception("Invalid entry for projection: use 'level-shift' or 'huzinaga' ")
 
+        # Copy ASE calculators needed for the AB_LL, A_LL and A_HL calculations
         low_level_calculator_1 = deepcopy(self.calculator_ll)
         low_level_calculator_2 = deepcopy(self.calculator_ll)
         high_level_calculator_1 = deepcopy(self.calculator_hl)
 
+        # Set keywords needed for localisation
         self.localisation = localisation
         if self.localisation == "SPADE":
-            low_level_calculator_2.parameters['qm_embedding_mo_localise']=".false."
+            root_print("Localisation method: SPADE")
         elif self.localisation == "qmcode":
-            low_level_calculator_2.parameters['qm_embedding_mo_localise']=".true."
+            root_print("Localisation method: QM Code")
+            low_level_calculator_1 = \
+                self.param_setter_ll.set_qm_localise(low_level_calculator_1)
         else:
             raise Exception("Invalid entry for localisation: use 'SPADE' or 'qmcode' ")
 
-        
+
         # Determines the BLACS context and descriptors used for the communication
         # and storage of arrays in the NPScal registry structure
         if self.parallel:
@@ -541,7 +562,7 @@ class ProjectionEmbedding(EmbeddingBase):
                        huzinaga=self.flag_huz_sc)
         self.A_HL.abs_truncate = self.abs_truncate
         self.A_HL.truncate = self.truncate
-        
+
         if self.fat_on:
             self.set_layer(atoms, "B_LL", low_level_calculator_1,
                            embed_mask, ghosts=1, no_scf=False,
@@ -568,7 +589,7 @@ class ProjectionEmbedding(EmbeddingBase):
     def calculate_levelshift_projector(self, densmat, overlap):
         """Calculates level-shift projection operator
 
-        Calculate the level-shift based projection operator from 
+        Calculate the level-shift based projection operator from
         Manby et al.[1]:
                     P^{B} = /mu S^{AB} D^{B} S^{AB}
         where S^{AB} is the overlap matrix for the supermolecular system, and
@@ -661,7 +682,7 @@ class ProjectionEmbedding(EmbeddingBase):
         else:
             density_matrix_supersystem = (evecs_occ_ab @ evecs_occ_ab.copy().T)
             density_matrix_subsys_a = (rot_evecs_occ_a @ rot_evecs_occ_a.copy().T)
-            
+
         # I don't think this is needed anymore - density matrices should be synched before this
         # point.
         if not(self.parallel):
@@ -856,7 +877,7 @@ class ProjectionEmbedding(EmbeddingBase):
             emb_ham_a = self.AB_LL.hamiltonian_total - self.A_LL.hamiltonian_total
 
             self.vemb = emb_ham_a
-            
+
             self.A_HL.input_fragment_nelectrons = self.A_pop
             self.A_HL.run_emb_scf(dm_in=densmat_A_LL, emb_pot=emb_ham_a,
                                   sc_huz_dm=densmat_B_LL, sc_huz_ovlp=overlap,
@@ -1098,6 +1119,9 @@ class ProjectionEmbedding(EmbeddingBase):
             self.PB_corr = 0
 
         self.output_data_dict["TOTALENERGY"]["PB_CORR"] = self.PB_corr
+
+        # An FHI-aims specific keyword for extracting total energies
+        # from the post-scf correction
         if "total_energy_method" in self.A_HL.initial_calc.parameters:
             self.subsys_A_highlvl_totalen = self.subsys_A_highlvl_totalen + \
                 self.A_HL.post_scf_corr_energy - self.A_HL.dft_energy
@@ -1221,15 +1245,21 @@ class FrozenDensityEmbedding(EmbeddingBase):
 
         self.run_dir =  run_dir
 
-        initial_calculator.parameters['qm_embedding_type'] = 'frozendensity  write'
-        low_level_calculator.parameters['qm_embedding_type'] = 'frozendensity  read_and_write'
-        high_level_calculator.parameters['qm_embedding_type'] = 'frozendensity  read_and_write'
+        initial_calculator = \
+            self.param_setter_ll.set_embasi_calculation_type(initial_calculator,
+                                                             "frozendensity-write")
+        low_level_calculator = \
+            self.param_setter_ll.set_embasi_calculation_type(low_level_calculator,
+                                                             "frozendensity-readandwrite")
+        initial_calculator = \
+            self.param_setter_ll.set_embasi_calculation_type(high_level_calculator,
+                                                             "frozendensity-readandwrite")
 
-        self.set_layer(atoms, "MU0", initial_calculator, 
+        self.set_layer(atoms, "MU0", initial_calculator,
                        embed_mask, ghosts=2, no_scf=False,
                        insert_embedding_region=False)
 
-        self.set_layer(atoms, "F2A1", low_level_calculator, 
+        self.set_layer(atoms, "F2A1", low_level_calculator,
                        embed_mask, ghosts=2, no_scf=False,
                        insert_embedding_region=False)
 
@@ -1380,12 +1410,9 @@ class ONIOMSubtractiveEmbedding(EmbeddingBase):
 
         self.cluster_hl = cluster_hl
 
-        #self.calculator_ll.parameters['override_default_empty_basis_order']=".true."
-        #self.calculator_hl.parameters['override_default_empty_basis_order']=".true."
-
         low_level_calculator_1 = deepcopy(self.calculator_ll)
         low_level_calculator_2 = deepcopy(self.calculator_ll)
-        
+
         high_level_calculator_1 = deepcopy(self.calculator_hl)
         high_level_calculator_2 = deepcopy(self.calculator_hl)
 
@@ -1394,12 +1421,16 @@ class ONIOMSubtractiveEmbedding(EmbeddingBase):
             high_level_calculator_1.parameters.pop("k_grid")
             high_level_calculator_2.parameters.pop("k_grid")
 
-        low_level_calculator_1.parameters['qm_embedding_calc'] = 1
-        low_level_calculator_2.parameters['qm_embedding_calc'] = 1
-        high_level_calculator_1.parameters['qm_embedding_calc'] = 1
-        high_level_calculator_2.parameters['qm_embedding_calc'] = 1
+        low_level_calculator_1 = \
+            self.param_setter_ll.set_full_scf_calc(low_level_calculator_1)
+        low_level_calculator_2 = \
+            self.param_setter_ll.set_full_scf_calc(low_level_calculator_2)
+        high_level_calculator_1 = \
+            self.param_setter_ll.set_full_scf_calc(high_level_calculator_2)
+        high_level_calculator_2 = \
+            self.param_setter_ll.set_full_scf_calc(high_level_calculator_2)
 
-        self.set_layer(atoms, "AB_LL", low_level_calculator_1, 
+        self.set_layer(atoms, "AB_LL", low_level_calculator_1,
                        embed_mask, ghosts=0, no_scf=False,
                        ctxt_tag=supersys_ctxt_tag,
                        descr_tag=supersys_descr_tag)
@@ -1429,7 +1460,6 @@ class ONIOMSubtractiveEmbedding(EmbeddingBase):
                        ctxt_tag=subsys_ctxt_tag,
                        descr_tag=subsys_descr_tag)
 
-
         if "total_energy_method" in high_level_calculator_2.parameters:
             high_level_calculator_2.parameters['total_energy_method'] = high_level_calculator_2.parameters["xc"]
         self.set_layer(subsys_atoms, "A_HL", high_level_calculator_1,
@@ -1453,8 +1483,6 @@ class ONIOMSubtractiveEmbedding(EmbeddingBase):
     def run(self):
         """ Summary
         The primary driver for ONIOM-like QM/QM embedding using a subtractive scheme.
-        The total energy is evaluated using 
-        
         ...
 
         """
@@ -1492,7 +1520,7 @@ class ONIOMSubtractiveEmbedding(EmbeddingBase):
         self.time_a_highlevel = end - start
 
         # Calculate the total energy of the embedded subsystem A at the high
-        # level of theory without the associated embedding potential.        
+        # level of theory without the associated embedding potential.
         self.A_HL_PP.density_matrix_in = self.A_HL.density_matrices_out[0]
         start = time.time()
         self.A_HL_PP.run()

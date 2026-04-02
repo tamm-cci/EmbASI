@@ -6,14 +6,14 @@ class SpinKpointArray:
     """
     A wrapper around a 2D NumPy array that provides additional indexing
     for spin and k-point dimensions using Pythonic bracket notation.
-    
+
     The internal array has shape (n_spin, n_kpoints, *base_shape) where
     base_shape is the shape of the underlying 2D array.
-    
+
     Indexing works with a tuple: arr[spin, kpoint, i, j]
     - Use None or : to get all elements in a dimension
     - Use integers to select specific indices
-    
+
     Parameters
     ----------
     base_array : tuple indexed array of np.ndarry/NPScal arrays
@@ -24,7 +24,7 @@ class SpinKpointArray:
         Number of k-points (default: 1)
     dtype : np.dtype, optional
         Data type for the array. If None, uses base_array's dtype
-    
+
     Examples
     --------
     >>> arr = SpinKpointArray.zeros((3, 4), n_spin=2, n_kpoints=5)
@@ -34,7 +34,7 @@ class SpinKpointArray:
     >>> arr[0, 2] = 1.0     # Set entire 2D slice
     >>> arr[1, 3, 2, 1] = 5 # Set single element
     """
-    
+
     def __init__(
         self,
         base_array_dict,
@@ -317,7 +317,7 @@ class SpinKpointArray:
         new_data = new_data.N
         self = self.N
         val = val.N
-                    
+
         return new_data
 
     def __mul__(self, val):
@@ -378,7 +378,6 @@ class SpinKpointArray:
                 sum_array = array.copy()
 
         return sum_array
-                
 
 def slice_all_check(slicefuncs):
     for slicefunc in slicefuncs:

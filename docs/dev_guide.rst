@@ -6,15 +6,23 @@ Introduction
 ~~~~~~~~~~~~
 
 EmbASI is designed as a minimal workflow for abstracting the tasks associated
-with embedding to the Pythonic wrapper. The modification to the host codebase
-should be small, but some familiarity with your codebase is desirable to
-implement the required control flow mechanisms.
+with embedding to a Pythonic wrapper. The modification to the host codebase
+should be small, but some routines for exporting and importing the correct
+data structures will need to be integrated into your core SCF loop. The placement
+of these routines should be fairly general, but familiarity with your codebase
+is desirable to implement the required control flow mechanisms.
 
 Where possible, we have provided template routines in ``<EmbASI_ROOT>/templates/fortran/qm_embedding.f90``
 which wrap around the expected import and export routines for each
 matrix quantity.
 
+Before implementing EmbASI into your QM code, you will require the following
+features in your codebase:
+   1. An interface to the ASI API, see: :ref:`section-asi-api`.
+   2. The ability to output the core Hamiltonian (or the one-electron Hamiltonian) and the two-electron Hamiltonian (electrostatic and exchange-correlation contributions).
+   3. The ability to set certain atomic sites as ghost atoms.
 
+.. _section-asi-api:
 Atomic Simulation Interface (ASI) API
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -58,8 +66,8 @@ matrices are output to the EmbASI wrapper:
 To integrate these routines within your workflow, the following routines
 from the ``qm_embedding`` template should be added in the following parts of your code:
    1. ``export_overlap``: after the construction of the overlap matrix.
-   2. ``export_allH``: after the final interation of the SCF cycle.
-   3. ``export_densmat``: after the final interation of the SCF cycle.
+   2. ``export_allH``: after the final iteration of the SCF cycle.
+   3. ``export_densmat``: after the final iteration of the SCF cycle.
 
 Expected Matrix Imports
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -88,13 +96,14 @@ this keyword are:
 Python Interface Modifications
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**In progress**
+Input file generation and output file parsing is performed with `ASE <https://ase-lib.org/>__. The syntax for some input parameters, including the total charge and specification of ghost sites, differ between each calculator. EmbASI requires the correct specification of these input in the ``qmcode_input_directives`` module. This module contains the abstract ``ase_calc_parameter_setter``, which supports the following inputs for different ASE calculators:
 
-As calculation input file generation and output file parsing is performed with `ASE <https://ase-lib.org/>__, some modification to the Pythonic wrapper may be needed to support the specification of ghost basis functions. As this syntax is different for each calculator object, ``embasi/qmcode_input_directives.py`` will need to be modified to provide the correct syntax for:
-
-   1. Setting the number of SCF cycles to 0.
+   1. Setting the correct syntax for a total energy only calculation.
    2. Creating an input file with ghost basis functions.
    3. Keyword modifications for calling post-HF calculations.
+   4. Setting the ScaLAPACK block size (Parallel only).
+
+To support a new calculator, a concrete implementation of ``ase_calc_parameter_setter`` must be provided, and the name of your calculator added to ``implemented_calculators``. Please refer to the FHI-aims implementation (``Aims_param_setter``) for direction.
 
 References
 ~~~~~~~~~~
