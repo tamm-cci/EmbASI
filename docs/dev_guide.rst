@@ -6,15 +6,23 @@ Introduction
 ~~~~~~~~~~~~
 
 EmbASI is designed as a minimal workflow for abstracting the tasks associated
-with embedding to the Pythonic wrapper. The modification to the host codebase
-should be small, but some familiarity with your codebase is desirable to
-implement the required control flow mechanisms.
+with embedding to a Pythonic wrapper. The modification to the host codebase
+should be small, but some routines for exporting and importing the correct
+data structures will need to be integrated into your core SCF loop. The placement
+of these routines should be fairly general, but familiarity with your codebase
+is desirable to implement the required control flow mechanisms.
 
 Where possible, we have provided template routines in ``<EmbASI_ROOT>/templates/fortran/qm_embedding.f90``
 which wrap around the expected import and export routines for each
 matrix quantity.
 
+Before implementing EmbASI into your QM code, you will require the following
+features in your codebase:
+   1. An interface to the ASI API, see: :ref:`section-asi-api`.
+   2. The ability to output the core Hamiltonian (or the one-electron Hamiltonian) and the two-electron Hamiltonian (electrostatic and exchange-correlation contributions).
+   3. The ability to set certain atomic sites as ghost atoms.
 
+.. _section-asi-api:
 Atomic Simulation Interface (ASI) API
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
