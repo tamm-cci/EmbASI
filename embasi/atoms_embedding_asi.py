@@ -957,8 +957,8 @@ class AtomsEmbed():
                 self.ev_corr_energy = \
                     27.211384500 * (self.density_matrices_out @ self.hamiltonian_total).trace()
 
-                self.ev_corr_total_energy = \
-                    self.total_energy - self.ev_sum + self.ev_corr_energy
+            self.ev_corr_total_energy = \
+                self.total_energy - self.ev_sum + self.ev_corr_energy
                 
     def close_calculator(self):
         self.atoms.calc.asi.close()

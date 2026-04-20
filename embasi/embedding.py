@@ -1055,8 +1055,8 @@ class ProjectionEmbedding(EmbeddingBase):
             # Registered callbacks in ASI add the above components to the Fock-matrix
             # at every SCF iteration.
             self.A_HL.input_fragment_nelectrons = self.A_pop
-            #self.vemb = self.AB_LL.hamiltonian_total - self.A_LL.hamiltonian_total
-            self.vemb = self.AB_LL.hamiltonian_estat_plus_xc - self.A_LL.hamiltonian_estat_plus_xc
+            self.vemb = self.AB_LL.hamiltonian_total - self.A_LL.hamiltonian_total
+            #self.vemb = self.AB_LL.hamiltonian_estat_plus_xc - self.A_LL.hamiltonian_estat_plus_xc
 
             self.A_HL.run_emb_scf(dm_in=densmat_A_LL, emb_pot=self.vemb,
                                   sc_huz_dm=densmat_B_LL, sc_huz_ovlp=overlap,
@@ -1115,11 +1115,11 @@ class ProjectionEmbedding(EmbeddingBase):
 
         if self.abs_truncate:
             self.DFT_AinB_total_energy = self.subsys_A_highlvl_totalen - \
-                self.subsys_A_lowlvl_totalen + self.subsys_AB_lowlvl_scftotalen + self.PB_corr + self.order_1_embedding_corr            
+                self.subsys_A_lowlvl_totalen + self.subsys_AB_lowlvl_scftotalen + self.PB_corr + self.order_1_embedding_corr
         elif self.total_energy_corr == "nonscf":
             self.DFT_AinB_total_energy = self.subsys_A_highlvl_totalen - \
                 self.subsys_A_lowlvl_totalen + self.subsys_AB_lowlvl_nonscftotalen + self.PB_corr
-            
+
         self.output_data_dict["TOTALENERGY"]["AinB_FINAL_EMBEEDING"] = self.DFT_AinB_total_energy
 
         root_print( f" ----------- FINAL         OUTPUTS --------- " )

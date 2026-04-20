@@ -384,7 +384,7 @@ def ham_saving_and_huzinaga_callback(aux, iK, iS, descr, data, matrix_descr_ptr)
                     MP = asi.scalapack.blacs_gridinfo(descr_cast.ctxt)[0]
                     NP = asi.scalapack.blacs_gridinfo(descr_cast.ctxt)[1]
                     ctxt = BLACSContextManager(ctxt_tag, MP, NP, asi.scalapack)
-                                                
+
                 if not(DESCR_Register.check_register(descr_tag)):
                     descr_cast = asi.scalapack.wrap_blacs_desc(descr)
                     m, n, mb, nb = descr_cast.m, descr_cast.n, descr_cast.mb, descr_cast.nb
@@ -437,7 +437,7 @@ def ham_saving_and_huzinaga_callback(aux, iK, iS, descr, data, matrix_descr_ptr)
                 else:
                     fock_supermol = atomsembed.truncated_mat_to_full(data)
                     fmat_supermol = (fock_supermol + vemb_supermol)
-                
+
                 if atomsembed.fock_embedding_matrix.n_spins > 1:
                     projector = - 1.0 * ((fmat_supermol @ dm_supermol @ ovlp_supermol.T) + (ovlp_supermol @ dm_supermol @ fmat_supermol.T))
                 else:
