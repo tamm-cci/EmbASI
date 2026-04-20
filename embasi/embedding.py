@@ -394,6 +394,8 @@ class ProjectionEmbedding(EmbeddingBase):
     truncate_basis: float or None:
         Truncates the basis functions of the environment based on
         a Mulliken charge metrix. Turned off if None. Defaults to None.
+    spade_ncores: int
+        Turns on separate core-valence localisation
 
     References
     ----------
@@ -406,10 +408,10 @@ class ProjectionEmbedding(EmbeddingBase):
     def __init__(self, atoms, embed_mask, calc_base_ll, calc_base_hl,
                  total_charge=0, post_scf=None, total_energy_corr="1storder",
                  truncate_basis_thresh=None, truncate_basis_atoms=None,
-                 localisation='SPADE', spade_manual_state=0, projection="level-shift",
-                 freeze_and_thaw=False, mu_val=1.e+06, parallel=False, gc=True,
-                 run_dir="./EmbASI_calc", basis_illcond_thresh=1e-5,
-                 scalapack_block_size=16, fat_mixing=0.2):
+                 localisation='SPADE', spade_manual_state=0, spade_ncores=0,
+                 projection="level-shift", freeze_and_thaw=False, mu_val=1.e+06,
+                 parallel=False, gc=True, run_dir="./EmbASI_calc",
+                 basis_illcond_thresh=1e-5, scalapack_block_size=16, fat_mixing=0.2):
 
         from copy import copy, deepcopy
         from mpi4py import MPI
@@ -446,6 +448,7 @@ class ProjectionEmbedding(EmbeddingBase):
             self.fat_on = True
 
         self.spade_manual_state = spade_manual_state
+        self.spade_ncores = spade_ncores
 
         if ((self.abs_truncate) and (not self.fat_on)):
             raise Exception("Absolute truncation can only be run with 'freeze_and_thaw=True' ")
@@ -621,11 +624,14 @@ class ProjectionEmbedding(EmbeddingBase):
         from scalapack4py.npscal.math_utils.npscal2npscal import eig, svd
         from embasi.parallel_utils import mpi_bcast_matrix
         import copy
+
+        # TODO: This procedure is getting very ugly and needs refactoring into its
+        # own module at some point.
+
         # TODO: @SPIN AND K-POINT LOOP - and needs syncing?? - SHOULD WE JUST PLACE THE LOOP AROUND THIS ROUTINE?
         root_print('Starting SPADE localisation...')
 
         nelecs = atomsembed.free_atom_nelectrons - atomsembed.input_total_charge
-        root_print(f"NELECS: {nelecs}")
         if self.parallel:
             evals, evecs, evecs_orthog, occ_mat = hamiltonian_eigensolv_parallel(hamiltonian, \
                                                                                  overlap, \
@@ -642,6 +648,7 @@ class ProjectionEmbedding(EmbeddingBase):
                                                           nkpts=atomsembed.n_kpoints,
                                                           basis_illcond_thresh=self.basis_illcond_thresh,)
 
+
         mask_val = []
 
         for idx, basis2atom in enumerate(atomsembed.basis_info.full_basis_atoms):
@@ -656,13 +663,53 @@ class ProjectionEmbedding(EmbeddingBase):
         rot_evecs_occ_a = evecs.copy()
         rot_evecs_occ_b = evecs.copy()
 
-        root_print(f"ALPHA EVALS: {evals[0,0]}")
-        root_print(f"BETA EVALS: {evals[0,0]}")
+        # TODO: Clean this up and add automatic detection based on eigenvalues.
+        # This should be done in one routine - this is very FORTRAN-like.
+        if self.spade_ncores > 0:
+            root_print("Performing separate core-valence SPADE localisation.")
+            for ispin in range(atomsembed.n_spins):
+                for ikpt in range(atomsembed.n_kpoints):
+                    max_occ_state = np.count_nonzero(occ_mat[ispin,ikpt])
+
+                    evecs_occ_orthog = evecs_orthog[ispin, ikpt, :, :self.spade_ncores]
+                    evecs_occ_a_orthog = evecs_occ_orthog[mask_val, :]
+
+                    if self.parallel:
+                        u, svals, v = svd(evecs_occ_a_orthog)
+                    else:
+                        u, svals, v = np.linalg.svd(evecs_occ_a_orthog, full_matrices=True)
+
+                    svals_diff = np.ediff1d(svals**2.0)
+                    max_sval_change_idx = np.argmax(np.abs(svals_diff)) + self.spade_manual_state + 1
+
+                    root_print(f'MAX OCC CORE STATE {self.spade_ncores} for Spin Channel {ispin}')
+                    root_print(f'SPADE CORE STATE FOR: Spin Channel {ispin}, K-point {ikpt}')
+                    root_print(f'Maximum SPADE core state for subsystem A: {max_sval_change_idx}')
+
+                    evecs_occ = evecs[ispin, ikpt, :, :self.spade_ncores]
+
+                    rot_evecs_occ_a[ispin, ikpt] = evecs_occ @ v[:max_sval_change_idx, :].T
+                    rot_evecs_occ_b[ispin, ikpt] = evecs_occ @ v[max_sval_change_idx:, :].T
+                    evecs_occ_ab[ispin, ikpt] = evecs_occ.copy()
+
+            # @TODOSPIN: Need to redefine occupancies - this obviously won't work for k-points
+            if atomsembed.n_spins == 1:
+                density_matrix_supersystem = 2.0 * (evecs_occ_ab @ evecs_occ_ab.copy().T)
+                density_matrix_subsys_a = 2.0 * (rot_evecs_occ_a @ rot_evecs_occ_a.copy().T)
+                density_matrix_subsys_b = 2.0 * (rot_evecs_occ_b @ rot_evecs_occ_b.copy().T)
+            else:
+                density_matrix_supersystem = (evecs_occ_ab @ evecs_occ_ab.copy().T)
+                density_matrix_subsys_a = (rot_evecs_occ_a @ rot_evecs_occ_a.copy().T)
+                density_matrix_subsys_b = (rot_evecs_occ_b @ rot_evecs_occ_b.copy().T)
+
+                root_print(f'SPADE CORE localised subsystem A charge: {(overlap @ density_matrix_subsys_a).trace()}')
+                root_print(f'SPADE CORE localised subsystem B charge: {(overlap @ density_matrix_subsys_b).trace()}')
+
         for ispin in range(atomsembed.n_spins):
             for ikpt in range(atomsembed.n_kpoints):
                 max_occ_state = np.count_nonzero(occ_mat[ispin,ikpt])
 
-                evecs_occ_orthog = evecs_orthog[ispin, ikpt, :, :max_occ_state]
+                evecs_occ_orthog = evecs_orthog[ispin, ikpt, :, self.spade_ncores:max_occ_state]
                 evecs_occ_a_orthog = evecs_occ_orthog[mask_val, :]
 
                 if self.parallel:
@@ -672,29 +719,36 @@ class ProjectionEmbedding(EmbeddingBase):
 
                 svals_diff = np.ediff1d(svals**2.0)
                 max_sval_change_idx = np.argmax(np.abs(svals_diff)) + self.spade_manual_state + 1
-                root_print(f"SVALS: {svals}")
-                root_print(f"SVALS DIFF: {svals_diff}")
-
 
                 root_print(f'MAX OCC STATE {max_occ_state} for Spin Channel {ispin}')
                 root_print(f'SPADE STATE FOR: Spin Channel {ispin}, K-point {ikpt}')
                 root_print(f'Maximum SPADE state for subsystem A: {max_sval_change_idx}')
 
-                evecs_occ = evecs[ispin, ikpt, :, :max_occ_state]
+                evecs_occ = evecs[ispin, ikpt, :, self.spade_ncores:max_occ_state]
 
                 rot_evecs_occ_a[ispin, ikpt] = evecs_occ @ v[:max_sval_change_idx, :].T
                 rot_evecs_occ_b[ispin, ikpt] = evecs_occ @ v[max_sval_change_idx:, :].T
                 evecs_occ_ab[ispin, ikpt] = evecs_occ.copy()
 
         # @TODOSPIN: Need to redefine occupancies - this obviously won't work for k-points
-        if atomsembed.n_spins == 1:
-            density_matrix_supersystem = 2.0 * (evecs_occ_ab @ evecs_occ_ab.copy().T)
-            density_matrix_subsys_a = 2.0 * (rot_evecs_occ_a @ rot_evecs_occ_a.copy().T)
-            density_matrix_subsys_b = 2.0 * (rot_evecs_occ_b @ rot_evecs_occ_b.copy().T)
+        if self.spade_ncores > 0:
+            if atomsembed.n_spins == 1:
+                density_matrix_supersystem = density_matrix_supersystem + 2.0 * (evecs_occ_ab @ evecs_occ_ab.copy().T)
+                density_matrix_subsys_a = density_matrix_subsys_a + 2.0 * (rot_evecs_occ_a @ rot_evecs_occ_a.copy().T)
+                density_matrix_subsys_b = density_matrix_subsys_b + 2.0 * (rot_evecs_occ_b @ rot_evecs_occ_b.copy().T)
+            else:
+                density_matrix_supersystem = density_matrix_supersystem + (evecs_occ_ab @ evecs_occ_ab.copy().T)
+                density_matrix_subsys_a = density_matrix_subsys_a + (rot_evecs_occ_a @ rot_evecs_occ_a.copy().T)
+                density_matrix_subsys_b = density_matrix_subsys_b + (rot_evecs_occ_b @ rot_evecs_occ_b.copy().T)
         else:
-            density_matrix_supersystem = (evecs_occ_ab @ evecs_occ_ab.copy().T)
-            density_matrix_subsys_a = (rot_evecs_occ_a @ rot_evecs_occ_a.copy().T)
-            density_matrix_subsys_b = (rot_evecs_occ_b @ rot_evecs_occ_b.copy().T)
+            if atomsembed.n_spins == 1:
+                density_matrix_supersystem = 2.0 * (evecs_occ_ab @ evecs_occ_ab.copy().T)
+                density_matrix_subsys_a = 2.0 * (rot_evecs_occ_a @ rot_evecs_occ_a.copy().T)
+                density_matrix_subsys_b =  2.0 * (rot_evecs_occ_b @ rot_evecs_occ_b.copy().T)
+            else:
+                density_matrix_supersystem = (evecs_occ_ab @ evecs_occ_ab.copy().T)
+                density_matrix_subsys_a = (rot_evecs_occ_a @ rot_evecs_occ_a.copy().T)
+                density_matrix_subsys_b = (rot_evecs_occ_b @ rot_evecs_occ_b.copy().T)
 
         # I don't think this is needed anymore - density matrices should be synched before this
         # point.
@@ -709,8 +763,6 @@ class ProjectionEmbedding(EmbeddingBase):
 
         root_print(f'SPADE total supersystem A+B charge: {(overlap @ density_matrix_supersystem).trace()}')
         root_print(f'SPADE localised subsystem A charge: {(overlap @ density_matrix_subsys_a).trace()}')
-        root_print(f'SPADE localised subsystem B charge: {(overlap @ density_matrix_subsys_b).trace()}')
-
         root_print(f'SPADE localised subsystem B charge: {(overlap @ density_matrix_subsys_b).trace()}')
 
         root_print('Exiting SPADE localisation...')
@@ -1098,6 +1150,14 @@ class ProjectionEmbedding(EmbeddingBase):
             # at every SCF iteration.
             self.A_HL.input_fragment_nelectrons = self.A_pop
             self.vemb = self.AB_LL.hamiltonian_total - self.A_LL.hamiltonian_total
+            self.calculate_levelshift_projector(densmat_B_LL, overlap)
+            for i in range(2):
+                np.save(f"ham_a_ll_spin_{i}.npy", self.A_LL.hamiltonian_total[i,0].gather_to_global())
+                np.save(f"dm_a_ll_spin_{i}.npy", densmat_A_LL[i,0].gather_to_global())
+                np.save(f"dm_b_ll_spin_{i}.npy", densmat_B_LL[i,0].gather_to_global())
+                np.save(f"vemb_spin_{i}.npy", self.vemb[i,0].gather_to_global())
+                np.save(f"pb_spin_{i}.npy", self.P_b[i,0].gather_to_global())
+            self.P_b
 
             self.A_HL.run_emb_scf(dm_in=densmat_A_LL, emb_pot=self.vemb,
                                   sc_huz_dm=densmat_B_LL, sc_huz_ovlp=overlap,
@@ -1154,13 +1214,6 @@ class ProjectionEmbedding(EmbeddingBase):
         #if "total_energy_method" in self.A_HL.initial_calc.parameters:
         #    self.subsys_A_highlvl_totalen = self.subsys_A_highlvl_totalen + \
         #        self.A_HL.post_scf_corr_energy - self.A_HL.dft_energy
-
-        for i in range(2):
-            np.save(f"ham_hl_spin_{i}.npy", self.A_HL.hamiltonian_total[i,0].gather_to_global())
-            np.save(f"dm_ab_ll_spin_{i}.npy", (self.AB_LL.density_matrices_out[i,0]).gather_to_global())
-            np.save(f"dm_a_hl_spin_{i}.npy", densmat_A_HL[i,0].gather_to_global())
-            np.save(f"dm_a_ll_spin_{i}.npy", densmat_A_LL[i,0].gather_to_global())
-            np.save(f"vemb_spin_{i}.npy", self.vemb[i,0].gather_to_global())
 
         if self.total_energy_corr == "1storder":
             if self.truncate:
