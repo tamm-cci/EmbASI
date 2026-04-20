@@ -52,7 +52,7 @@ class GeomUtils():
         for link in intersect:
             pos_1 = self.atoms.positions[link[0]]
             pos_2 = self.atoms.positions[link[1]]
-            
+
             vect = pos_2 - pos_1
             norm_vect = vect / np.linalg.norm(vect)
 
@@ -60,9 +60,9 @@ class GeomUtils():
                 link_pos = pos_2 - (link_len * norm_vect)
             else:
                 link_pos = pos_1 + (link_len * norm_vect)
-            
+
             link_atom = Atom(species_link, position=link_pos)
 
             reduced_atoms = reduced_atoms + link_atom
-    
+
         return reduced_atoms

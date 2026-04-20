@@ -239,7 +239,7 @@ def ham_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
     """
     try:
         asi, storage_dict, cnt_dict, ctxt_tag, descr_tag, label = cast(aux, py_object).value
-        
+
         if asi.is_hamiltonian_real:
             data_shape = (asi.n_basis,asi.n_basis) 
         else:
@@ -297,7 +297,7 @@ def ham_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
                 storage_dict[1][(PiS, PiK)] = storage_dict[2][(PiS, PiK)]
                 #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
                 storage_dict[2][(PiS, PiK)] = data
-                #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
+
     except Exception as eee:
         print(f"""Something happened in ASI ham_saving_callback {label}: 
                   {eee}\nAborting...""")
@@ -406,7 +406,7 @@ def ham_saving_and_huzinaga_callback(aux, iK, iS, descr, data, matrix_descr_ptr)
             if not (asi.ham_count in storage_dict.keys()):
                 storage_dict[asi.ham_count] = {}
 
-            if asi.ham_count <= 2:
+            if asi.ham_count <= 3:
                 storage_dict[asi.ham_count][(PiS, PiK)] = data
 
                 if (iS*iK) == (asi.n_local_ks):
@@ -419,7 +419,6 @@ def ham_saving_and_huzinaga_callback(aux, iK, iS, descr, data, matrix_descr_ptr)
                 storage_dict[1][(PiS, PiK)] = storage_dict[2][(PiS, PiK)]
                 #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
                 storage_dict[2][(PiS, PiK)] = data
-                #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
 
             if atomsembed.truncate:
                 vemb_supermol = atomsembed.fock_embedding_matrix[PiS, PiK]
@@ -455,8 +454,10 @@ def ham_saving_and_huzinaga_callback(aux, iK, iS, descr, data, matrix_descr_ptr)
 
                 if atomsembed.fock_embedding_matrix.n_spins > 1:
                     asi.huzinaga_eq[(PiS, PiK)] = vemb - 1.0 * (((data+vemb) @ dm @ ovlp.T) + (ovlp @ dm @ (data+vemb).T))
+                    #asi.huzinaga_eq[(PiS, PiK)] = vemb - 1.0 * ( ( ((data+vemb) - 3.0 * ovlp) @ dm @ ovlp.T) + (ovlp @ dm @ ((data+vemb) - 3.0 * ovlp).T) )
                 else:
                     asi.huzinaga_eq[(PiS, PiK)] = vemb - 0.5 * (((data+vemb) @ dm @ ovlp.T) + (ovlp @ dm @ (data+vemb).T))
+                    #asi.huzinaga_eq[(PiS, PiK)] = vemb - 0.5 * ( ( ((data+vemb) - 3.0 * ovlp) @ dm @ ovlp.T) + (ovlp @ dm @ ((data+vemb) - 3.0 * ovlp).T) )
 
     except Exception as eee:
         print(f"""Something happened in ASI ham_saving_callback {label}: 
@@ -521,7 +522,7 @@ def matrix_loading_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
             else:
                 if not(CTXT_Register.check_register(ctxt_tag)):
                     raise Exception("Context not recognised")
-                                                
+
                 if not(DESCR_Register.check_register(descr_tag)):
                     raise Exception("BLACS descriptor not recognised")
 

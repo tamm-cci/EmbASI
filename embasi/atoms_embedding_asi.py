@@ -535,7 +535,8 @@ class AtomsEmbed():
         self.runtime_calc = \
             self.param_setter.set_full_scf_calc(self.runtime_calc)
 
-        self.run()
+        self.run(ev_corr_scf_final_density=True)
+        #self.run()
 
         self.density_matrix_in = None
 
@@ -909,12 +910,19 @@ class AtomsEmbed():
         self._ham_tot = SpinKpointArray(self.atoms.calc.asi.ham_storage[2], self.n_spins, self.n_kpoints)
         self._ovlp = SpinKpointArray(self.atoms.calc.asi.overlap_storage, self.n_spins, self.n_kpoints)
 
+        if self.n_spins > 1:
+            self._ovlp[0,0] = self._ovlp[0,0]
+            self._ovlp[1,0] = self._ovlp[0,0]
+
         # THIS IS CODE BREAKING FOR QM CODE LOCALISATION - I WILL NEED A FIX TO RESTORE
+        root_print(f"DM STORAGE KEYS {self.atoms.calc.asi.dm_storage.keys()}")
         if (1 in self.atoms.calc.asi.dm_storage.keys()):
+            root_print("GOING THROUGH 1")
             self._dm = []
             self._dm.append(SpinKpointArray(self.atoms.calc.asi.dm_storage[0], self.n_spins, self.n_kpoints))
             self._dm.append(SpinKpointArray(self.atoms.calc.asi.dm_storage[1], self.n_spins, self.n_kpoints))
         else:
+            root_print("GOING THROUGH 2")
             self._dm = SpinKpointArray(self.atoms.calc.asi.dm_storage[0], self.n_spins, self.n_kpoints)
 
         if close_calc:
@@ -952,6 +960,7 @@ class AtomsEmbed():
             # To make sure we are holding the correct sum of eigenvalues,
             # we conduct one final eigensolution, rather than grepping (the
             # solution for FHI-aims).
+            root_print(f"EV SUM: {self.ev_sum}")
             if not hasattr(self, "ev_sum"):
                 self.ev_sum = self.ev_solve_and_sum_evs(emb_pot_scf)
 
@@ -964,8 +973,11 @@ class AtomsEmbed():
                     self.ev_corr_energy = \
                         27.211384500 * (self.density_matrix_in @ self.hamiltonian_total).trace()
 
+                root_print(f"EV CORR E: {self.ev_corr_energy}")
                 self.ev_corr_total_energy = \
                     self.total_energy - self.ev_sum + self.ev_corr_energy
+                root_print(f"EV TOTAL E: {self.total_energy}")
+                root_print(f"EV CORR TOTAL E: {self.ev_corr_total_energy}")
 
             if ev_corr_scf_final_density:
                 if self.truncate:
@@ -978,7 +990,9 @@ class AtomsEmbed():
 
                 self.ev_corr_total_energy = \
                     self.total_energy - self.ev_sum + self.ev_corr_energy
-
+                root_print(f"EV CORR E: {self.ev_corr_energy}")
+                root_print(f"EV TOTAL E: {self.total_energy}")
+                root_print(f"EV CORR TOTAL E: {self.ev_corr_total_energy}")
 
     def ev_solve_and_sum_evs(self, emb_pot_scf):
         """Solves the KS eigenvalue equation and sums the eigenvalues
@@ -1255,7 +1269,7 @@ class AtomsEmbed():
 
         tot_nelec = np.sum(self.atoms.numbers)
         ghost_nelec = np.sum(self.atoms.numbers[self.ghost_list_calc])
-
+        root_print(f"GHOST NELEC: {+(ghost_nelec)}")
         return tot_nelec - ghost_nelec
 
     @property
@@ -1276,4 +1290,7 @@ class AtomsEmbed():
 
     @property
     def fragment_total_charge(self):
+        root_print(f"FREE AT NELECS: {+(self.free_atom_nelectrons)}")
+        root_print(f"INPUT FRAG NELECS: {+(self.input_fragment_nelectrons)}")
+        root_print(f"FRAG TOTAL CHARGE: {+(self.input_fragment_nelectrons - self.free_atom_nelectrons)}")
         return +(self.input_fragment_nelectrons - self.free_atom_nelectrons)

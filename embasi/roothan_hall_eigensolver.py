@@ -93,6 +93,9 @@ def hamiltonian_eigensolv(hamiltonian, overlap, nelec, nspins=1, nkpts=1, basis_
 
     evals = {}
     evecs = {}
+    if return_orthog:
+        evecs_orthog = {}
+
     for ispin in range(nspins):
         for ikpt in range(nkpts):
             xform_mat, n_bad = overlap_illcondition_check(overlap[ispin,ikpt], thresh)
@@ -100,8 +103,14 @@ def hamiltonian_eigensolv(hamiltonian, overlap, nelec, nspins=1, nkpts=1, basis_
 
             evals[(ispin,ikpt)], evecs[(ispin,ikpt)] = np.linalg.eig(xform_hamiltonian(hamiltonian[ispin,ikpt], xform_mat))
 
-            evecs[(ispin,ikpt)] = back_xform_evecs(evecs[(ispin,ikpt)], xform_mat)
-            evals[(ispin,ikpt)], evecs[(ispin,ikpt)] = sort_eigvals_and_evecs(evals[(ispin,ikpt)], evecs[(ispin,ikpt)])
+            if (not return_orthog):
+                evecs[(ispin,ikpt)] = back_xform_evecs(evecs[(ispin,ikpt)], xform_mat)
+                evals[(ispin,ikpt)], evecs[(ispin,ikpt)] = sort_eigvals_and_evecs(evals[(ispin,ikpt)], evecs[(ispin,ikpt)])
+            else:
+                evecs_orthog[(ispin,ikpt)] = evecs[(ispin,ikpt)]
+                evecs[(ispin,ikpt)] = back_xform_evecs(evecs[(ispin,ikpt)], xform_mat)
+                evals[(ispin,ikpt)], evecs[(ispin,ikpt)] = sort_eigvals_and_evecs(evals[(ispin,ikpt)], evecs[(ispin,ikpt)])
+                evals[(ispin,ikpt)], evecs_orthog[(ispin,ikpt)] = sort_eigvals_and_evecs(evals[(ispin,ikpt)], evecs_orthog[(ispin,ikpt)])
 
     # Just assume we're dealing with simple insulators for now
     # - fill from the bottom up
@@ -134,4 +143,8 @@ def hamiltonian_eigensolv(hamiltonian, overlap, nelec, nspins=1, nkpts=1, basis_
     evals = SpinKpointArray(evals, nspins, nkpts)
     occ_mat = SpinKpointArray(occ_mat, nspins, nkpts)
 
-    return evals, evecs, occ_mat
+    if return_orthog:
+        evecs_orthog = SpinKpointArray(evecs_orthog, nspins, nkpts)
+        return evals, evecs, evecs_orthog, occ_mat
+    else:
+        return evals, evecs, occ_mat
