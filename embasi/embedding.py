@@ -344,12 +344,13 @@ class StandardDFT(EmbeddingBase):
 
         self.calc_names = ["AB_LL"]
 
+        calc_base_hl = deepcopy(calc_base_ll)
+
         super(StandardDFT, self).__init__(atoms, embed_mask, calc_base_ll,
                                           calc_base_hl, run_dir=run_dir)
-        calc_ll = deepcopy(self.ll_calc)
 
-        calc_ll = self.param_setter_ll.set_full_scf_calc(calc_ll)
-        self.set_layer(atoms, self.calc_names[0], low_level_calc_1,
+        calc_ll = self.param_setter_ll.set_full_scf_calc(calc_base_ll)
+        self.set_layer(atoms, self.calc_names[0], calc_ll,
                        embed_mask, ghosts=0, no_scf=False,
                        insert_embedding_region=False)
 
@@ -671,6 +672,9 @@ class ProjectionEmbedding(EmbeddingBase):
                 for ikpt in range(atomsembed.n_kpoints):
                     max_occ_state = np.count_nonzero(occ_mat[ispin,ikpt])
 
+                    #evecs_occ_orthog = evecs_orthog.copy()
+                    #evecs_occ_orthog[ispin, ikpt, :, self.spade_ncores:max_occ_state] = 0.0
+                    #evecs_occ_a_orthog = evecs_occ_orthog[mask_val, :]
                     evecs_occ_orthog = evecs_orthog[ispin, ikpt, :, :self.spade_ncores]
                     evecs_occ_a_orthog = evecs_occ_orthog[mask_val, :]
 
@@ -680,12 +684,14 @@ class ProjectionEmbedding(EmbeddingBase):
                         u, svals, v = np.linalg.svd(evecs_occ_a_orthog, full_matrices=True)
 
                     svals_diff = np.ediff1d(svals**2.0)
-                    max_sval_change_idx = np.argmax(np.abs(svals_diff)) + self.spade_manual_state + 1
+                    max_sval_change_idx = np.argmax(np.abs(svals_diff)) + 1
 
                     root_print(f'MAX OCC CORE STATE {self.spade_ncores} for Spin Channel {ispin}')
                     root_print(f'SPADE CORE STATE FOR: Spin Channel {ispin}, K-point {ikpt}')
                     root_print(f'Maximum SPADE core state for subsystem A: {max_sval_change_idx}')
 
+                    #evecs_occ = evecs.copy()
+                    #evecs_occ[ispin, ikpt, :, self.spade_ncores:max_occ_state] = 0.0
                     evecs_occ = evecs[ispin, ikpt, :, :self.spade_ncores]
 
                     rot_evecs_occ_a[ispin, ikpt] = evecs_occ @ v[:max_sval_change_idx, :].T
@@ -702,8 +708,8 @@ class ProjectionEmbedding(EmbeddingBase):
                 density_matrix_subsys_a = (rot_evecs_occ_a @ rot_evecs_occ_a.copy().T)
                 density_matrix_subsys_b = (rot_evecs_occ_b @ rot_evecs_occ_b.copy().T)
 
-                root_print(f'SPADE CORE localised subsystem A charge: {(overlap @ density_matrix_subsys_a).trace()}')
-                root_print(f'SPADE CORE localised subsystem B charge: {(overlap @ density_matrix_subsys_b).trace()}')
+            root_print(f'SPADE CORE localised subsystem A charge: {(overlap @ density_matrix_subsys_a).trace()}')
+            root_print(f'SPADE CORE localised subsystem B charge: {(overlap @ density_matrix_subsys_b).trace()}')
 
         for ispin in range(atomsembed.n_spins):
             for ikpt in range(atomsembed.n_kpoints):
@@ -750,6 +756,8 @@ class ProjectionEmbedding(EmbeddingBase):
                 density_matrix_subsys_a = (rot_evecs_occ_a @ rot_evecs_occ_a.copy().T)
                 density_matrix_subsys_b = (rot_evecs_occ_b @ rot_evecs_occ_b.copy().T)
 
+        #density_matrix_subsys_b = density_matrix_supersystem - density_matrix_subsys_a
+
         # I don't think this is needed anymore - density matrices should be synched before this
         # point.
         if not(self.parallel):
@@ -758,8 +766,6 @@ class ProjectionEmbedding(EmbeddingBase):
                     density_matrix_supersystem[ispin,ikpt] = mpi_bcast_matrix(density_matrix_supersystem[ispin,ikpt])
                     density_matrix_subsys_a[ispin,ikpt] = mpi_bcast_matrix(density_matrix_subsys_a[ispin,ikpt])
                     density_matrix_subsys_b[ispin,ikpt] = mpi_bcast_matrix(density_matrix_subsys_b[ispin,ikpt])
-
-        #density_matrix_subsys_b = density_matrix_supersystem - density_matrix_subsys_a
 
         root_print(f'SPADE total supersystem A+B charge: {(overlap @ density_matrix_supersystem).trace()}')
         root_print(f'SPADE localised subsystem A charge: {(overlap @ density_matrix_subsys_a).trace()}')
@@ -1126,9 +1132,7 @@ class ProjectionEmbedding(EmbeddingBase):
             self.output_timing_dict["FAT_Total"] = self.fat_total_time
         else:
             # Calculate the energy for subsystem A with the lower level of theory
-            #densmat_A_LL[0,0] = densmat_A_LL[0,0] + 0.5*(densmat_A_LL[0,0]+densmat_A_LL[1,0])
-            #densmat_A_LL[1,0] = densmat_A_LL[1,0] + 0.5*(densmat_A_LL[0,0]-densmat_A_LL[1,0])
-            #root_print(f"A SPIN 1 POP: {op.traceoverlap_matrix @ density_matrix})
+            root_print(f"DENSITY DIFF: {(self.AB_LL.density_matrices_out - densmat_A_LL - densmat_B_LL).trace()}")
 
             self.A_LL.input_fragment_nelectrons = self.A_pop
             self.A_LL.run_noscf(dm_in=densmat_A_LL)
@@ -1150,14 +1154,6 @@ class ProjectionEmbedding(EmbeddingBase):
             # at every SCF iteration.
             self.A_HL.input_fragment_nelectrons = self.A_pop
             self.vemb = self.AB_LL.hamiltonian_total - self.A_LL.hamiltonian_total
-            self.calculate_levelshift_projector(densmat_B_LL, overlap)
-            for i in range(2):
-                np.save(f"ham_a_ll_spin_{i}.npy", self.A_LL.hamiltonian_total[i,0].gather_to_global())
-                np.save(f"dm_a_ll_spin_{i}.npy", densmat_A_LL[i,0].gather_to_global())
-                np.save(f"dm_b_ll_spin_{i}.npy", densmat_B_LL[i,0].gather_to_global())
-                np.save(f"vemb_spin_{i}.npy", self.vemb[i,0].gather_to_global())
-                np.save(f"pb_spin_{i}.npy", self.P_b[i,0].gather_to_global())
-            self.P_b
 
             self.A_HL.run_emb_scf(dm_in=densmat_A_LL, emb_pot=self.vemb,
                                   sc_huz_dm=densmat_B_LL, sc_huz_ovlp=overlap,
@@ -1203,9 +1199,7 @@ class ProjectionEmbedding(EmbeddingBase):
         else:
             self.calculate_huzinaga_projector(self.A_HL.hamiltonian_total + self.vemb, overlap, densmat_B_LL)
             self.PB_corr = ((self.P_b @ densmat_A_HL).trace() * 27.211384500)
-            root_print(f"PB1: {self.PB_corr}")
             self.PB_corr = ((self.P_b @ (densmat_A_HL - densmat_A_LL)).trace() * 27.211384500)
-            root_print(f"PB2: {self.PB_corr}")
 
         self.output_data_dict["TOTALENERGY"]["PB_CORR"] = self.PB_corr
 
