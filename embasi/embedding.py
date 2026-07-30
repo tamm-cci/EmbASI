@@ -1031,7 +1031,6 @@ class ProjectionEmbedding(EmbeddingBase):
         self.time_ab_lowlevel = self.AB_LL.last_run_time
         self.output_timing_dict["AB_LL_SCF"] = self.time_ab_lowlevel
         self.output_data_dict["TOTALENERGY"]["AB_LL"] = self.AB_LL.total_energy
-        root_print(f"PBE ENERGY: {self.AB_LL.total_energy}")
 
         # TODO: @SPIN AND K-POINT LOOP
         if self.parallel:
