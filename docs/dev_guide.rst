@@ -96,14 +96,16 @@ this keyword are:
 Python Interface Modifications
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Input file generation and output file parsing is performed with `ASE <https://ase-lib.org/>__. The syntax for some input parameters, including the total charge and specification of ghost sites, differ between each calculator. EmbASI requires the correct specification of these input in the ``qmcode_input_directives`` module. This module contains the abstract ``ase_calc_parameter_setter``, which supports the following inputs for different ASE calculators:
+Input file generation and output file parsing is performed with `ASE <https://ase-lib.org/>__. The syntax for some input parameters, including the total charge and specification of ghost sites, differ between each calculator, and the mechanism used to export matrix quantities (density matrices, Hamiltonians, overlap) once a calculation has run also differs between codes (e.g., callbacks registered ahead of an ASI-driven run versus attributes read directly off the calculator afterwards). EmbASI requires the correct specification of both of these in the ``qmcode_adapters`` module. This module contains the abstract ``QMCodeAdapter``, which supports the following for different ASE calculators:
 
    1. Setting the correct syntax for a total energy only calculation.
    2. Creating an input file with ghost basis functions.
    3. Keyword modifications for calling post-HF calculations.
    4. Setting the ScaLAPACK block size (Parallel only).
+   5. Registering any export hooks needed before a calculation runs (``register_export_hooks``).
+   6. Extracting matrix quantities once a calculation has completed (``extract_matrices``).
 
-To support a new calculator, a concrete implementation of ``ase_calc_parameter_setter`` must be provided, and the name of your calculator added to ``implemented_calculators``. Please refer to the FHI-aims implementation (``Aims_param_setter``) for direction.
+To support a new calculator, provide a concrete implementation of ``QMCodeAdapter`` decorated with ``@register_calculator("YourAseCalculatorClassName")``, which adds it to ``implemented_calculators`` automatically. Please refer to the FHI-aims implementation (``AimsAdapter``) for direction.
 
 References
 ~~~~~~~~~~

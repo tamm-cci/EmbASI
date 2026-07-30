@@ -4,10 +4,9 @@ import numpy as np
 import time
 from mpi4py import MPI
 
-from embasi.parallel_utils import root_print, mpi_bcast_matrix_storage, \
-    mpi_bcast_integer
+from embasi.parallel_utils import root_print
 from embasi.ks_array import SpinKpointArray
-from embasi.qmcode_input_directives import ase_calc_parameter_setter
+from embasi.qmcode_adapters import qm_code_adapter
 
 from scalapack4py.npscal import NPScal
 from typing import overload, Union
@@ -93,7 +92,7 @@ class AtomsEmbed():
             self.reorder_atoms_from_embed_mask()
             self.atoms.info['embedding_mask'] = self.embed_mask
 
-        self.param_setter = ase_calc_parameter_setter(initial_calc)
+        self.qm_adapter = qm_code_adapter(initial_calc)
         self.initial_calc = initial_calc
 
         self.truncate = False
@@ -140,8 +139,8 @@ class AtomsEmbed():
             total_charge = 0.
 
         # Set the calculator to accept the total charge for the given fragment
-        calc = self.param_setter.set_qm_total_charge(calc, -float(total_charge))
-        calc = self.param_setter.set_ghost_atoms(calc, self.atoms, self.ghost_list_calc)
+        calc = self.qm_adapter.set_qm_total_charge(calc, -float(total_charge))
+        calc = self.qm_adapter.set_ghost_atoms(calc, self.atoms, self.ghost_list_calc)
 
         # Ensure the Aims template shares the input parameters of the calculator object
         calc.template.parameters = calc.parameters
@@ -150,7 +149,7 @@ class AtomsEmbed():
 
         # Nasty cludge for adding certain, non-ASE supported keywords
         # to the FHI-aims calculator.
-        if self.param_setter.asi_flavour == 1:
+        if self.qm_adapter.asi_flavour == 1:
             if self.embed_mask is not None and self.insert_embedding_region:
                 self._insert_embedding_region_aims()
 
@@ -533,10 +532,9 @@ class AtomsEmbed():
         self.runtime_calc = deepcopy(self.initial_calc)
 
         self.runtime_calc = \
-            self.param_setter.set_full_scf_calc(self.runtime_calc)
+            self.qm_adapter.set_full_scf_calc(self.runtime_calc)
 
-        self.run(ev_corr_scf_final_density=True)
-        #self.run()
+        self.run(ev_corr_scf_final_density=True, noscf=False)
 
         self.density_matrix_in = None
 
@@ -548,10 +546,10 @@ class AtomsEmbed():
         self.density_matrix_in = dm_in
 
         self.runtime_calc = deepcopy(self.initial_calc)
-        self.runtime_calc = self.param_setter.set_noscf_calc_params(self.runtime_calc)
+        self.runtime_calc = self.qm_adapter.set_noscf_calc_params(self.runtime_calc)
 
         time_s = time.time()
-        self.run(ev_corr_scf=True, close_calc=close_calc)
+        self.run(ev_corr_scf=True, close_calc=close_calc, noscf=True)
 
         # HACKY WAY TO INDUCE ASE TO RECALCULATE ENERGIES - DO NOT TO THIS
         #self.atoms.calc.atoms.positions[0,0] = self.atoms.calc.atoms.positions[0,0] + 0.00000001
@@ -566,7 +564,7 @@ class AtomsEmbed():
 
         self.runtime_calc = deepcopy(self.initial_calc)
         self.runtime_calc = \
-            self.param_setter.set_full_scf_embed_calc(self.runtime_calc)
+            self.qm_adapter.set_full_scf_embed_calc(self.runtime_calc)
 
         # TODO: REMOVE FHI-AIMS SPECIFIC DIRECTIVES - LEAVE WF CALCULATION TO POSTPROC
         #if "total_energy_method" in self.runtime_calc.parameters:
@@ -587,7 +585,7 @@ class AtomsEmbed():
             self.fock_embedding_matrix = emb_pot + proj_pot
 
         time_s = time.time()
-        self.run(ev_corr_scf_final_density=True, emb_pot_scf=True)
+        self.run(ev_corr_scf_final_density=True, emb_pot_scf=True, noscf=False)
 
         # Unset all for clarity
         self.huzinaga_dm_in = None
@@ -636,7 +634,7 @@ class AtomsEmbed():
                     for PiK in range(self.n_kpoints):
                         ovlp_supermol = atomsembed.huzinaga_ovlp_in[PiS, PiK]
                         dm_supermol = atomsembed.huzinaga_dm_in[PiS, PiK]
-                        
+
                         fock_supermol = atomsembed.embedding_ham_in[PiS, PiK]
 
                         A_block_min, A_block_max, B_block_min, B_block_max = get_abs_trunc_indices(atomsembed)
@@ -644,7 +642,7 @@ class AtomsEmbed():
                         fmat_supermol = fock_supermol[A_block_min:A_block_max,B_block_min:B_block_max]
                         dm_supermol = dm_supermol[B_block_min:B_block_max,B_block_min:B_block_max]
                         ovlp_supermol = ovlp_supermol[A_block_min:A_block_max,B_block_min:B_block_max]
-                
+
                         if atomsembed.huzinaga_dm_in.n_spins > 1:
                             projector[(PiS,PiK)] = - 1.0 * ((fmat_supermol @ dm_supermol @ ovlp_supermol.T) + (ovlp_supermol @ dm_supermol @ fmat_supermol.T))
                         else:
@@ -661,10 +659,10 @@ class AtomsEmbed():
                             projector[(PiS,PiK)] = - 1.0 * ((fock_supermol @ dm @ ovlp.T) + (ovlp @ dm @ fock_supermol.T))
                         else:
                             projector[(PiS,PiK)] = - 0.5 * (((fock_supermol) @ dm @ ovlp.T) + (ovlp @ dm @ (fock_supermol).T))
-            
+
 
             return SpinKpointArray(projector, self.n_spins, self.n_kpoints)
-        
+
         self.huzinaga_dm_in = sc_huz_dm
         self.huzinaga_ovlp_in = sc_huz_ovlp
         self.embedding_ham_in = sc_huz_ham
@@ -721,7 +719,7 @@ class AtomsEmbed():
         self.embedding_ham_in = None
         self.density_matrix_in = None
 
-    def run(self, ev_corr_scf=False, ev_corr_scf_final_density=False, emb_pot_scf=False, close_calc=True):
+    def run(self, ev_corr_scf=False, ev_corr_scf_final_density=False, emb_pot_scf=False, close_calc=True, noscf=False):
         """Invokes the ASI_run() call and extracts matrix quantities
 
         Driver routine which executes the QM code and controls which
@@ -739,11 +737,6 @@ class AtomsEmbed():
         import time
         import numpy as np
         from asi4py.asecalc import ASI_ASE_calculator
-        from embasi.asi_default_callbacks import dm_saving_callback, \
-                                                        ham_saving_callback, \
-                                                        ham_saving_and_huzinaga_callback, \
-                                                        ovlp_saving_callback, \
-                                                        matrix_loading_callback
         from embasi.roothan_hall_eigensolver_scalapack import hamiltonian_eigensolv_parallel
         from embasi.roothan_hall_eigensolver import hamiltonian_eigensolv
 
@@ -770,160 +763,29 @@ class AtomsEmbed():
                                                  self.atoms,
                                                  work_dir=self.outdir)
 
-        # Explicitly set function pointers to NULL to avoid
-        # previously set function pointers from passing into
-        # the present calculation.
-        self.atoms.calc.asi.register_overlap_callback(0, 0)
-        self.atoms.calc.asi.register_dm_callback(0, 0)
-        self.atoms.calc.asi.register_DM_init(0, 0)
-        self.atoms.calc.asi.register_hamiltonian_callback(0, 0)
-        self.atoms.calc.asi.register_set_hamiltonian_callback(0, 0)
-        self.atoms.calc.asi.register_modify_hamiltonian_callback(0, 0)
+        # Prepare the calculator to export matrix quantities (e.g., register
+        # ASI callbacks for callback-based QM codes; no-op for QM codes which
+        # expose matrices directly as attributes once a calculation has run).
+        self.qm_adapter.register_import_export_hooks(self.atoms.calc, self, emb_pot_scf=emb_pot_scf)
 
-        # Register the relevant callbacks
-        # self.atoms.calc.asi.keep_overlap = True
-        self.atoms.calc.asi.overlap_storage = {}
-        self.atoms.calc.asi.register_overlap_callback(ovlp_saving_callback, 
-                                                      (self.atoms.calc.asi, 
-                                                       self.atoms.calc.asi.overlap_storage,
-                                                       self.blacs_ctxt_tag,
-                                                       self.blacs_descr_tag,
-                                                       'Ovlp calc'))
-
-
-        self.atoms.calc.asi.dm_storage = {}
-        self.atoms.calc.asi.dm_calc_cnt = {}
-        self.atoms.calc.asi.dm_count = 0
-        self.atoms.calc.asi.register_dm_callback(dm_saving_callback,
-                                                 (self.atoms.calc.asi,
-                                                  self.atoms.calc.asi.dm_storage,
-                                                  self.atoms.calc.asi.dm_calc_cnt,
-                                                  self.blacs_ctxt_tag,
-                                                  self.blacs_descr_tag,
-                                                  'DM calc'))
-
-        self.atoms.calc.asi.ham_storage = {}
-        self.atoms.calc.asi.ham_calc_cnt = {}
-        self.atoms.calc.asi.ham_count = 0
-
-        if (self.flag_huz and emb_pot_scf):
-            self.atoms.calc.asi.huzinaga_eq = {}
-            self.atoms.calc.asi.register_hamiltonian_callback(ham_saving_and_huzinaga_callback,
-                                                              (self.atoms.calc.asi,
-                                                               self.atoms.calc.asi.ham_storage,
-                                                               {"atembed": self},
-                                                               self.atoms.calc.asi.ham_calc_cnt,
-                                                               self.blacs_ctxt_tag,
-                                                               self.blacs_descr_tag,
-                                                               'Ham calc'))
-        else:
-            self.atoms.calc.asi.register_hamiltonian_callback(ham_saving_callback,
-                                                              (self.atoms.calc.asi,
-                                                               self.atoms.calc.asi.ham_storage,
-                                                               self.atoms.calc.asi.ham_calc_cnt,
-                                                               self.blacs_ctxt_tag,
-                                                               self.blacs_descr_tag,
-                                                               'Ham calc'))
-
-        if self.density_matrix_in is not None:
-            self.atoms.calc.asi.register_DM_init(matrix_loading_callback,
-                                                 (self.atoms.calc.asi,
-                                                 self.density_matrix_in,
-                                                 False,
-                                                 self.blacs_ctxt_tag,
-                                                 self.blacs_descr_tag,
-                                                 'DM init'))
-
-        # Make sure we don't run with an already stored embedding potential unless
-        # It is actually called for.
-        if ((self.fock_embedding_matrix is not None) and (emb_pot_scf)):
-            if self.truncate:
-                mat_in = self.fock_embedding_matrix_trunc
-            else:
-                mat_in = self.fock_embedding_matrix
-
-            self.atoms.calc.asi.register_modify_hamiltonian_callback(matrix_loading_callback,
-                                                                     (self.atoms.calc.asi,
-                                                                     mat_in,
-                                                                     self.flag_huz,
-                                                                     self.blacs_ctxt_tag,
-                                                                     self.blacs_descr_tag,
-                                                                     'Modify H'))
-
-        E0 = self.atoms.get_potential_energy()
-
-        self.n_local_ks = self.atoms.calc.asi.n_local_ks
-        self.n_kpoints = self.atoms.calc.asi.n_kpts
-        self.n_spins = self.atoms.calc.asi.n_spin
+        E0 = self.qm_adatper.get_energy(self, self.atoms.calc)
 
         self.total_energy = E0
-        self.basis_atoms = self.atoms.calc.asi.basis_atoms
-        self.n_basis = self.atoms.calc.asi.n_basis
 
-        # BROADCAST QUANTITIES ONLY CALCULATED FOR THE HEAD NODE TO ALL
-        # OTHER NODES - ONLY DO THIS IN SERIAL MODE AS THE NPSCAL ARRAYS
-        # ARE ALREADY DISTRIBUTED TO EACH TASK
-        if not (self.parallel):
-            self.atoms.calc.asi.dm_count = mpi_bcast_integer(self.atoms.calc.asi.dm_count)
-            self.atoms.calc.asi.ham_count = mpi_bcast_integer(self.atoms.calc.asi.ham_count)
+        # Extract matrix quantities from the completed calculation, using
+        # whichever mechanism is appropriate for the underlying QM code.
+        results = self.qm_adapter.extract_matrices(self.atoms.calc, self)
 
-            if MPI.COMM_WORLD.Get_rank() != 0:
-                for iham in range(self.atoms.calc.asi.ham_count):
-                    self.atoms.calc.asi.ham_storage[iham] = {}
+        self.n_kpoints = results["n_kpoints"]
+        self.n_spins = results["n_spins"]
+        self.n_basis = results["n_basis"]
+        self.basis_atoms = results["basis_atoms"]
 
-            if MPI.COMM_WORLD.Get_rank() != 0:
-                for idm in range(self.atoms.calc.asi.dm_count):
-                    self.atoms.calc.asi.dm_storage[idm] = {}
-
-            for iham in range(self.atoms.calc.asi.ham_count):
-                self.atoms.calc.asi.ham_storage[iham] = \
-                    mpi_bcast_matrix_storage(self.atoms.calc.asi.ham_storage[iham],
-                                             self.atoms.calc.asi.n_basis,
-                                             self.atoms.calc.asi.n_basis)
-
-            for idm in range(self.atoms.calc.asi.dm_count):
-                self.atoms.calc.asi.dm_storage[idm] = \
-                    mpi_bcast_matrix_storage(self.atoms.calc.asi.dm_storage[idm],
-                                             self.atoms.calc.asi.n_basis,
-                                             self.atoms.calc.asi.n_basis)
-
-            self.atoms.calc.asi.overlap_storage = \
-                mpi_bcast_matrix_storage(self.atoms.calc.asi.overlap_storage,
-                                     self.atoms.calc.asi.n_basis,
-                                     self.atoms.calc.asi.n_basis)
-
-        if self.truncate:
-            for idx, kspdict in self.atoms.calc.asi.ham_storage.items():
-                for key in kspdict.keys():
-                    self.atoms.calc.asi.ham_storage[idx][key] = self.truncated_mat_to_full(kspdict.get(key))
-
-            for idx, kspdict in self.atoms.calc.asi.dm_storage.items():
-                for key in kspdict.keys():
-                    self.atoms.calc.asi.dm_storage[idx][key] = self.truncated_mat_to_full(kspdict.get(key))
-
-            for key in self.atoms.calc.asi.overlap_storage.keys():
-                self.atoms.calc.asi.overlap_storage[key] = self.truncated_mat_to_full(self.atoms.calc.asi.overlap_storage.get(key))
-
-        # Now put all of the output arrays into a nice wrapper
-        self._ham_kin = SpinKpointArray(self.atoms.calc.asi.ham_storage[0], self.n_spins, self.n_kpoints)
-        self._ham_2ee = SpinKpointArray(self.atoms.calc.asi.ham_storage[1], self.n_spins, self.n_kpoints)
-        self._ham_tot = SpinKpointArray(self.atoms.calc.asi.ham_storage[2], self.n_spins, self.n_kpoints)
-        self._ovlp = SpinKpointArray(self.atoms.calc.asi.overlap_storage, self.n_spins, self.n_kpoints)
-
-        if self.n_spins > 1:
-            self._ovlp[0,0] = self._ovlp[0,0]
-            self._ovlp[1,0] = self._ovlp[0,0]
-
-        # THIS IS CODE BREAKING FOR QM CODE LOCALISATION - I WILL NEED A FIX TO RESTORE
-        root_print(f"DM STORAGE KEYS {self.atoms.calc.asi.dm_storage.keys()}")
-        if (1 in self.atoms.calc.asi.dm_storage.keys()):
-            root_print("GOING THROUGH 1")
-            self._dm = []
-            self._dm.append(SpinKpointArray(self.atoms.calc.asi.dm_storage[0], self.n_spins, self.n_kpoints))
-            self._dm.append(SpinKpointArray(self.atoms.calc.asi.dm_storage[1], self.n_spins, self.n_kpoints))
-        else:
-            root_print("GOING THROUGH 2")
-            self._dm = SpinKpointArray(self.atoms.calc.asi.dm_storage[0], self.n_spins, self.n_kpoints)
+        self._ham_kin = results["ham_kin"]
+        self._ham_2ee = results["ham_2ee"]
+        self._ham_tot = results["ham_tot"]
+        self._ovlp = results["ovlp"]
+        self._dm = results["dm"]
 
         if close_calc:
             self.atoms.calc.asi.close()

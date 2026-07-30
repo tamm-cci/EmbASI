@@ -1,7 +1,7 @@
 # ~ Overall Embedding object
 from abc import ABC, abstractmethod
 from embasi.parallel_utils import root_print
-from embasi.qmcode_input_directives import ase_calc_parameter_setter
+from embasi.qmcode_adapters import qm_code_adapter
 import scalapack4py.npscal.math_utils.operations as op
 import copy
 import time
@@ -44,8 +44,8 @@ class EmbeddingBase(ABC):
         self.calculator_hl = calc_base_hl
         self.run_dir=run_dir
 
-        self.param_setter_ll = ase_calc_parameter_setter(self.calculator_ll)
-        self.param_setter_hl = ase_calc_parameter_setter(self.calculator_hl)
+        self.qm_adapter_ll = qm_code_adapter(self.calculator_ll)
+        self.qm_adapter_hl = qm_code_adapter(self.calculator_hl)
 
         try:
             os.makedirs(self.run_dir, exist_ok=True)
@@ -349,8 +349,8 @@ class StandardDFT(EmbeddingBase):
         super(StandardDFT, self).__init__(atoms, embed_mask, calc_base_ll,
                                           calc_base_hl, run_dir=run_dir)
 
-        calc_ll = self.param_setter_ll.set_full_scf_calc(calc_base_ll)
-        self.set_layer(atoms, self.calc_names[0], calc_ll,
+        calc_ll = self.qm_adapter_ll.set_full_scf_calc(calc_ll)
+        self.set_layer(atoms, self.calc_names[0], low_level_calc_1,
                        embed_mask, ghosts=0, no_scf=False,
                        insert_embedding_region=False)
 
@@ -479,19 +479,19 @@ class ProjectionEmbedding(EmbeddingBase):
         self.gc = gc
 
         # Set calculator keywords. This is very verbose - maybe the
-        # calculator should be set as an attribute of the param_setter
+        # calculator should be set as an attribute of the qm_adapter
         # classes...
         if self.parallel:
             self.calculator_ll = \
-                self.param_setter_ll.set_scalapack_blocksize(self.calculator_ll,
+                self.qm_adapter_ll.set_scalapack_blocksize(self.calculator_ll,
                                                              scalapack_block_size)
             self.calculator_hl = \
-                self.param_setter_ll.set_scalapack_blocksize(self.calculator_hl,
+                self.qm_adapter_ll.set_scalapack_blocksize(self.calculator_hl,
                                                              scalapack_block_size)
         self.calculator_ll = \
-            self.param_setter_ll.override_basis_order(self.calculator_ll)
+            self.qm_adapter_ll.override_basis_order(self.calculator_ll)
         self.calculator_hl = \
-            self.param_setter_hl.override_basis_order(self.calculator_hl)
+            self.qm_adapter_hl.override_basis_order(self.calculator_hl)
 
         # Set the projection keywords
         self.projection = projection
@@ -519,7 +519,7 @@ class ProjectionEmbedding(EmbeddingBase):
         elif self.localisation == "qmcode":
             root_print("Localisation method: QM Code")
             low_level_calculator_1 = \
-                self.param_setter_ll.set_qm_localise(low_level_calculator_1)
+                self.qm_adapter_ll.set_qm_localise(low_level_calculator_1)
         else:
             raise Exception("Invalid entry for localisation: use 'SPADE' or 'qmcode' ")
 
@@ -1329,13 +1329,13 @@ class FrozenDensityEmbedding(EmbeddingBase):
         self.run_dir =  run_dir
 
         initial_calculator = \
-            self.param_setter_ll.set_embasi_calculation_type(initial_calculator,
+            self.qm_adapter_ll.set_embasi_calculation_type(initial_calculator,
                                                              "frozendensity-write")
         low_level_calculator = \
-            self.param_setter_ll.set_embasi_calculation_type(low_level_calculator,
+            self.qm_adapter_ll.set_embasi_calculation_type(low_level_calculator,
                                                              "frozendensity-readandwrite")
         initial_calculator = \
-            self.param_setter_ll.set_embasi_calculation_type(high_level_calculator,
+            self.qm_adapter_ll.set_embasi_calculation_type(high_level_calculator,
                                                              "frozendensity-readandwrite")
 
         self.set_layer(atoms, "MU0", initial_calculator,
@@ -1503,13 +1503,13 @@ class ONIOMSubtractiveEmbedding(EmbeddingBase):
             high_level_calculator_2.parameters.pop("k_grid")
 
         low_level_calculator_1 = \
-            self.param_setter_ll.set_full_scf_calc(low_level_calculator_1)
+            self.qm_adapter_ll.set_full_scf_calc(low_level_calculator_1)
         low_level_calculator_2 = \
-            self.param_setter_ll.set_full_scf_calc(low_level_calculator_2)
+            self.qm_adapter_ll.set_full_scf_calc(low_level_calculator_2)
         high_level_calculator_1 = \
-            self.param_setter_ll.set_full_scf_calc(high_level_calculator_2)
+            self.qm_adapter_ll.set_full_scf_calc(high_level_calculator_2)
         high_level_calculator_2 = \
-            self.param_setter_ll.set_full_scf_calc(high_level_calculator_2)
+            self.qm_adapter_ll.set_full_scf_calc(high_level_calculator_2)
 
         self.set_layer(atoms, "AB_LL", low_level_calculator_1,
                        embed_mask, ghosts=0, no_scf=False,
