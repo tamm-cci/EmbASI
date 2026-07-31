@@ -261,7 +261,7 @@ def ham_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
                     MP = asi.scalapack.blacs_gridinfo(descr_cast.ctxt)[0]
                     NP = asi.scalapack.blacs_gridinfo(descr_cast.ctxt)[1]
                     ctxt = BLACSContextManager(ctxt_tag, MP, NP, asi.scalapack)
-                                                
+
                 if not(DESCR_Register.check_register(descr_tag)):
                     descr_cast = asi.scalapack.wrap_blacs_desc(descr)
                     m, n, mb, nb = descr_cast.m, descr_cast.n, descr_cast.mb, descr_cast.nb
