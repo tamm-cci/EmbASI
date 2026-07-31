@@ -549,7 +549,7 @@ class AtomsEmbed():
         self.runtime_calc = self.qm_adapter.set_noscf_calc_params(self.runtime_calc)
 
         time_s = time.time()
-        self.run(ev_corr_scf=True, close_calc=close_calc, noscf=True)
+        self.run(ev_corr_scf=True, close_calc=close_calc)
 
         # HACKY WAY TO INDUCE ASE TO RECALCULATE ENERGIES - DO NOT TO THIS
         #self.atoms.calc.atoms.positions[0,0] = self.atoms.calc.atoms.positions[0,0] + 0.00000001
@@ -585,7 +585,7 @@ class AtomsEmbed():
             self.fock_embedding_matrix = emb_pot + proj_pot
 
         time_s = time.time()
-        self.run(ev_corr_scf_final_density=True, emb_pot_scf=True, noscf=False)
+        self.run(ev_corr_scf_final_density=True, emb_pot_scf=True)
 
         # Unset all for clarity
         self.huzinaga_dm_in = None
@@ -719,7 +719,7 @@ class AtomsEmbed():
         self.embedding_ham_in = None
         self.density_matrix_in = None
 
-    def run(self, ev_corr_scf=False, ev_corr_scf_final_density=False, emb_pot_scf=False, close_calc=True, noscf=False):
+    def run(self, ev_corr_scf=False, ev_corr_scf_final_density=False, emb_pot_scf=False, close_calc=True):
         """Invokes the ASI_run() call and extracts matrix quantities
 
         Driver routine which executes the QM code and controls which
@@ -747,9 +747,16 @@ class AtomsEmbed():
         if self.truncate and len(self.atoms) != self.basis_info.trunc_natoms:
             self.atoms = self.atoms[self.basis_info.active_atoms]
 
-        if hasattr(self.atoms.calc, "asi"):
-            if hasattr(self.atoms.calc.asi, "lib") and (not close_calc):
-                root_print("USING OLD CALCULATOR")
+        if self.qm_adapter.uses_asi_callbacks:
+            if hasattr(self.atoms.calc, "asi"):
+                if hasattr(self.atoms.calc.asi, "lib") and (not close_calc):
+                    root_print("USING OLD CALCULATOR")
+                else:
+                    self.atoms.calc = ASI_ASE_calculator(os.environ['ASI_LIB_PATH'],
+                                                         self.calc_initializer,
+                                                         MPI.COMM_WORLD,
+                                                         self.atoms,
+                                                         work_dir=self.outdir)
             else:
                 self.atoms.calc = ASI_ASE_calculator(os.environ['ASI_LIB_PATH'],
                                                      self.calc_initializer,
@@ -757,23 +764,26 @@ class AtomsEmbed():
                                                      self.atoms,
                                                      work_dir=self.outdir)
         else:
-            self.atoms.calc = ASI_ASE_calculator(os.environ['ASI_LIB_PATH'],
-                                                 self.calc_initializer,
-                                                 MPI.COMM_WORLD,
-                                                 self.atoms,
-                                                 work_dir=self.outdir)
+            self.atoms.calc = self.runtime_calc
 
         # Prepare the calculator to export matrix quantities (e.g., register
         # ASI callbacks for callback-based QM codes; no-op for QM codes which
         # expose matrices directly as attributes once a calculation has run).
         self.qm_adapter.register_import_export_hooks(self.atoms.calc, self, emb_pot_scf=emb_pot_scf)
 
-        E0 = self.qm_adatper.get_energy(self, self.atoms.calc)
+        # Runs the SCF calculation dependent on the number of SCF
+        # cycles set by the qm_adapter - if only the total energy
+        # is needed, the energy is evaluated from an input density
+        # matrix
+        self.qm_adapter.run_scf(self)
+
+        E0 = self.qm_adapter.get_energy(self, self.atoms.calc)
 
         self.total_energy = E0
 
         # Extract matrix quantities from the completed calculation, using
         # whichever mechanism is appropriate for the underlying QM code.
+        results_scalar = self.qm_adapter.extract_matrices(self.atoms.calc, self)
         results = self.qm_adapter.extract_matrices(self.atoms.calc, self)
 
         self.n_kpoints = results["n_kpoints"]
@@ -817,12 +827,11 @@ class AtomsEmbed():
         # such, we 'correct' the eigenvalue portion of the total energy to reflect
         # the interaction of the input density matrix, as opposed to the first
         # set of KS-eigenvectors resulting from the DFT code.
-        if ev_corr_scf or ev_corr_scf_final_density:
+        if (ev_corr_scf or ev_corr_scf_final_density) and self.qm_adapter.needs_nonscf_ene_corr:
 
             # To make sure we are holding the correct sum of eigenvalues,
             # we conduct one final eigensolution, rather than grepping (the
             # solution for FHI-aims).
-            root_print(f"EV SUM: {self.ev_sum}")
             if not hasattr(self, "ev_sum"):
                 self.ev_sum = self.ev_solve_and_sum_evs(emb_pot_scf)
 
@@ -835,11 +844,8 @@ class AtomsEmbed():
                     self.ev_corr_energy = \
                         27.211384500 * (self.density_matrix_in @ self.hamiltonian_total).trace()
 
-                root_print(f"EV CORR E: {self.ev_corr_energy}")
                 self.ev_corr_total_energy = \
                     self.total_energy - self.ev_sum + self.ev_corr_energy
-                root_print(f"EV TOTAL E: {self.total_energy}")
-                root_print(f"EV CORR TOTAL E: {self.ev_corr_total_energy}")
 
             if ev_corr_scf_final_density:
                 if self.truncate:
@@ -852,9 +858,6 @@ class AtomsEmbed():
 
                 self.ev_corr_total_energy = \
                     self.total_energy - self.ev_sum + self.ev_corr_energy
-                root_print(f"EV CORR E: {self.ev_corr_energy}")
-                root_print(f"EV TOTAL E: {self.total_energy}")
-                root_print(f"EV CORR TOTAL E: {self.ev_corr_total_energy}")
 
     def ev_solve_and_sum_evs(self, emb_pot_scf):
         """Solves the KS eigenvalue equation and sums the eigenvalues

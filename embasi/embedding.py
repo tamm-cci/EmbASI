@@ -344,13 +344,13 @@ class StandardDFT(EmbeddingBase):
 
         self.calc_names = ["AB_LL"]
 
-        calc_base_hl = deepcopy(calc_base_ll)
+        calc_base_ll = deepcopy(calc_base_ll)
 
         super(StandardDFT, self).__init__(atoms, embed_mask, calc_base_ll,
                                           calc_base_hl, run_dir=run_dir)
 
-        calc_ll = self.qm_adapter_ll.set_full_scf_calc(calc_ll)
-        self.set_layer(atoms, self.calc_names[0], low_level_calc_1,
+        calc_ll = self.qm_adapter_ll.set_full_scf_calc(calc_base_ll)
+        self.set_layer(atoms, self.calc_names[0], calc_ll,
                        embed_mask, ghosts=0, no_scf=False,
                        insert_embedding_region=False)
 

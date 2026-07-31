@@ -1,13 +1,13 @@
 from abc import ABC, abstractmethod
-
+from dataclasses import dataclass
 from mpi4py import MPI
-
 from embasi.parallel_utils import root_print, mpi_bcast_matrix_storage, \
     mpi_bcast_integer
 from embasi.ks_array import SpinKpointArray
 from embasi.asi_default_callbacks import dm_saving_callback, \
     ham_saving_callback, ham_saving_and_huzinaga_callback, \
     ovlp_saving_callback, matrix_loading_callback
+import numpy as np
 
 # Valid ASI Flavours
 ASI_flavour = {"None": -1, "Dummy": 0, "FHIaims": 1, "DFTB+": 2}
@@ -67,6 +67,13 @@ class QMCodeAdapter(ABC):
         directly as attributes of the calculator once it has run.
         """
         return self.asi_flavour > 0
+
+    @property
+    def needs_nonscf_ene_corr(self):
+        """Indicates whether the true total energy is returned from run_scf
+           for a non-self-consistent total energy evaluation
+        """
+        self._needs_nonscf_corr = False
 
     # ------------------------------------------------------------------
     # Input directives
@@ -217,7 +224,7 @@ class QMCodeAdapter(ABC):
     # ------------------------------------------------------------------
 
     @abstractmethod
-    def register_export_hooks(self, atoms_calc, atoms_embed, emb_pot_scf=False):
+    def register_import_export_hooks(self, atoms_calc, atoms_embed, emb_pot_scf=False):
         """Prepares the calculator to export matrix quantities
 
         Called immediately before atoms.get_potential_energy(). For QM
@@ -263,13 +270,13 @@ class QMCodeAdapter(ABC):
         pass
 
     @abstractmethod
-    def get_energy(self, atoms_calc):
+    def get_energy(self, atoms):
         """Extracts final total energy of a given calculation
 
         Parameters
         ----------
-        atoms_calc : ASE Calculator
-            The calculator which has just completed a calculation.
+        atoms : ASE Atoms object
+            ASE atoms object with attached calculator
 
         Returns
         -------
@@ -278,17 +285,37 @@ class QMCodeAdapter(ABC):
         pass
 
     @abstractmethod
-    def get_forces(self, atoms_calc):
+    def get_forces(self, atoms):
         """Extracts final forces for calculation
 
         Parameters
         ----------
+        atoms : ASE Atoms object
+            ASE atoms object with attached calculator
+
+        Returns
+        -------
+        ndarray : Final forces
+        """
+        pass
+
+    # ------------------------------------------------------------------
+    # Runtime directives
+    # ------------------------------------------------------------------
+    def run_scf(self, atomsembed):
+        """Performs a total energy evaluation only with SCF steps set in
+        set_no_scf_total_energy_calc
+
+        Parameters
+        ----------
+        atomsembed : AtomsEmbed
+            Wrapper containing data structures for embedding
         atoms_calc : ASE Calculator
             The calculator which has just completed a calculation.
 
         Returns
         -------
-        ndarray : Final forces
+        None
         """
         pass
 
@@ -445,14 +472,11 @@ class QMCodeASIAdapter(QMCodeAdapter):
             ovlp[1, 0] = ovlp[0, 0]
 
         # THIS IS CODE BREAKING FOR QM CODE LOCALISATION - I WILL NEED A FIX TO RESTORE
-        root_print(f"DM STORAGE KEYS {asi.dm_storage.keys()}")
         if 1 in asi.dm_storage.keys():
-            root_print("GOING THROUGH 1")
             dm = []
             dm.append(SpinKpointArray(asi.dm_storage[0], n_spins, n_kpoints))
             dm.append(SpinKpointArray(asi.dm_storage[1], n_spins, n_kpoints))
         else:
-            root_print("GOING THROUGH 2")
             dm = SpinKpointArray(asi.dm_storage[0], n_spins, n_kpoints)
 
         return {
@@ -467,6 +491,9 @@ class QMCodeASIAdapter(QMCodeAdapter):
             "dm": dm,
         }
 
+    def run_scf(self, atomsembed, atoms):
+        atoms.get_potential_energy()
+
 @register_calculator("Aims")
 class AimsAdapter(QMCodeASIAdapter):
 
@@ -476,6 +503,13 @@ class AimsAdapter(QMCodeASIAdapter):
     @property
     def asi_flavour(self):
         return ASI_flavour["FHIaims"]
+
+    @property
+    def needs_nonscf_ene_corr(self):
+        """Indicates whether the true total energy is returned from run_scf
+           for a non-self-consistent total energy evaluation
+        """
+        self._needs_nonscf_corr = True
 
     def set_noscf_calc_params(self, calc):
         calc.parameters['charge_mix_param'] = 0.
@@ -526,9 +560,11 @@ class AimsAdapter(QMCodeASIAdapter):
         calc.parameters['charge'] = charge
         return calc
 
-    def get_energy(self, atomsembed, calc):
-        return calc.get_potential_energy()
+    def get_energy(self, atomsembed):
+        return atomsembed.atoms.calc.get_potential_energy()
 
+    def get_energy(self, atomsembed):
+        return atomsembed.atoms.calc.get_forces()
 
 @register_calculator("PySCF")
 class PySCFAdapter(QMCodeAdapter):
@@ -541,6 +577,8 @@ class PySCFAdapter(QMCodeAdapter):
         return ASI_flavour["None"]
 
     def set_noscf_calc_params(self, calc):
+        calc.method.max_cycles = 0
+        calc.method_scan.max_cycles = 0
         return calc
 
     def set_ghost_atoms(self, calc, atoms, ghost_list):
@@ -564,10 +602,40 @@ class PySCFAdapter(QMCodeAdapter):
     def set_qm_total_charge(self, calc, charge):
         return calc
 
-    def get_energy(self, atomsembed, calc):
-        
+    def run_scf(self, atomsembed):
+        if atomsembed.density_matrix_in is None:
+            dm_in = atomsembed.atoms.calc.method_scan.get_init_guess()
+        else:
+            dm_in = atomsembed.density_matrix_in[0,0]
 
-        
+        _, total_energy, _, _, _ = atomsembed.atoms.calc.method_scan.kernel(dm0=dm_in)
+
+        ## TODO INPROGRESS
+        basis_atoms = atomsembed.atoms.calc.method_scan.aoslice_by_atoms()
+        nbasis = len(basis_atoms)
+        nspins = 1
+        nkpts = 1
+        ham_kin = {(0,0): atoms.calc.method.mol.intor('int1e_kin')}
+        ham_2ee = {(0,0): atoms.calc.method.mol.intor('int1e_kin')}
+        ovlp = {(0,0): atoms.calc.method.mol.intor('int1e_ovlp')}
+
+        dm = {(0,0): atoms.calc.method.mol.intor('int1e_kin')}
+
+        self.scf_rundata = SCFRunData(total_energy, )
+
+    def get_energy(self, atoms_embed):
+
+        return total_energy
+
+    def get_forces(self, atoms_embed):
+        return None
+
+    def extract_matrices(self, atoms_embed):
+        return None
+
+    def register_import_export_hooks(self, atoms_calc, atoms_embed, emb_pot_scf=False):
+        return atoms_calc
+
 def qm_code_adapter(calc):
     """Gets the QMCodeAdapter for a given ASE Calculator implementation
 
@@ -591,3 +659,17 @@ def qm_code_adapter(calc):
         raise Exception("ASE Calculator not implemented.")
 
     return implemented_calculators[classname]()
+
+@dataclass
+class SCFRunData:
+    total_energy: np.float64
+    nspins: int
+    nkpts: int
+    nbasis: int
+    basis_atoms: list
+    ham_kin: dict
+    ham_2ee: dict
+    ham_tot: dict
+    ovlp: dict
+    dm: dict
+
