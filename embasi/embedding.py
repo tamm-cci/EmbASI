@@ -388,8 +388,16 @@ class ProjectionEmbedding(EmbeddingBase):
         Calculator object for layer 2
     frag_charge: int
         Charge of the embedded fragment. Defaults to 0.
-    post_scf: str
-        Post-HF method applied to high-level calculation. Defaults to None.
+    post_scf: str or object
+        Post-HF method applied to high-level calculation. Either a bare
+        method name (e.g., 'MP2', 'CCSD', 'CCSD(T)' for PySCF; FHI-aims'
+        own total_energy_method keywords otherwise), or - PySCF only - a
+        pre-configured, unconverged post-HF method object (e.g.
+        pyscf.cc.CCSD(dummy_mf, frozen=2)) whose solver options are
+        reused; only its settings are taken, its mean-field/mol/MO
+        references are replaced with the actual embedded reference at
+        run time. Set ``.run_ccsd_t = True`` on such an object to also
+        request the perturbative triples correction. Defaults to None.
     mu_val: float
         Pre-factor for level-shift orthogonalisation. Defaults to 1e+06 Ha.
     truncate_basis: float or None:
@@ -455,6 +463,7 @@ class ProjectionEmbedding(EmbeddingBase):
             raise Exception("Absolute truncation can only be run with 'freeze_and_thaw=True' ")
 
         self.total_energy_corr = total_energy_corr
+        self.post_scf = post_scf
 
         # Set calculators for a given method of calculating the total embedding energy
         if self.abs_truncate and (not (self.total_energy_corr == "nonscf")):
@@ -511,6 +520,12 @@ class ProjectionEmbedding(EmbeddingBase):
         low_level_calculator_1 = deepcopy(self.calculator_ll)
         low_level_calculator_2 = deepcopy(self.calculator_ll)
         high_level_calculator_1 = deepcopy(self.calculator_hl)
+
+        # Set the post-SCF (correlated wavefunction) correction keyword,
+        # applied only to the A_HL fragment calculation
+        if self.post_scf is not None:
+            high_level_calculator_1 = \
+                self.qm_adapter_hl.set_postscf_keyword(high_level_calculator_1, self.post_scf)
 
         # Set keywords needed for localisation
         self.localisation = localisation
@@ -1199,11 +1214,11 @@ class ProjectionEmbedding(EmbeddingBase):
 
         self.output_data_dict["TOTALENERGY"]["PB_CORR"] = self.PB_corr
 
-        # An FHI-aims specific keyword for extracting total energies
-        # from the post-scf correction
-        #if "total_energy_method" in self.A_HL.initial_calc.parameters:
-        #    self.subsys_A_highlvl_totalen = self.subsys_A_highlvl_totalen + \
-        #        self.A_HL.post_scf_corr_energy - self.A_HL.dft_energy
+        # Add the post-SCF (correlated wavefunction) correction, if
+        # requested, on top of the already-embedded A_HL reference energy.
+        if self.post_scf is not None:
+            self.subsys_A_highlvl_totalen = self.subsys_A_highlvl_totalen + \
+                self.A_HL.post_scf_corr_energy - self.A_HL.dft_energy
 
         if self.total_energy_corr == "1storder":
             if self.truncate:

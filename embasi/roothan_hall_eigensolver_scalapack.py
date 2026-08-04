@@ -99,13 +99,15 @@ def hamiltonian_eigensolv_parallel(hamiltonian, overlap, nelec, nspins=1, nkpts=
             evals[(ispin,ikpt)], evecs[(ispin,ikpt)] = eig(xform_hamiltonian(hamiltonian[ispin,ikpt], xform_mat))
 
             if (not return_orthog):
-                evecs[(ispin,ikpt)] = back_xform_evecs(evecs[(ispin,ikpt)], xform_mat)
-                evals[(ispin,ikpt)], evecs[(ispin,ikpt)] = sort_eigvals_and_evecs(evals[(ispin,ikpt)], evecs[(ispin,ikpt)])
+                idx = np.argsort(evals[(ispin,ikpt)])
+                evals[(ispin,ikpt)] = evals[(ispin,ikpt)][idx]
+                evecs[(ispin,ikpt)] = back_xform_evecs(evecs[(ispin,ikpt)], xform_mat)[:,idx]
             else:
                 evecs_orthog[(ispin,ikpt)] = evecs[(ispin,ikpt)].copy()
-                evecs[(ispin,ikpt)] = back_xform_evecs(evecs[(ispin,ikpt)], xform_mat)
-                evals[(ispin,ikpt)], evecs[(ispin,ikpt)] = sort_eigvals_and_evecs(evals[(ispin,ikpt)], evecs[(ispin,ikpt)])
-                evals[(ispin,ikpt)], evecs_orthog[(ispin,ikpt)] = sort_eigvals_and_evecs(evals[(ispin,ikpt)], evecs_orthog[(ispin,ikpt)])
+                idx = np.argsort(evals[(ispin,ikpt)])
+                evals[(ispin,ikpt)] = evals[(ispin,ikpt)][idx]
+                evecs[(ispin,ikpt)] = back_xform_evecs(evecs[(ispin,ikpt)], xform_mat)[:,idx]
+                evecs_orthog[(ispin,ikpt)] = evecs_orthog[(ispin,ikpt)][:,idx]
 
     # Just assume we're dealing with simple insulators for now
     # - fill from the bottom up

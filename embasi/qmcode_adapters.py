@@ -73,14 +73,14 @@ class QMCodeAdapter(ABC):
         """Indicates whether the true total energy is returned from run_scf
            for a non-self-consistent total energy evaluation
         """
-        self._needs_nonscf_corr = False
+        return False
 
     # ------------------------------------------------------------------
     # Input directives
     # ------------------------------------------------------------------
 
     @abstractmethod
-    def set_ghost_atoms(self, calc, ghost_list):
+    def set_ghost_atoms(self, atomsembed, calc, ghost_list):
         """Set calculator parameters for setting atoms of a given index as ghost atoms
 
         Changes the ASE Calculator keywords to accept the keywords to
@@ -88,6 +88,8 @@ class QMCodeAdapter(ABC):
 
         Parameters
         ----------
+        atomsembed : AtomsEmbed
+            The owning AtomsEmbed instance.
         calc : ASECalculator
             ASE calculator to add parameters.
         ghost_list : list, len(atoms)
@@ -107,8 +109,17 @@ class QMCodeAdapter(ABC):
         ----------
         calc : ASECalculator
             ASE calculator to add parameters.
-        postscf_method : None or str
-            Post-SCF method ran on calculator execution.
+        postscf_method : None, str, or object
+            Post-SCF method ran on calculator execution. For codes which
+            drive post-SCF methods directly in Python (currently PySCF),
+            this may instead be a pre-configured, unconverged post-HF
+            method object (e.g., ``pyscf.cc.CCSD(mf, frozen=2)``) whose
+            solver options (frozen core, convergence thresholds, DIIS
+            settings, ...) are reused - only its settings are taken, its
+            mean-field/mol/MO references are replaced with the actual
+            embedded reference at run time. To also request a
+            perturbative triples correction on such an object, set
+            ``.run_ccsd_t = True`` on it.
         """
         pass
 
@@ -247,7 +258,7 @@ class QMCodeAdapter(ABC):
         pass
 
     @abstractmethod
-    def extract_matrices(self, atoms_calc, atoms_embed):
+    def extract_matrices(self, atomsembed):
         """Extracts matrix quantities from a completed calculation
 
         Called immediately after atoms.get_potential_energy(). Returns a
@@ -258,10 +269,9 @@ class QMCodeAdapter(ABC):
 
         Parameters
         ----------
-        atoms_calc : ASE Calculator
-            The calculator which has just completed a calculation.
-        atoms_embed : AtomsEmbed
-            The owning AtomsEmbed instance.
+        atomsembed : AtomsEmbed
+            The owning AtomsEmbed instance, providing access to the
+            calculator which has just completed a calculation.
 
         Returns
         -------
@@ -435,7 +445,7 @@ class QMCodeASIAdapter(QMCodeAdapter):
 
         """
 
-        with open(self.outdir+'/asi.log', 'r') as output:
+        with open(atomsembed.outdir+'/asi.log', 'r') as output:
             lines = output.readlines()
 
             for line in lines:
@@ -461,7 +471,9 @@ class QMCodeASIAdapter(QMCodeAdapter):
 
         return atomsembed
 
-    def extract_matrices(self, atoms_calc, atoms_embed):
+    def extract_matrices(self, atomsembed):
+        atoms_embed = atomsembed
+        atoms_calc = atomsembed.atoms.calc
         asi = atoms_calc.asi
 
         n_kpoints = asi.n_kpts
@@ -541,8 +553,8 @@ class QMCodeASIAdapter(QMCodeAdapter):
             "dm": dm,
         }
 
-    def run_scf(self, atomsembed, atoms):
-        atoms.get_potential_energy()
+    def run_scf(self, atomsembed):
+        atomsembed.atoms.get_potential_energy()
 
 @register_calculator("Aims")
 class AimsAdapter(QMCodeASIAdapter):
@@ -559,7 +571,7 @@ class AimsAdapter(QMCodeASIAdapter):
         """Indicates whether the true total energy is returned from run_scf
            for a non-self-consistent total energy evaluation
         """
-        self._needs_nonscf_corr = True
+        return True
 
     def set_noscf_calc_params(self, calc):
         calc.parameters['charge_mix_param'] = 0.
@@ -568,7 +580,7 @@ class AimsAdapter(QMCodeASIAdapter):
 
         return calc
 
-    def set_ghost_atoms(self, calc, ghost_list):
+    def set_ghost_atoms(self, atomsembed, calc, ghost_list):
         calc.parameters["ghosts"] = ghost_list
         return calc
 
@@ -613,7 +625,7 @@ class AimsAdapter(QMCodeASIAdapter):
     def get_energy(self, atomsembed):
         return atomsembed.atoms.calc.get_potential_energy()
 
-    def get_energy(self, atomsembed):
+    def get_forces(self, atomsembed):
         return atomsembed.atoms.calc.get_forces()
 
 @register_calculator("PySCF")
@@ -665,6 +677,7 @@ class PySCFAdapter(QMCodeAdapter):
         return calc
 
     def set_postscf_keyword(self, calc, postscf_method):
+        calc.parameters['postscf_method'] = postscf_method
         return calc
 
     def set_scalapack_blocksize(self, calc, scalapack_blocksize):
@@ -691,20 +704,64 @@ class PySCFAdapter(QMCodeAdapter):
         else:
             dm_in = atomsembed.density_matrix_in[0,0]
 
-        if (atomsembed.fock_embedding_matrix is not None):
-            if atomsembed.truncate:
-                mat_in = atomsembed.fock_embedding_matrix_trunc[0,0]
-            else:
-                mat_in = atomsembed.fock_embedding_matrix[0,0]
+        mf = atomsembed.atoms.calc.method
 
-            hcore_func = atomsembed.atoms.calc.method.get_hcore
-            h0 = atomsembed.atoms.calc.method.get_hcore()
-            atomsembed.atoms.calc.method.get_hcore = lambda *args: h0 + mat_in
+        # Both the static embedding potential (level-shift, and the
+        # 'emb_pot' term of Huzinaga projection) and the dynamic Huzinaga
+        # projector (which depends on the current, per-iteration Fock, not
+        # just a fixed matrix) are injected via a single get_fock override,
+        # rather than patching get_hcore. get_fock is called exactly once
+        # per SCF cycle, right before diagonalisation, so this needs no
+        # replication of PySCF's own SCF loop - damping/DIIS/level-shift
+        # are all still handled by delegating to the original get_fock.
+        # get_hcore itself is deliberately left untouched: energy_elec/
+        # energy_tot never call get_fock (they take h1e/vhf directly, or
+        # fall back to get_hcore/get_veff), so leaving get_hcore bare keeps
+        # the energy bookkeeping below exactly as before, and CCSD/MP2
+        # rebuild their reference Fock via mf.get_fock(vhf=vhf, dm=dm)
+        # (see pyscf.cc.ccsd._ChemistsERIs._common_init_), so this is also
+        # the call the post-SCF correction actually needs patched.
+        needs_fock_override = (atomsembed.fock_embedding_matrix is not None) or \
+            (atomsembed.flag_huz and atomsembed.huzinaga_dm_in is not None)
 
-        total_energy = atomsembed.atoms.calc.method.kernel(dm0=dm_in)
+        if needs_fock_override:
+            from embasi.pyscf_scf_hooks import embedded_get_fock_factory
 
-        if (atomsembed.fock_embedding_matrix is not None):
-            atomsembed.atoms.calc.method.get_hcore = hcore_func
+            mat_in = None
+            if atomsembed.fock_embedding_matrix is not None:
+                if atomsembed.truncate:
+                    mat_in = atomsembed.fock_embedding_matrix_trunc[0,0]
+                else:
+                    mat_in = atomsembed.fock_embedding_matrix[0,0]
+
+            gamma_B = S = None
+            if atomsembed.flag_huz and atomsembed.huzinaga_dm_in is not None:
+                gamma_B = atomsembed.huzinaga_dm_in[0,0]
+                S = atomsembed.huzinaga_ovlp_in[0,0]
+
+            fock_func = mf.get_fock
+            mf.get_fock = embedded_get_fock_factory(mf, fock_func, mat_in=mat_in,
+                                                    gamma_B=gamma_B, S=S)
+
+        total_energy = mf.kernel(dm0=dm_in)
+
+        # Post-SCF (correlated wavefunction) correction, if requested. This
+        # must run here, before the get_fock override below is undone -
+        # cc.CCSD/mp.MP2 rebuild their reference Fock from mf.get_fock(),
+        # so the correlated method needs to see the same (possibly
+        # embedded/projected) Fock that the converged orbitals above were
+        # obtained from.
+        postscf_method = atomsembed.atoms.calc.parameters.get('postscf_method')
+        if postscf_method is not None and mf.converged:
+            from embasi.pyscf_postscf import run_postscf
+
+            e_corr = run_postscf(mf, postscf_method)
+
+            atomsembed.dft_energy = total_energy * 27.211384500
+            atomsembed.post_scf_corr_energy = atomsembed.dft_energy + e_corr * 27.211384500
+
+        if needs_fock_override:
+            mf.get_fock = fock_func
 
         scf_conv = atomsembed.atoms.calc.method.converged
         mo_energy = atomsembed.atoms.calc.method.mo_energy

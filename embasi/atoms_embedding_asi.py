@@ -99,6 +99,9 @@ class AtomsEmbed():
         self.truncate = False
         self.density_matrix_in = None
         self.fock_embedding_matrix = None
+        self.huzinaga_dm_in = None
+        self.huzinaga_ovlp_in = None
+        self.embedding_ham_in = None
 
         self.no_scf = no_scf
 
@@ -782,7 +785,7 @@ class AtomsEmbed():
         self.last_run_time = end_time - start_time
 
         if close_calc and self.qm_adapter.uses_asi_callbacks:
-            self.extract_results()
+            self.qm_adapter.get_decomposed_energy_from_file(self)
 
         # Within the embedding workflow, we often want to calculate the total
         # energy for a given density matrix without performing any SCF steps.
