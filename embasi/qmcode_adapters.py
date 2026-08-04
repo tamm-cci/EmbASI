@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from mpi4py import MPI
 from embasi.parallel_utils import root_print, mpi_bcast_matrix_storage, \
     mpi_bcast_integer
@@ -80,7 +80,7 @@ class QMCodeAdapter(ABC):
     # ------------------------------------------------------------------
 
     @abstractmethod
-    def set_ghost_atoms(self, calc, atoms, ghost_list):
+    def set_ghost_atoms(self, calc, ghost_list):
         """Set calculator parameters for setting atoms of a given index as ghost atoms
 
         Changes the ASE Calculator keywords to accept the keywords to
@@ -187,7 +187,7 @@ class QMCodeAdapter(ABC):
         pass
 
     @abstractmethod
-    def set_qm_total_charge(self, calc, charge):
+    def set_qm_total_charge(self, atomsembed, calc, charge):
         """Set calculator parameters for specifying input total charge
 
         Parameters
@@ -296,6 +296,21 @@ class QMCodeAdapter(ABC):
         Returns
         -------
         ndarray : Final forces
+        """
+        pass
+
+    @abstractmethod
+    def get_decomposed_energy_from_file(self, atomsembed):
+        """Extracts energetic components from an output file
+
+        Parameters
+        ----------
+        atoms : ASE Atoms object
+            ASE atoms object with attached calculator
+
+        Returns
+        -------
+        atomsembed : Atomsembed object
         """
         pass
 
@@ -411,6 +426,41 @@ class QMCodeASIAdapter(QMCodeAdapter):
                                                       atoms_embed.blacs_descr_tag,
                                                       'Modify H'))
 
+    def get_decomposed_energy_from_file(self, atomsembed):
+        """Extracts quantities not currently supported by ASI
+
+        An ad hoc solution to extract values unsupported by ASI for
+        FHI-aims. Currently reads values such as the kinetic energy,
+        electrostatic energy, sum of eigenvalues etc,
+
+        """
+
+        with open(self.outdir+'/asi.log', 'r') as output:
+            lines = output.readlines()
+
+            for line in lines:
+                outline = line.split()
+
+                if '  | Kinetic energy                :' in line:
+                    atomsembed.kinetic_energy = float(outline[6])
+
+                if '  | Electrostatic energy          :' in line:
+                    atomsembed.es_energy = float(outline[6])
+
+                if '  | Sum of eigenvalues            :' in line:
+                    atomsembed.ev_sum = float(outline[7])
+
+                if '  | Total energy of the DFT' in line:
+                    atomsembed.dft_energy = float(outline[11])
+
+                if 'Total XC Energy     :' in line:
+                    atomsembed.xc_energy = float(outline[6])
+
+                if 'Total energy after the post-s.c.f.' in line:
+                    atomsembed.post_scf_corr_energy = float(outline[9])
+
+        return atomsembed
+
     def extract_matrices(self, atoms_calc, atoms_embed):
         asi = atoms_calc.asi
 
@@ -518,7 +568,7 @@ class AimsAdapter(QMCodeASIAdapter):
 
         return calc
 
-    def set_ghost_atoms(self, calc, atoms, ghost_list):
+    def set_ghost_atoms(self, calc, ghost_list):
         calc.parameters["ghosts"] = ghost_list
         return calc
 
@@ -556,7 +606,7 @@ class AimsAdapter(QMCodeASIAdapter):
 
         return calc
 
-    def set_qm_total_charge(self, calc, charge):
+    def set_qm_total_charge(self, atomsembed, calc, charge):
         calc.parameters['charge'] = charge
         return calc
 
@@ -577,11 +627,41 @@ class PySCFAdapter(QMCodeAdapter):
         return ASI_flavour["None"]
 
     def set_noscf_calc_params(self, calc):
-        calc.method.max_cycles = 0
-        calc.method_scan.max_cycles = 0
+        calc.method.max_cycle = 0
+        calc.method_scan.max_cycle = 0
         return calc
 
-    def set_ghost_atoms(self, calc, atoms, ghost_list):
+    def set_ghost_atoms(self, atomsembed, calc, ghost_list):
+        from pyscf import gto
+
+        ghost_species = []
+        old_basis = calc.mol.basis
+        new_basis = {}
+
+        if not isinstance(old_basis, dict):
+            for element in calc.mol.elements:
+                new_basis[element] = old_basis
+
+        for idx, ghost in enumerate(ghost_list):
+            if ghost:
+                old_species_name = calc.mol.atom[idx][0]
+                calc.mol.atom[idx][0] = "ghost_" + old_species_name
+
+                if old_species_name not in ghost_species:
+                    ghost_basis = new_basis[old_species_name]
+                    new_basis[calc.mol.atom[idx][0]] = gto.basis.load(ghost_basis, old_species_name)
+                    ghost_species.append(old_species_name)
+
+        calc.mol.basis = new_basis
+
+        # Satisfy PySCF's internal nelec/spin book-keeping: this
+        # won't be the final value passed to the calculation but
+        # avoids a nasty crash
+        if not round(atomsembed.free_atom_nelectrons) % 2 == 0:
+            calc.mol.spin = 1
+
+        calc.mol.build()
+
         return calc
 
     def set_postscf_keyword(self, calc, postscf_method):
@@ -599,42 +679,91 @@ class PySCFAdapter(QMCodeAdapter):
     def set_qm_localise(self, calc):
         return calc
 
-    def set_qm_total_charge(self, calc, charge):
+    def set_qm_total_charge(self, atomsembed, calc, charge):
+        calc.mol.charge = charge
+        calc.mol.spin = 0
+        calc.mol.build()
         return calc
 
     def run_scf(self, atomsembed):
         if atomsembed.density_matrix_in is None:
-            dm_in = atomsembed.atoms.calc.method_scan.get_init_guess()
+            dm_in = atomsembed.atoms.calc.method.get_init_guess()
         else:
             dm_in = atomsembed.density_matrix_in[0,0]
 
-        _, total_energy, _, _, _ = atomsembed.atoms.calc.method_scan.kernel(dm0=dm_in)
+        if (atomsembed.fock_embedding_matrix is not None):
+            if atomsembed.truncate:
+                mat_in = atomsembed.fock_embedding_matrix_trunc[0,0]
+            else:
+                mat_in = atomsembed.fock_embedding_matrix[0,0]
 
-        ## TODO INPROGRESS
-        basis_atoms = atomsembed.atoms.calc.method_scan.aoslice_by_atoms()
+            hcore_func = atomsembed.atoms.calc.method.get_hcore
+            h0 = atomsembed.atoms.calc.method.get_hcore()
+            atomsembed.atoms.calc.method.get_hcore = lambda *args: h0 + mat_in
+
+        total_energy = atomsembed.atoms.calc.method.kernel(dm0=dm_in)
+
+        if (atomsembed.fock_embedding_matrix is not None):
+            atomsembed.atoms.calc.method.get_hcore = hcore_func
+
+        scf_conv = atomsembed.atoms.calc.method.converged
+        mo_energy = atomsembed.atoms.calc.method.mo_energy
+        mo_coeff = atomsembed.atoms.calc.method.mo_coeff
+        mo_occ = atomsembed.atoms.calc.method.mo_occ
+
+        aoslice = atomsembed.atoms.calc.mol.aoslice_by_atom()
+        basis_atoms = []
+        for atom_idx, basis in enumerate(aoslice):
+            basis_atoms += len(range(basis[2],basis[3])) * [atom_idx]
+
         nbasis = len(basis_atoms)
-        nspins = 1
-        nkpts = 1
-        ham_kin = {(0,0): atoms.calc.method.mol.intor('int1e_kin')}
-        ham_2ee = {(0,0): atoms.calc.method.mol.intor('int1e_kin')}
-        ovlp = {(0,0): atoms.calc.method.mol.intor('int1e_ovlp')}
+        n_spins = 1
+        n_kpoints = 1
 
-        dm = {(0,0): atoms.calc.method.mol.intor('int1e_kin')}
+        ham_kin = SpinKpointArray({(0,0): atomsembed.atoms.calc.method.mol.intor('int1e_kin')}, n_spins, n_kpoints)
+        ovlp = SpinKpointArray({(0,0): atomsembed.atoms.calc.method.mol.intor('int1e_ovlp')}, n_spins, n_kpoints)
 
-        self.scf_rundata = SCFRunData(total_energy, )
+        if scf_conv:
+            dm_out = atomsembed.atoms.calc.method.make_rdm1(mo_coeff, mo_occ)
+            dm = SpinKpointArray({(0,0): atomsembed.atoms.calc.method.make_rdm1(mo_coeff, mo_occ)}, n_spins, n_kpoints)
+        else:
+            dm_out = dm_in
+            dm = SpinKpointArray({(0,0): dm_out}, n_spins, n_kpoints)
 
-    def get_energy(self, atoms_embed):
+        hcore = atomsembed.atoms.calc.method.get_hcore()
+        veff = atomsembed.atoms.calc.method.get_veff(dm=dm_out)
 
-        return total_energy
+        ham_2ee = SpinKpointArray({(0,0): veff}, n_spins, n_kpoints)
+        ham_tot = SpinKpointArray({(0,0): hcore + veff}, n_spins, n_kpoints)
 
-    def get_forces(self, atoms_embed):
+        total_energy = atomsembed.atoms.calc.method.energy_tot(dm_out, hcore, veff) * 27.211384500
+
+        self.scf_rundata = SCFRunData(total_energy,
+                                      n_spins,
+                                      n_kpoints,
+                                      nbasis,
+                                      basis_atoms,
+                                      ham_kin,
+                                      ham_2ee,
+                                      ham_tot,
+                                      ovlp,
+                                      dm
+                                      )
+
+    def get_energy(self, atomsembed):
+        return self.scf_rundata.total_energy
+
+    def get_forces(self, atomsembed):
         return None
 
-    def extract_matrices(self, atoms_embed):
-        return None
+    def extract_matrices(self, atomsembed):
+        return asdict(self.scf_rundata)
 
     def register_import_export_hooks(self, atoms_calc, atoms_embed, emb_pot_scf=False):
         return atoms_calc
+
+    def get_decomposed_energy_from_file(self, atomsembed):
+        return atomsembed
 
 def qm_code_adapter(calc):
     """Gets the QMCodeAdapter for a given ASE Calculator implementation
@@ -663,13 +792,14 @@ def qm_code_adapter(calc):
 @dataclass
 class SCFRunData:
     total_energy: np.float64
-    nspins: int
-    nkpts: int
-    nbasis: int
+    n_spins: int
+    n_kpoints: int
+    n_basis: int
     basis_atoms: list
-    ham_kin: dict
-    ham_2ee: dict
-    ham_tot: dict
-    ovlp: dict
-    dm: dict
+    ham_kin: SpinKpointArray
+    ham_2ee: SpinKpointArray
+    ham_tot: SpinKpointArray
+    ovlp: SpinKpointArray
+    dm: SpinKpointArray
+
 

@@ -63,6 +63,7 @@ class AtomsEmbed():
         self.initial_embed_mask = embed_mask
         self.outdir = outdir
         self.insert_embedding_region = insert_embedding_region
+        self.embed_mask = embed_mask
 
         # Determines whether arrays are to be communicated in serial,
         # or as BLACS distributed arrays from a globally stored context
@@ -88,12 +89,12 @@ class AtomsEmbed():
         elif embed_mask is None:
             self.embed_mask = None
 
+        self.qm_adapter = qm_code_adapter(initial_calc)
+        self.initial_calc = initial_calc
+
         if self.embed_mask is not None:
             self.reorder_atoms_from_embed_mask()
             self.atoms.info['embedding_mask'] = self.embed_mask
-
-        self.qm_adapter = qm_code_adapter(initial_calc)
-        self.initial_calc = initial_calc
 
         self.truncate = False
         self.density_matrix_in = None
@@ -112,7 +113,7 @@ class AtomsEmbed():
 
         self.flag_huz = huzinaga
 
-    def calc_initializer(self, asi):
+    def calc_initializer(self, asi=None, return_calc=False):
 
         calc = self.runtime_calc
 
@@ -139,13 +140,15 @@ class AtomsEmbed():
             total_charge = 0.
 
         # Set the calculator to accept the total charge for the given fragment
-        calc = self.qm_adapter.set_qm_total_charge(calc, -float(total_charge))
-        calc = self.qm_adapter.set_ghost_atoms(calc, self.atoms, self.ghost_list_calc)
+        calc = self.qm_adapter.set_ghost_atoms(self, calc, self.ghost_list_calc)
+        calc = self.qm_adapter.set_qm_total_charge(self, calc, -float(total_charge))
 
         # Ensure the Aims template shares the input parameters of the calculator object
-        calc.template.parameters = calc.parameters
+        if hasattr(calc, "template"):
+            calc.template.parameters = calc.parameters
 
-        calc.write_inputfiles(asi.atoms, properties=['energy'])
+        if hasattr(calc, "write_inputfiles"):
+            calc.write_inputfiles(asi.atoms, properties=['energy'])
 
         # Nasty cludge for adding certain, non-ASE supported keywords
         # to the FHI-aims calculator.
@@ -154,6 +157,9 @@ class AtomsEmbed():
                 self._insert_embedding_region_aims()
 
             self._insert_custom_aims_controlin()
+
+        if return_calc:
+            return calc
 
     def reorder_atoms_from_embed_mask(self):
         """ Re-orders atoms to push those in embedding region 1 to the beginning
@@ -168,8 +174,15 @@ class AtomsEmbed():
         idx_list = np.argsort(self.embed_mask)
         sort_embed_mask = np.sort(self.embed_mask)
 
+        #print(f"AAH1: {self.initial_calc.mol._atom}")
         self.embed_mask = sort_embed_mask
         self.atoms = self.atoms[idx_list]
+        #print(f"AAH2: {self.initial_calc.mol._atom}")
+
+        #print([self.initial_calc.mol._atom[i] for i in idx_list])
+        #self.initial_calc.mol.atom = [list(self.initial_calc.mol._atom[i]) for i in idx_list]
+        #self.initial_calc.mol.build()
+        #print([self.initial_calc.mol._atom[i] for i in idx_list])
 
         if "ghosts" in self.atoms.info.keys():
             self.atoms.info["ghosts"] = [
@@ -487,40 +500,6 @@ class AtomsEmbed():
                 full_mat[:,full_col_min-1:full_col_max] = full_mat_row[:,trunc_col_min-1:trunc_col_max]
 
         return full_mat
-    
-    def extract_results(self):
-        """Extracts quantities not currently supported by ASI
-
-        An ad hoc solution to extract values unsupported by ASI for 
-        FHI-aims. Currently reads values such as the kinetic energy,
-        electrostatic energy, sum of eigenvalues etc,
-
-        """
-
-        with open(self.outdir+'/asi.log', 'r') as output:
-
-            lines = output.readlines()
-
-            for line in lines:
-                outline = line.split()
-
-                if '  | Kinetic energy                :' in line:
-                    self.kinetic_energy = float(outline[6])
-
-                if '  | Electrostatic energy          :' in line:
-                    self.es_energy = float(outline[6])
-
-                if '  | Sum of eigenvalues            :' in line:
-                    self.ev_sum = float(outline[7])
-
-                if '  | Total energy of the DFT' in line:
-                    self.dft_energy = float(outline[11])
-
-                if 'Total XC Energy     :' in line:
-                    self.xc_energy = float(outline[6])
-
-                if 'Total energy after the post-s.c.f.' in line:
-                    self.post_scf_corr_energy = float(outline[9])
 
     def run_scf(self, dm_in=None):
         """A wrapper function for executing a normal SCF calculation
@@ -534,7 +513,7 @@ class AtomsEmbed():
         self.runtime_calc = \
             self.qm_adapter.set_full_scf_calc(self.runtime_calc)
 
-        self.run(ev_corr_scf_final_density=True, noscf=False)
+        self.run(ev_corr_scf_final_density=True)
 
         self.density_matrix_in = None
 
@@ -728,7 +707,7 @@ class AtomsEmbed():
 
         Parameters
         ----------
-        ev_corr_scf: bool
+        ev_corr_scf: bolo
            Replaces energy contribution from sum of eigenvalues with
            product of the density matrix and hamiltonian
 
@@ -764,7 +743,7 @@ class AtomsEmbed():
                                                      self.atoms,
                                                      work_dir=self.outdir)
         else:
-            self.atoms.calc = self.runtime_calc
+            self.atoms.calc = self.calc_initializer(asi=None, return_calc=True)
 
         # Prepare the calculator to export matrix quantities (e.g., register
         # ASI callbacks for callback-based QM codes; no-op for QM codes which
@@ -777,14 +756,11 @@ class AtomsEmbed():
         # matrix
         self.qm_adapter.run_scf(self)
 
-        E0 = self.qm_adapter.get_energy(self, self.atoms.calc)
-
-        self.total_energy = E0
+        self.total_energy = self.qm_adapter.get_energy(self)
 
         # Extract matrix quantities from the completed calculation, using
         # whichever mechanism is appropriate for the underlying QM code.
-        results_scalar = self.qm_adapter.extract_matrices(self.atoms.calc, self)
-        results = self.qm_adapter.extract_matrices(self.atoms.calc, self)
+        results = self.qm_adapter.extract_matrices(self)
 
         self.n_kpoints = results["n_kpoints"]
         self.n_spins = results["n_spins"]
@@ -797,7 +773,7 @@ class AtomsEmbed():
         self._ovlp = results["ovlp"]
         self._dm = results["dm"]
 
-        if close_calc:
+        if close_calc and self.qm_adapter.uses_asi_callbacks:
             self.atoms.calc.asi.close()
 
         MPI.COMM_WORLD.Barrier()
@@ -805,7 +781,8 @@ class AtomsEmbed():
         end_time = time.time()
         self.last_run_time = end_time - start_time
 
-        self.extract_results()
+        if close_calc and self.qm_adapter.uses_asi_callbacks:
+            self.extract_results()
 
         # Within the embedding workflow, we often want to calculate the total
         # energy for a given density matrix without performing any SCF steps.
@@ -858,6 +835,9 @@ class AtomsEmbed():
 
                 self.ev_corr_total_energy = \
                     self.total_energy - self.ev_sum + self.ev_corr_energy
+
+        if (ev_corr_scf or ev_corr_scf_final_density) and not self.qm_adapter.needs_nonscf_ene_corr:
+            self.ev_corr_total_energy = self.total_energy
 
     def ev_solve_and_sum_evs(self, emb_pot_scf):
         """Solves the KS eigenvalue equation and sums the eigenvalues
@@ -1134,7 +1114,6 @@ class AtomsEmbed():
 
         tot_nelec = np.sum(self.atoms.numbers)
         ghost_nelec = np.sum(self.atoms.numbers[self.ghost_list_calc])
-        root_print(f"GHOST NELEC: {+(ghost_nelec)}")
         return tot_nelec - ghost_nelec
 
     @property
@@ -1155,7 +1134,4 @@ class AtomsEmbed():
 
     @property
     def fragment_total_charge(self):
-        root_print(f"FREE AT NELECS: {+(self.free_atom_nelectrons)}")
-        root_print(f"INPUT FRAG NELECS: {+(self.input_fragment_nelectrons)}")
-        root_print(f"FRAG TOTAL CHARGE: {+(self.input_fragment_nelectrons - self.free_atom_nelectrons)}")
         return +(self.input_fragment_nelectrons - self.free_atom_nelectrons)

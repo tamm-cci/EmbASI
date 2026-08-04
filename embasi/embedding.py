@@ -642,12 +642,13 @@ class ProjectionEmbedding(EmbeddingBase):
                                                                                  basis_illcond_thresh=self.basis_illcond_thresh,
                                                                                  return_orthog=True)
         else:
-            evals, evecs, occ_mat = hamiltonian_eigensolv(hamiltonian, \
+            evals, evecs, evecs_orthog, occ_mat = hamiltonian_eigensolv(hamiltonian, \
                                                           overlap, \
                                                           nelecs, \
                                                           nspins=atomsembed.n_spins,
                                                           nkpts=atomsembed.n_kpoints,
-                                                          basis_illcond_thresh=self.basis_illcond_thresh,)
+                                                          basis_illcond_thresh=self.basis_illcond_thresh,
+                                                          return_orthog=True)
 
 
         mask_val = []
@@ -1131,8 +1132,6 @@ class ProjectionEmbedding(EmbeddingBase):
             self.output_timing_dict["FAT_Total"] = self.fat_total_time
         else:
             # Calculate the energy for subsystem A with the lower level of theory
-            root_print(f"DENSITY DIFF: {(self.AB_LL.density_matrices_out - densmat_A_LL - densmat_B_LL).trace()}")
-
             self.A_LL.input_fragment_nelectrons = self.A_pop
             self.A_LL.run_noscf(dm_in=densmat_A_LL)
             self.subsys_A_lowlvl_totalen = self.A_LL.ev_corr_total_energy
@@ -1170,8 +1169,6 @@ class ProjectionEmbedding(EmbeddingBase):
             densmat_A_HL = self.A_HL.density_matrices_out.copy()
 
         if self.total_energy_corr == "nonscf":
-            #self.A_LL.initial_calc.parameters["xc"] = "pbe0"
-            #self.AB_LL.initial_calc.parameters["xc"] = "pbe0"
             # Calculate A low-level reference energy
             self.A_LL.input_fragment_nelectrons = self.A_pop
             self.A_LL.run_noscf(dm_in=densmat_A_HL)
@@ -1225,7 +1222,7 @@ class ProjectionEmbedding(EmbeddingBase):
         elif self.total_energy_corr == "nonscf":
             self.DFT_AinB_total_energy = self.subsys_A_highlvl_totalen - \
                 self.subsys_A_lowlvl_totalen + self.subsys_AB_lowlvl_nonscftotalen + self.PB_corr
-            
+
         self.output_data_dict["TOTALENERGY"]["AinB_FINAL_EMBEEDING"] = self.DFT_AinB_total_energy
 
         root_print( f" ----------- FINAL         OUTPUTS --------- " )

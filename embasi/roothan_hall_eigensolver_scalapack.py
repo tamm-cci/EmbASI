@@ -132,7 +132,7 @@ def hamiltonian_eigensolv_parallel(hamiltonian, overlap, nelec, nspins=1, nkpts=
             remaining_electrons += -1
     else:
         occ_mat[(0,0)] = np.zeros(np.size(evals[(0,0)]))
-        occ_mat[(0,0)][:int(round(nelec/2))] = 2.0
+        occ_mat[(0,0)][:round(nelec/2)] = 2.0
 
     evecs = SpinKpointArray(evecs, nspins, nkpts)
     evals = SpinKpointArray(evals, nspins, nkpts)
