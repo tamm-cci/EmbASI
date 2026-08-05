@@ -52,7 +52,7 @@ atoms = atoms[idx_list]
 mol = pyscf.M(atom=ase_atoms_to_pyscf(atoms), basis='ccpvtz')
 
 mf_ll = mol.KS(xc='PBE')
-mf_hl = mol.KS(xc='PBE0')
+mf_hl = mol.KS(xc='PBE')
 
 calc_ll = PySCF(method=mf_ll)
 calc_hl = PySCF(method=mf_hl)

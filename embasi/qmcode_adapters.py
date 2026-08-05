@@ -97,6 +97,30 @@ class QMCodeAdapter(ABC):
         """
         pass
 
+    def set_truncated_atoms(self, atomsembed, calc, active_atoms):
+        """Drops non-active atoms (and their basis functions) from the calculator
+
+        No-op by default: QM codes whose calculator is rebuilt fresh from
+        the (already-truncated) ASE atoms object on every run - e.g.
+        FHI-aims via ASI, which regenerates geometry.in each call - get
+        truncation for free and need nothing here. Codes that instead
+        read a persistent, calculator-resident geometry/basis (PySCF's
+        Mole) must override this to remove the truncated atoms there
+        directly, since nothing else ever re-derives it from
+        atomsembed.atoms.
+
+        Parameters
+        ----------
+        atomsembed : AtomsEmbed
+            The owning AtomsEmbed instance.
+        calc : ASECalculator
+            ASE calculator to truncate.
+        active_atoms : array-like of int
+            Indices, into the original untruncated atom ordering, of the
+            atoms to keep.
+        """
+        return calc
+
     @abstractmethod
     def set_postscf_keyword(self, calc, postscf_method):
         """Set calculator parameters for setting the keyword for postscf methods
@@ -161,6 +185,20 @@ class QMCodeAdapter(ABC):
 
         Changes the ASE Calculator keywords to accept the keywords to
         skip the SCF cycle and only output the total energy.
+
+        Parameters
+        ----------
+        calc : ASECalculator
+            ASE calculator to add parameters
+        """
+        pass
+
+    @abstractmethod
+    def set_max_scf_cycles(self, calc):
+        """Set calculator maximum number of SCF cycles
+
+        Changes the ASE Calculator keywords for manipulating the number
+        of SCF iterations
 
         Parameters
         ----------
@@ -575,9 +613,13 @@ class AimsAdapter(QMCodeASIAdapter):
 
     def set_noscf_calc_params(self, calc):
         calc.parameters['charge_mix_param'] = 0.
-        calc.parameters['sc_iter_limit'] = 0
+        calc = self.set_max_scf_cycles(calc, 0)
         self.set_embasi_calculation_type(calc, "total_energy_only")
 
+        return calc
+
+    def set_max_scf_cycles(self, calc, max_cycles):
+        calc.parameters['sc_iter_limit'] = max_cycles
         return calc
 
     def set_ghost_atoms(self, atomsembed, calc, ghost_list):
@@ -639,8 +681,12 @@ class PySCFAdapter(QMCodeAdapter):
         return ASI_flavour["None"]
 
     def set_noscf_calc_params(self, calc):
-        calc.method.max_cycle = 0
-        calc.method_scan.max_cycle = 0
+        calc = self.set_max_scf_cycles(calc, 0)
+        return calc
+
+    def set_max_scf_cycles(self, calc, max_cycles):
+        calc.method.max_cycle = max_cycles
+        calc.method_scan.max_cycle = max_cycles
         return calc
 
     def set_ghost_atoms(self, atomsembed, calc, ghost_list):
@@ -670,6 +716,37 @@ class PySCFAdapter(QMCodeAdapter):
         # won't be the final value passed to the calculation but
         # avoids a nasty crash
         if not round(atomsembed.free_atom_nelectrons) % 2 == 0:
+            calc.mol.spin = 1
+
+        calc.mol.build()
+
+        return calc
+
+    def set_truncated_atoms(self, atomsembed, calc, active_atoms):
+        from pyscf.gto.mole import charge
+
+        old_atom = calc.mol.atom
+        old_basis = calc.mol.basis
+
+        new_atom = [old_atom[idx] for idx in active_atoms]
+
+        if isinstance(old_basis, dict):
+            kept_species = {entry[0] for entry in new_atom}
+            new_basis = {sp: basis for sp, basis in old_basis.items() if sp in kept_species}
+        else:
+            new_basis = old_basis
+
+        calc.mol.atom = new_atom
+        calc.mol.basis = new_basis
+
+        # Dropping atoms changes the neutral-fragment electron count,
+        # which may no longer be consistent with the default mol.spin=0.
+        # Satisfy PySCF's internal nelec/spin book-keeping enough for
+        # build() below to succeed - set_qm_total_charge (called right
+        # after this, in calc_initializer) sets the actual fragment
+        # charge/spin and rebuilds again.
+        nelec_trunc = sum(charge(entry[0]) for entry in new_atom)
+        if nelec_trunc % 2 != 0:
             calc.mol.spin = 1
 
         calc.mol.build()
@@ -736,8 +813,17 @@ class PySCFAdapter(QMCodeAdapter):
 
             gamma_B = S = None
             if atomsembed.flag_huz and atomsembed.huzinaga_dm_in is not None:
-                gamma_B = atomsembed.huzinaga_dm_in[0,0]
-                S = atomsembed.huzinaga_ovlp_in[0,0]
+                # huzinaga_dm_in/huzinaga_ovlp_in are always stored full-size
+                # (run_embasi_diag_emb_pot's absolute-truncation projector
+                # needs them that way), but the Fock override below runs
+                # inside mf.kernel() on the truncated Mole, so gamma_B/S
+                # need to match its (trunc_nbasis, trunc_nbasis) Fock here.
+                if atomsembed.truncate:
+                    gamma_B = atomsembed.full_mat_to_truncated(atomsembed.huzinaga_dm_in)[0,0]
+                    S = atomsembed.full_mat_to_truncated(atomsembed.huzinaga_ovlp_in)[0,0]
+                else:
+                    gamma_B = atomsembed.huzinaga_dm_in[0,0]
+                    S = atomsembed.huzinaga_ovlp_in[0,0]
 
             fock_func = mf.get_fock
             mf.get_fock = embedded_get_fock_factory(mf, fock_func, mat_in=mat_in,
@@ -772,6 +858,7 @@ class PySCFAdapter(QMCodeAdapter):
         basis_atoms = []
         for atom_idx, basis in enumerate(aoslice):
             basis_atoms += len(range(basis[2],basis[3])) * [atom_idx]
+        basis_atoms = np.array(basis_atoms)
 
         nbasis = len(basis_atoms)
         n_spins = 1
@@ -794,6 +881,20 @@ class PySCFAdapter(QMCodeAdapter):
         ham_tot = SpinKpointArray({(0,0): hcore + veff}, n_spins, n_kpoints)
 
         total_energy = atomsembed.atoms.calc.method.energy_tot(dm_out, hcore, veff) * 27.211384500
+
+        # Everything above was computed on the truncated Mole (shape
+        # trunc_nbasis x trunc_nbasis). Pad back up to the full
+        # supersystem basis so combining these with other, untruncated
+        # layers (e.g. self.AB_LL.hamiltonian_total - self.A_LL.hamiltonian_total
+        # in ProjectionEmbedding.run) doesn't hit a shape mismatch - this
+        # mirrors what QMCodeASIAdapter.extract_matrices already does for
+        # the ASI-based adapters via the same truncated_mat_to_full call.
+        if atomsembed.truncate:
+            ham_kin = atomsembed.truncated_mat_to_full(ham_kin)
+            ham_2ee = atomsembed.truncated_mat_to_full(ham_2ee)
+            ham_tot = atomsembed.truncated_mat_to_full(ham_tot)
+            ovlp = atomsembed.truncated_mat_to_full(ovlp)
+            dm = atomsembed.truncated_mat_to_full(dm)
 
         self.scf_rundata = SCFRunData(total_energy,
                                       n_spins,

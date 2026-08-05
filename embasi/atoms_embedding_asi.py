@@ -124,6 +124,7 @@ class AtomsEmbed():
             self.ghost_list_calc = [
                 ghst for (idx, ghst) in enumerate(self.ghost_list)
                 if idx in self.basis_info.active_atoms ]
+            calc = self.qm_adapter.set_truncated_atoms(self, calc, self.basis_info.active_atoms)
         else:
             self.ghost_list_calc = self.ghost_list
 
@@ -584,73 +585,14 @@ class AtomsEmbed():
         import time
         from embasi.roothan_hall_eigensolver_scalapack import hamiltonian_eigensolv_parallel
         from embasi.roothan_hall_eigensolver import hamiltonian_eigensolv
-
-        def calculate_abs_trunc_huzinaga_projector(atomsembed):
-
-            def get_abs_trunc_indices(atomsembed):
-                import numpy as np
-
-                active_atoms = np.array(atomsembed.basis_info.active_atoms_mask)
-
-                # First and last truncated atom
-                trunc_at_first = np.argmax(active_atoms == True)
-                trunc_at_last = len(active_atoms) - 1 - np.argmax((active_atoms == True)[::-1])
-                # Find first and last active atom
-                full_at_first = np.argmax(active_atoms == False)
-                full_at_last = len(active_atoms) - 1 - np.argmax((active_atoms == False)[::-1])
-
-                full_basis_min_idx = atomsembed.basis_info.full_basis_min_idx
-                full_basis_max_idx = atomsembed.basis_info.full_basis_max_idx
-                A_block_min = full_basis_min_idx[trunc_at_first]
-                A_block_max = full_basis_max_idx[trunc_at_last]
-
-                B_block_min = full_basis_min_idx[full_at_first]
-                B_block_max = full_basis_max_idx[full_at_last]
-
-                return A_block_min, A_block_max, B_block_min, B_block_max
-
-            projector = {}
-
-            if self.truncate:
-                for PiS in range(self.n_spins):
-                    for PiK in range(self.n_kpoints):
-                        ovlp_supermol = atomsembed.huzinaga_ovlp_in[PiS, PiK]
-                        dm_supermol = atomsembed.huzinaga_dm_in[PiS, PiK]
-
-                        fock_supermol = atomsembed.embedding_ham_in[PiS, PiK]
-
-                        A_block_min, A_block_max, B_block_min, B_block_max = get_abs_trunc_indices(atomsembed)
-
-                        fmat_supermol = fock_supermol[A_block_min:A_block_max,B_block_min:B_block_max]
-                        dm_supermol = dm_supermol[B_block_min:B_block_max,B_block_min:B_block_max]
-                        ovlp_supermol = ovlp_supermol[A_block_min:A_block_max,B_block_min:B_block_max]
-
-                        if atomsembed.huzinaga_dm_in.n_spins > 1:
-                            projector[(PiS,PiK)] = - 1.0 * ((fmat_supermol @ dm_supermol @ ovlp_supermol.T) + (ovlp_supermol @ dm_supermol @ fmat_supermol.T))
-                        else:
-                            projector[(PiS,PiK)] = - 0.5 * ((fmat_supermol @ dm_supermol @ ovlp_supermol.T) + (ovlp_supermol @ dm_supermol @ fmat_supermol.T))
-
-            else:
-                for PiS in range(self.n_spins):
-                    for PiK in range(self.n_kpoints):
-                        fock_supermol = atomsembed.embedding_ham_in[PiS, PiK]
-                        ovlp = atomsembed.huzinaga_ovlp_in[PiS, PiK]
-                        dm = atomsembed.huzinaga_dm_in[PiS, PiK]
-
-                        if atomsembed.embedding_ham_in.n_spins > 1:
-                            projector[(PiS,PiK)] = - 1.0 * ((fock_supermol @ dm @ ovlp.T) + (ovlp @ dm @ fock_supermol.T))
-                        else:
-                            projector[(PiS,PiK)] = - 0.5 * (((fock_supermol) @ dm @ ovlp.T) + (ovlp @ dm @ (fock_supermol).T))
-
-
-            return SpinKpointArray(projector, self.n_spins, self.n_kpoints)
+        from embasi.huzinaga_projector import huzinaga_projector_abs_trunc
 
         self.huzinaga_dm_in = sc_huz_dm
         self.huzinaga_ovlp_in = sc_huz_ovlp
         self.embedding_ham_in = sc_huz_ham
 
         if self.flag_huz:
-            projector = calculate_abs_trunc_huzinaga_projector(self)
+            projector = huzinaga_projector_abs_trunc(self)
         else:
             projector = proj_pot
 
@@ -784,8 +726,8 @@ class AtomsEmbed():
         end_time = time.time()
         self.last_run_time = end_time - start_time
 
-        if close_calc and self.qm_adapter.uses_asi_callbacks:
-            self.qm_adapter.get_decomposed_energy_from_file(self)
+        self.qm_adapter.get_decomposed_energy_from_file(self)
+        self.close_calculator()
 
         # Within the embedding workflow, we often want to calculate the total
         # energy for a given density matrix without performing any SCF steps.
@@ -901,7 +843,8 @@ class AtomsEmbed():
 
 
     def close_calculator(self):
-        self.atoms.calc.asi.close()
+        if self.qm_adapter.uses_asi_callbacks:
+            self.atoms.calc.asi.close()
 
     def garbage_collect(self):
         """Removes all stored matrices from memory

@@ -620,177 +620,6 @@ class ProjectionEmbedding(EmbeddingBase):
 
         self.P_b = self.mu_val * (overlap @ densmat @ overlap)
 
-    def calculate_huzinaga_projector(self, hamiltonian, overlap, densmat):
-
-        if hamiltonian.n_spins > 1:
-            self.P_b = -1.0 * ( (hamiltonian @ densmat @ overlap.T) + (overlap @ densmat @ hamiltonian.T) )
-        else:
-            self.P_b = -0.5 * ( (hamiltonian @ densmat @ overlap.T) + (overlap @ densmat @ hamiltonian.T) )
-
-    def spade_localisation(self, atomsembed, hamiltonian, overlap):
-        """Calculate the localised density matrix with the SPADE method
-
-        As the eigenvectors (MO coefficient matrix) is not a part of the 
-        ASI specification, we solve the Roothan-Hall eigenvalue problem
-        and construct the density matrix at the wrapper level.
-
-        """
-        from embasi.roothan_hall_eigensolver import hamiltonian_eigensolv, calculate_densmat, overlap_illcondition_check
-        from embasi.roothan_hall_eigensolver_scalapack import hamiltonian_eigensolv_parallel, overlap_illcondition_check_parallel
-        from scalapack4py.npscal.math_utils.npscal2npscal import eig, svd
-        from embasi.parallel_utils import mpi_bcast_matrix
-        import copy
-
-        # TODO: This procedure is getting very ugly and needs refactoring into its
-        # own module at some point.
-
-        # TODO: @SPIN AND K-POINT LOOP - and needs syncing?? - SHOULD WE JUST PLACE THE LOOP AROUND THIS ROUTINE?
-        root_print('Starting SPADE localisation...')
-
-        nelecs = atomsembed.free_atom_nelectrons - atomsembed.input_total_charge
-        if self.parallel:
-            evals, evecs, evecs_orthog, occ_mat = hamiltonian_eigensolv_parallel(hamiltonian, \
-                                                                                 overlap, \
-                                                                                 nelecs, \
-                                                                                 nspins=atomsembed.n_spins, \
-                                                                                 nkpts=atomsembed.n_kpoints, \
-                                                                                 basis_illcond_thresh=self.basis_illcond_thresh,
-                                                                                 return_orthog=True)
-        else:
-            evals, evecs, evecs_orthog, occ_mat = hamiltonian_eigensolv(hamiltonian, \
-                                                          overlap, \
-                                                          nelecs, \
-                                                          nspins=atomsembed.n_spins,
-                                                          nkpts=atomsembed.n_kpoints,
-                                                          basis_illcond_thresh=self.basis_illcond_thresh,
-                                                          return_orthog=True)
-
-
-        mask_val = []
-
-        for idx, basis2atom in enumerate(atomsembed.basis_info.full_basis_atoms):
-            if atomsembed.embed_mask[basis2atom]==1:
-                mask_val.append(True)
-            else:
-                mask_val.append(False)
-
-        mask_val = np.array(mask_val)
-
-        evecs_occ_ab = evecs.copy()
-        rot_evecs_occ_a = evecs.copy()
-        rot_evecs_occ_b = evecs.copy()
-
-        # TODO: Clean this up and add automatic detection based on eigenvalues.
-        # This should be done in one routine - this is very FORTRAN-like.
-        if self.spade_ncores > 0:
-            root_print("Performing separate core-valence SPADE localisation.")
-            for ispin in range(atomsembed.n_spins):
-                for ikpt in range(atomsembed.n_kpoints):
-                    max_occ_state = np.count_nonzero(occ_mat[ispin,ikpt])
-
-                    #evecs_occ_orthog = evecs_orthog.copy()
-                    #evecs_occ_orthog[ispin, ikpt, :, self.spade_ncores:max_occ_state] = 0.0
-                    #evecs_occ_a_orthog = evecs_occ_orthog[mask_val, :]
-                    evecs_occ_orthog = evecs_orthog[ispin, ikpt, :, :self.spade_ncores]
-                    evecs_occ_a_orthog = evecs_occ_orthog[mask_val, :]
-
-                    if self.parallel:
-                        u, svals, v = svd(evecs_occ_a_orthog)
-                    else:
-                        u, svals, v = np.linalg.svd(evecs_occ_a_orthog, full_matrices=True)
-
-                    svals_diff = np.ediff1d(svals**2.0)
-                    max_sval_change_idx = np.argmax(np.abs(svals_diff)) + 1
-
-                    root_print(f'MAX OCC CORE STATE {self.spade_ncores} for Spin Channel {ispin}')
-                    root_print(f'SPADE CORE STATE FOR: Spin Channel {ispin}, K-point {ikpt}')
-                    root_print(f'Maximum SPADE core state for subsystem A: {max_sval_change_idx}')
-
-                    #evecs_occ = evecs.copy()
-                    #evecs_occ[ispin, ikpt, :, self.spade_ncores:max_occ_state] = 0.0
-                    evecs_occ = evecs[ispin, ikpt, :, :self.spade_ncores]
-
-                    rot_evecs_occ_a[ispin, ikpt] = evecs_occ @ v[:max_sval_change_idx, :].T
-                    rot_evecs_occ_b[ispin, ikpt] = evecs_occ @ v[max_sval_change_idx:, :].T
-                    evecs_occ_ab[ispin, ikpt] = evecs_occ.copy()
-
-            # @TODOSPIN: Need to redefine occupancies - this obviously won't work for k-points
-            if atomsembed.n_spins == 1:
-                density_matrix_supersystem = 2.0 * (evecs_occ_ab @ evecs_occ_ab.copy().T)
-                density_matrix_subsys_a = 2.0 * (rot_evecs_occ_a @ rot_evecs_occ_a.copy().T)
-                density_matrix_subsys_b = 2.0 * (rot_evecs_occ_b @ rot_evecs_occ_b.copy().T)
-            else:
-                density_matrix_supersystem = (evecs_occ_ab @ evecs_occ_ab.copy().T)
-                density_matrix_subsys_a = (rot_evecs_occ_a @ rot_evecs_occ_a.copy().T)
-                density_matrix_subsys_b = (rot_evecs_occ_b @ rot_evecs_occ_b.copy().T)
-
-            root_print(f'SPADE CORE localised subsystem A charge: {(overlap @ density_matrix_subsys_a).trace()}')
-            root_print(f'SPADE CORE localised subsystem B charge: {(overlap @ density_matrix_subsys_b).trace()}')
-
-        for ispin in range(atomsembed.n_spins):
-            for ikpt in range(atomsembed.n_kpoints):
-                max_occ_state = np.count_nonzero(occ_mat[ispin,ikpt])
-
-                evecs_occ_orthog = evecs_orthog[ispin, ikpt, :, self.spade_ncores:max_occ_state]
-                evecs_occ_a_orthog = evecs_occ_orthog[mask_val, :]
-
-                if self.parallel:
-                    u, svals, v = svd(evecs_occ_a_orthog)
-                else:
-                    u, svals, v = np.linalg.svd(evecs_occ_a_orthog, full_matrices=True)
-
-                svals_diff = np.ediff1d(svals**2.0)
-                max_sval_change_idx = np.argmax(np.abs(svals_diff)) + self.spade_manual_state + 1
-
-                root_print(f'MAX OCC STATE {max_occ_state} for Spin Channel {ispin}')
-                root_print(f'SPADE STATE FOR: Spin Channel {ispin}, K-point {ikpt}')
-                root_print(f'Maximum SPADE state for subsystem A: {max_sval_change_idx}')
-
-                evecs_occ = evecs[ispin, ikpt, :, self.spade_ncores:max_occ_state]
-
-                rot_evecs_occ_a[ispin, ikpt] = evecs_occ @ v[:max_sval_change_idx, :].T
-                rot_evecs_occ_b[ispin, ikpt] = evecs_occ @ v[max_sval_change_idx:, :].T
-                evecs_occ_ab[ispin, ikpt] = evecs_occ.copy()
-
-        # @TODOSPIN: Need to redefine occupancies - this obviously won't work for k-points
-        if self.spade_ncores > 0:
-            if atomsembed.n_spins == 1:
-                density_matrix_supersystem = density_matrix_supersystem + 2.0 * (evecs_occ_ab @ evecs_occ_ab.copy().T)
-                density_matrix_subsys_a = density_matrix_subsys_a + 2.0 * (rot_evecs_occ_a @ rot_evecs_occ_a.copy().T)
-                density_matrix_subsys_b = density_matrix_subsys_b + 2.0 * (rot_evecs_occ_b @ rot_evecs_occ_b.copy().T)
-            else:
-                density_matrix_supersystem = density_matrix_supersystem + (evecs_occ_ab @ evecs_occ_ab.copy().T)
-                density_matrix_subsys_a = density_matrix_subsys_a + (rot_evecs_occ_a @ rot_evecs_occ_a.copy().T)
-                density_matrix_subsys_b = density_matrix_subsys_b + (rot_evecs_occ_b @ rot_evecs_occ_b.copy().T)
-        else:
-            if atomsembed.n_spins == 1:
-                density_matrix_supersystem = 2.0 * (evecs_occ_ab @ evecs_occ_ab.copy().T)
-                density_matrix_subsys_a = 2.0 * (rot_evecs_occ_a @ rot_evecs_occ_a.copy().T)
-                density_matrix_subsys_b =  2.0 * (rot_evecs_occ_b @ rot_evecs_occ_b.copy().T)
-            else:
-                density_matrix_supersystem = (evecs_occ_ab @ evecs_occ_ab.copy().T)
-                density_matrix_subsys_a = (rot_evecs_occ_a @ rot_evecs_occ_a.copy().T)
-                density_matrix_subsys_b = (rot_evecs_occ_b @ rot_evecs_occ_b.copy().T)
-
-        #density_matrix_subsys_b = density_matrix_supersystem - density_matrix_subsys_a
-
-        # I don't think this is needed anymore - density matrices should be synched before this
-        # point.
-        if not(self.parallel):
-            for ispin in range(atomsembed.n_spins):
-                for ikpt in range(atomsembed.n_kpoints):
-                    density_matrix_supersystem[ispin,ikpt] = mpi_bcast_matrix(density_matrix_supersystem[ispin,ikpt])
-                    density_matrix_subsys_a[ispin,ikpt] = mpi_bcast_matrix(density_matrix_subsys_a[ispin,ikpt])
-                    density_matrix_subsys_b[ispin,ikpt] = mpi_bcast_matrix(density_matrix_subsys_b[ispin,ikpt])
-
-        root_print(f'SPADE total supersystem A+B charge: {(overlap @ density_matrix_supersystem).trace()}')
-        root_print(f'SPADE localised subsystem A charge: {(overlap @ density_matrix_subsys_a).trace()}')
-        root_print(f'SPADE localised subsystem B charge: {(overlap @ density_matrix_subsys_b).trace()}')
-
-        root_print('Exiting SPADE localisation...')
-
-        return density_matrix_subsys_a, density_matrix_subsys_b
-
     def freeze_and_thaw(self, densmat_A_LL, densmat_B_LL, overlap, ncycles=5, mixing_type="emb_pot"):
         """ Freeze-and-thaw absolute basis truncation algorithm of Graham et al.[1]
 
@@ -870,14 +699,14 @@ class ProjectionEmbedding(EmbeddingBase):
             self.A_LL.input_fragment_nelectrons = self.A_pop
             if self.projection == "huzinaga-sc":
                 # Produces a converged initial density for future iterations
-                if i==0:
-                    self.A_LL.run_emb_scf(dm_in=densmat_A_LL, emb_pot=self.vemb,
-                                          sc_huz_dm=densmat_B_LL, sc_huz_ovlp=overlap,
-                                          sc_huz_ham=self.AB_LL.hamiltonian_total,)
-                else:
-                    self.A_LL.run_embasi_diag_emb_pot(dm_in=densmat_A_LL, emb_pot=self.AB_LL.hamiltonian_total,
-                                                      sc_huz_dm=densmat_B_LL, sc_huz_ovlp=overlap,
-                                                      sc_huz_ham=self.AB_LL.hamiltonian_total)
+                #if i==0:
+                #    self.A_LL.run_emb_scf(dm_in=densmat_A_LL, emb_pot=self.vemb,
+                #                          sc_huz_dm=densmat_B_LL, sc_huz_ovlp=overlap,
+                #                          sc_huz_ham=self.AB_LL.hamiltonian_total,)
+                #else:
+                self.A_LL.run_embasi_diag_emb_pot(dm_in=densmat_A_LL, emb_pot=self.AB_LL.hamiltonian_total,
+                                                  sc_huz_dm=densmat_B_LL, sc_huz_ovlp=overlap,
+                                                  sc_huz_ham=self.AB_LL.hamiltonian_total)
             else:
                 raise Exception("Only 'huzinaga-sc' is valid in freeze-and-thaw.")
             end_time = time.time()
@@ -890,14 +719,14 @@ class ProjectionEmbedding(EmbeddingBase):
             start_time = time.time()
             self.B_LL.input_fragment_nelectrons = self.B_pop
             if self.projection == "huzinaga-sc":
-                if i==0:
-                    self.B_LL.run_emb_scf(dm_in=densmat_B_LL, emb_pot=self.vemb,
-                                          sc_huz_dm=densmat_A_LL, sc_huz_ovlp=overlap,
-                                          sc_huz_ham=self.AB_LL.hamiltonian_total)
-                else:
-                    self.B_LL.run_embasi_diag_emb_pot(dm_in=densmat_B_LL, emb_pot=self.AB_LL.hamiltonian_total,
-                                                      sc_huz_dm=densmat_A_LL, sc_huz_ovlp=overlap,
-                                                      sc_huz_ham=self.AB_LL.hamiltonian_total)
+                #if i==0:
+                #    self.B_LL.run_emb_scf(dm_in=densmat_B_LL, emb_pot=self.vemb,
+                #                          sc_huz_dm=densmat_A_LL, sc_huz_ovlp=overlap,
+                #                          sc_huz_ham=self.AB_LL.hamiltonian_total)
+                #else:
+                self.B_LL.run_embasi_diag_emb_pot(dm_in=densmat_B_LL, emb_pot=self.AB_LL.hamiltonian_total,
+                                                  sc_huz_dm=densmat_A_LL, sc_huz_ovlp=overlap,
+                                                  sc_huz_ham=self.AB_LL.hamiltonian_total)
             else:
                 raise Exception("Only 'huzinaga-sc' is valid in freeze-and-thaw.")
             end_time = time.time()
@@ -912,7 +741,7 @@ class ProjectionEmbedding(EmbeddingBase):
             self.output_data_dict["FATCONVINFO"]["DFTINDFT_DELTAENERGIES"].append(delta_energy)
             root_print(f"ITERATION {i}: DELTA ENERGY - {delta_energy} eV")
             old_energy = new_energy
-            
+
             if np.abs(delta_energy) < 1e-6 and i != 0:
                 root_print(f"FAT CONVERGED!")
                 break
@@ -958,30 +787,25 @@ class ProjectionEmbedding(EmbeddingBase):
             root_print(f"ITERATION {i}: DONE!\n")
 
         self.AB_LL.close_calculator()
+
         # Finally, run a post-processing step to obtain the high-level
         # energy in the potential of the frozen, absolutely localised
         # environment
-        if self.projection == "huzinaga-sc":
-            self.A_LL.input_fragment_nelectrons = self.A_pop
-            self.A_LL.run_noscf(dm_in=densmat_A_LL)
+        self.A_LL.input_fragment_nelectrons = self.A_pop
+        self.A_LL.run_noscf(dm_in=densmat_A_LL)
 
-            emb_ham_a = self.AB_LL.hamiltonian_total - self.A_LL.hamiltonian_total
+        emb_ham_a = self.AB_LL.hamiltonian_total - self.A_LL.hamiltonian_total
 
-            self.vemb = emb_ham_a
+        self.vemb = emb_ham_a
 
-            self.A_HL.input_fragment_nelectrons = self.A_pop
+        self.A_HL.input_fragment_nelectrons = self.A_pop
 
-            self.A_HL.run_emb_scf(dm_in=densmat_A_LL, emb_pot=emb_ham_a,
+        self.A_HL.run_emb_scf(dm_in=densmat_A_LL, emb_pot=emb_ham_a,
                                   sc_huz_dm=densmat_B_LL, sc_huz_ovlp=overlap,
                                   sc_huz_ham=self.AB_LL.hamiltonian_total)
 
-            self.subsys_A_highlvl_totalen = self.A_HL.ev_corr_total_energy
-
-            self.order_1_embedding_corr = ( (self.A_HL.density_matrices_out - densmat_A_LL) @ self.vemb).trace() * 27.211384500
-
-        else:
-            raise Exception("Only 'huzinaga-sc' is valid in freeze-and-thaw.")
-
+        densmat_A_LL = self.A_HL.density_matrices_out
+        self.subsys_A_highlvl_totalen = self.A_HL.ev_corr_total_energy
 
         return densmat_A_LL, densmat_B_LL
 
@@ -1034,7 +858,7 @@ class ProjectionEmbedding(EmbeddingBase):
         import tracemalloc
         import time
 
-        tracemalloc.start(50)
+        tracemalloc.start(1)
 
         root_print("Embedding calculation begun...")
 
@@ -1052,11 +876,11 @@ class ProjectionEmbedding(EmbeddingBase):
         if self.parallel:
             overlap = self.AB_LL.overlap.copy()
             hamiltonian_AB_total = self.AB_LL.hamiltonian_total.copy()
-            AB_hamiltonian_estat_plus_xc = self.AB_LL.hamiltonian_estat_plus_xc.copy()
+            #AB_hamiltonian_estat_plus_xc = self.AB_LL.hamiltonian_estat_plus_xc.copy()
         else:
             overlap = copy.deepcopy(self.AB_LL.overlap)
             hamiltonian_AB_total = copy.deepcopy(self.AB_LL.hamiltonian_total)
-            AB_hamiltonian_estat_plus_xc = copy.deepcopy(self.AB_LL.hamiltonian_estat_plus_xc)
+            #AB_hamiltonian_estat_plus_xc = copy.deepcopy(self.AB_LL.hamiltonian_estat_plus_xc)
 
         # Read the localised density matrices output by the QM code or
         # perform SPADE localisation on the wrapper level.
@@ -1064,8 +888,14 @@ class ProjectionEmbedding(EmbeddingBase):
         basis_info = self.set_basis_info(self.AB_LL)
         self.AB_LL.basis_info = basis_info
         if self.localisation == "SPADE":
+            from embasi.spade_localisation import spade_localisation
+
             start = time.time()
-            densmat_A_LL, densmat_B_LL = self.spade_localisation(self.AB_LL, hamiltonian_AB_total, overlap)
+            densmat_A_LL, densmat_B_LL = spade_localisation(self.AB_LL, hamiltonian_AB_total, overlap,
+                                                             parallel=self.parallel,
+                                                             spade_ncores=self.spade_ncores,
+                                                             spade_manual_state=self.spade_manual_state,
+                                                             basis_illcond_thresh=self.basis_illcond_thresh)
             end = time.time()
             self.time_spade = end - start
             self.output_timing_dict["SPADE_LOCALISATION"] = self.time_spade
@@ -1159,7 +989,9 @@ class ProjectionEmbedding(EmbeddingBase):
             if self.projection == "level-shift":
                 self.calculate_levelshift_projector(densmat_B_LL, overlap)
             elif self.projection == "huzinaga":
-                self.calculate_huzinaga_projector(hamiltonian_AB_total, overlap, densmat_B_LL)
+                from embasi.huzinaga_projector import huzinaga_projector
+
+                self.P_b = huzinaga_projector(hamiltonian_AB_total, overlap, densmat_B_LL)
             else:
                 self.P_b = None
 
@@ -1208,7 +1040,9 @@ class ProjectionEmbedding(EmbeddingBase):
             self.PB_corr = \
                 ((self.P_b @ densmat_A_HL).trace() * 27.211384500)
         else:
-            self.calculate_huzinaga_projector(self.A_HL.hamiltonian_total + self.vemb, overlap, densmat_B_LL)
+            from embasi.huzinaga_projector import huzinaga_projector
+
+            self.P_b = huzinaga_projector(self.A_HL.hamiltonian_total + self.vemb, overlap, densmat_B_LL)
             self.PB_corr = ((self.P_b @ densmat_A_HL).trace() * 27.211384500)
             self.PB_corr = ((self.P_b @ (densmat_A_HL - densmat_A_LL)).trace() * 27.211384500)
 

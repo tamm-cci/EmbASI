@@ -334,28 +334,7 @@ def ham_saving_and_huzinaga_callback(aux, iK, iS, descr, data, matrix_descr_ptr)
         Numerical value indexing matrix shape (See: ASI docs)
 
     """
-    def get_abs_trunc_indices(atomsembed):
-        import numpy as np
-
-        active_atoms = np.array(atomsembed.basis_info.active_atoms_mask)
-
-        # First and last truncated atom
-        trunc_at_first = np.argmax(active_atoms == True)
-        trunc_at_last = len(active_atoms) - 1 - np.argmax((active_atoms == True)[::-1])
-        # Find first and last active atom
-        full_at_first = np.argmax(active_atoms == False)
-        full_at_last = len(active_atoms) - 1 - np.argmax((active_atoms == False)[::-1])
-
-        full_basis_min_idx = atomsembed.basis_info.full_basis_min_idx
-        full_basis_max_idx = atomsembed.basis_info.full_basis_max_idx
-        A_block_min = full_basis_min_idx[trunc_at_first]
-        A_block_max = full_basis_max_idx[trunc_at_last]
-
-        B_block_min = full_basis_min_idx[full_at_first]
-        B_block_max = full_basis_max_idx[full_at_last]
-
-
-        return A_block_min, A_block_max, B_block_min, B_block_max
+    from embasi.huzinaga_projector import huzinaga_projector, get_abs_trunc_indices
 
     try:
         #asi, storage_dict, vemb, huz_dm, huz_ovlp, cnt_dict, ctxt_tag, descr_tag, label = cast(aux, py_object).value
@@ -436,11 +415,9 @@ def ham_saving_and_huzinaga_callback(aux, iK, iS, descr, data, matrix_descr_ptr)
                 else:
                     fock_supermol = atomsembed.truncated_mat_to_full(data)
                     fmat_supermol = (fock_supermol + vemb_supermol)
-                
-                if atomsembed.fock_embedding_matrix.n_spins > 1:
-                    projector = - 1.0 * ((fmat_supermol @ dm_supermol @ ovlp_supermol.T) + (ovlp_supermol @ dm_supermol @ fmat_supermol.T))
-                else:
-                    projector = - 0.5 * ((fmat_supermol @ dm_supermol @ ovlp_supermol.T) + (ovlp_supermol @ dm_supermol @ fmat_supermol.T))
+
+                projector = huzinaga_projector(fmat_supermol, ovlp_supermol, dm_supermol,
+                                               n_spins=atomsembed.fock_embedding_matrix.n_spins)
 
                 if not(atomsembed.abs_truncate):
                     projector = atomsembed.full_mat_to_truncated(projector)
@@ -452,12 +429,8 @@ def ham_saving_and_huzinaga_callback(aux, iK, iS, descr, data, matrix_descr_ptr)
                 ovlp = atomsembed.huzinaga_ovlp_in[PiS, PiK]
                 dm = atomsembed.huzinaga_dm_in[PiS, PiK]
 
-                if atomsembed.fock_embedding_matrix.n_spins > 1:
-                    asi.huzinaga_eq[(PiS, PiK)] = vemb - 1.0 * (((data+vemb) @ dm @ ovlp.T) + (ovlp @ dm @ (data+vemb).T))
-                    #asi.huzinaga_eq[(PiS, PiK)] = vemb - 1.0 * ( ( ((data+vemb) - 3.0 * ovlp) @ dm @ ovlp.T) + (ovlp @ dm @ ((data+vemb) - 3.0 * ovlp).T) )
-                else:
-                    asi.huzinaga_eq[(PiS, PiK)] = vemb - 0.5 * (((data+vemb) @ dm @ ovlp.T) + (ovlp @ dm @ (data+vemb).T))
-                    #asi.huzinaga_eq[(PiS, PiK)] = vemb - 0.5 * ( ( ((data+vemb) - 3.0 * ovlp) @ dm @ ovlp.T) + (ovlp @ dm @ ((data+vemb) - 3.0 * ovlp).T) )
+                asi.huzinaga_eq[(PiS, PiK)] = vemb + huzinaga_projector(data + vemb, ovlp, dm,
+                                                                        n_spins=atomsembed.fock_embedding_matrix.n_spins)
 
     except Exception as eee:
         print(f"""Something happened in ASI ham_saving_callback {label}: 
