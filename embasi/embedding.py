@@ -39,7 +39,7 @@ class EmbeddingBase(ABC):
         import os
 
         # Temporary workaround for PySCF-only calculations
-        if "ASI_LIB_PATH" in os.environ['ASI_LIB_PATH']:
+        if "ASI_LIB_PATH" in os.environ:
             self.asi_lib_path = os.environ['ASI_LIB_PATH']
         else:
             self.asi_lib_path = None
