@@ -15,7 +15,7 @@ absolute truncation workflow.
 import numpy as np
 from embasi.ks_array import SpinKpointArray
 
-def levelshift_projector(self, densmat, overlap, mu_val):
+def levelshift_projector(densmat, overlap, mu_val):
     """Calculates level-shift projection operator
 
     Calculate the level-shift based projection operator from
