@@ -7,17 +7,16 @@ from embasi.embedding import ProjectionEmbedding
 from embasi.parallel_utils import root_print
 
 '''
-A minimal working example for running a PBE0-in-PBE QM/QM embedding
-simulation of a methanol monomer with PySCF, using the self-consistent
-Huzinaga projector (projection="huzinaga-sc") instead of the level-shift
-projector used in the other PySCF examples. The embedded OH fragment is
-treated with PBE0, the remainder of the molecule (the CH3 fragment) with
-PBE. Unlike level-shift, which enforces A/B orthogonality only softly
-(via a large but finite energy penalty, mu_val), the Huzinaga projector
-enforces it as a hard constraint solved self-consistently as part of the
-SCF cycle - a good check of this is that the projection-operator energy
-correction (PB_corr) should come out essentially zero, unlike the small
-but non-zero value level-shift gives.
+A minimal working example for creating an embedded Fock matrix with
+the localised density matrix for use in workflows outside of the
+ProjectionEmbedding workflow.
+
+Presently, only the level-shift operator is recommended for external
+workflows. The self-consistent Huzinaga method requires the
+construction of the embedding potential from the 'high-level' Hamiltonian/
+Fock matrix within the SCF workflow. This means the Huzinaga
+embedding projection cannot be exported as a constant offset
+of the Hamiltonian
 '''
 
 # Import a methanol monomer (first 6 atoms of the s26 methanol dimer:
@@ -47,12 +46,6 @@ mf_hl = mol.KS(xc='PBE')
 calc_ll = PySCF(method=mf_ll)
 calc_hl = PySCF(method=mf_hl)
 
-# Set up ProjectionEmbedding, with:
-# - Embedding mask (1=High-level (PBE0), 2=Low-level (PBE))
-# - Assigned higher and lower level calculators
-# - projection="huzinaga-sc": self-consistent Huzinaga projection instead
-#   of level-shift - no mu_val needed, since there is no level-shift
-#   penalty factor for this projection scheme
 Projection = ProjectionEmbedding(atoms,
                                  embed_mask=sort_embed_mask,
                                  calc_base_ll=calc_ll,
@@ -63,4 +56,9 @@ Projection = ProjectionEmbedding(atoms,
 # Now run the simulation!
 dm_a, dm_b, fock_matrix = Projection.construct_embedded_fock()
 
-print(fock_matrix)
+# Access localised occupied molecular orbital coefficients
+mo_loc_a_ll = Projection.mo_coeffs_A_LL
+mo_loc_b_ll = Projection.mo_coeffs_B_LL
+
+# Example for constructing a new Fock matrix from the old density matrix
+dm_a, dm_b, new_fock_matrix = Projection.construct_embedded_fock(dmab_in = dm_a + dm_b)
