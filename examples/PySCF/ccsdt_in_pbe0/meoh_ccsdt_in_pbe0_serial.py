@@ -20,10 +20,6 @@ perturbative triples step scales as O(N^7)) - this example still uses
 the same small OH-fragment/cc-pVTZ test system as the MP2/CCSD examples
 for consistency, but expect it to take longer to run.
 
-Note: EmbASI currently requires the environmental variable
-'ASI_LIB_PATH' to be set even for a pure-PySCF run (it is read
-unconditionally in EmbeddingBase.__init__, though PySCF itself never
-uses it) - point it at any FHI-aims shared library on your system.
 '''
 
 try:

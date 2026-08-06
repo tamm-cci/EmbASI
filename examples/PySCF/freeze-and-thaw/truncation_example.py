@@ -27,16 +27,7 @@ Note: a small basis (STO-3G) is used here purely so the example runs
 quickly; swap in a larger basis (e.g. 'def2-svp' or 'ccpvtz') for
 production-quality results.
 
-Note: EmbASI currently requires the environmental variable
-'ASI_LIB_PATH' to be set even for a pure-PySCF run (it is read
-unconditionally in EmbeddingBase.__init__, though PySCF itself never
-uses it) - point it at any FHI-aims shared library on your system.
 '''
-
-try:
-    root_print(f"ASI_LIB_PATH: {os.environ['ASI_LIB_PATH']}")
-except KeyError:
-    raise RuntimeError("Please set the environmental variable: ASI_LIB_PATH")
 
 # Read decanol geometry and set up embedding mask: 1 = high-level (embedded
 # OH fragment: the O and its bonded hydroxyl H), 2 = low-level (the

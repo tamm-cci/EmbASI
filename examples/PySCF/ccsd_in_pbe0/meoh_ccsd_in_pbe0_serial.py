@@ -14,16 +14,7 @@ consistently, with a CCSD correlation correction added non-self-
 consistently on top of the converged, embedded PBE0 reference. The
 remainder of the molecule (the CH3 fragment) is treated with PBE.
 
-Note: EmbASI currently requires the environmental variable
-'ASI_LIB_PATH' to be set even for a pure-PySCF run (it is read
-unconditionally in EmbeddingBase.__init__, though PySCF itself never
-uses it) - point it at any FHI-aims shared library on your system.
 '''
-
-try:
-    root_print(f"ASI_LIB_PATH: {os.environ['ASI_LIB_PATH']}")
-except KeyError:
-    raise RuntimeError("Please set the environmental variable: ASI_LIB_PATH")
 
 # Import a methanol monomer (first 6 atoms of the s26 methanol dimer:
 # C, O, H, H, H, H)

@@ -57,16 +57,10 @@ Projection = ProjectionEmbedding(atoms,
                                  embed_mask=sort_embed_mask,
                                  calc_base_ll=calc_ll,
                                  calc_base_hl=calc_hl,
-                                 projection="huzinaga-sc",
+                                 projection="level-shift",
                                  parallel=False)
 
 # Now run the simulation!
-root_print('\nRunning MeOH monomer (PBE0-in-PBE, Huzinaga projection)\n')
-Projection.run()
-root_print('Finished running MeOH monomer\n')
+dm_a, dm_b, fock_matrix = Projection.construct_embedded_fock()
 
-# Total energy for the embedded fragment:
-meoh_pbe0inpbe_huz_energy = Projection.DFT_AinB_total_energy
-
-root_print(f"Final PBE0-in-PBE (Huzinaga) total energy: {meoh_pbe0inpbe_huz_energy} eV")
-root_print(f"Projection operator energy correction (PB_corr, expect ~0 for Huzinaga): {Projection.PB_corr} eV")
+print(fock_matrix)
