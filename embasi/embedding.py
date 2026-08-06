@@ -38,7 +38,12 @@ class EmbeddingBase(ABC):
     def __init__(self, atoms, embed_mask, calc_base_ll=None, calc_base_hl=None, run_dir="./EmbASI_calc"):
         import os
 
-        self.asi_lib_path = os.environ['ASI_LIB_PATH']
+        # Temporary workaround for PySCF-only calculations
+        if "ASI_LIB_PATH" in os.environ['ASI_LIB_PATH']:
+            self.asi_lib_path = os.environ['ASI_LIB_PATH']
+        else:
+            self.asi_lib_path = None
+
         self.embed_mask = embed_mask
         self.calculator_ll = calc_base_ll
         self.calculator_hl = calc_base_hl
