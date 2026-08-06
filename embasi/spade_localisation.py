@@ -7,7 +7,7 @@ from scalapack4py.npscal.math_utils.npscal2npscal import svd
 
 def spade_localisation(atomsembed, hamiltonian, overlap, parallel=False,
                        spade_ncores=0, spade_manual_state=0,
-                       basis_illcond_thresh=1e-5):
+                       basis_illcond_thresh=1e-5, return_mo_coeffs=False):
     """Calculate the localised density matrices with the SPADE method
 
     As the eigenvectors (MO coefficient matrix) is not a part of the
@@ -36,11 +36,15 @@ def spade_localisation(atomsembed, hamiltonian, overlap, parallel=False,
     basis_illcond_thresh : float
         Threshold below which near-linear-dependent basis functions are
         discarded during the eigensolve.
-
+    output_coeffs : bool
+        Determines whether the final MO coefficients should be output
     Returns
     -------
     density_matrix_subsys_a, density_matrix_subsys_b : SpinKpointArray
         Localised density matrices for subsystems A and B.
+    rot_evecs_occ_a, rot_evecs_occ_a : SpinKpointArray
+        Rotated eigenvectors for if ou
+
     """
 
     # TODO: @SPIN AND K-POINT LOOP - and needs syncing?? - SHOULD WE JUST PLACE THE LOOP AROUND THIS ROUTINE?
@@ -181,4 +185,7 @@ def spade_localisation(atomsembed, hamiltonian, overlap, parallel=False,
 
     root_print('Exiting SPADE localisation...')
 
-    return density_matrix_subsys_a, density_matrix_subsys_b
+    if return_mo_coeffs:
+        return density_matrix_subsys_a, density_matrix_subsys_b, rot_evecs_occ_a, rot_evecs_occ_b
+    else:
+        return density_matrix_subsys_a, density_matrix_subsys_b

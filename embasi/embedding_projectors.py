@@ -1,32 +1,77 @@
-"""Huzinaga projection operator construction.
+"""Constructing Embedding Projectors
 
-Builds the Huzinaga projector,
-    P^{B} = -1/2 (F^{B} D^{B} S^{AB,T} + S^{AB} D^{B} F^{B,T}),
-which enforces orthogonality between the embedded subsystem A and the
-environment B as a hard constraint (as opposed to level-shift's soft
-energy penalty).
+Constructs the two supported embedding projection
+matrices in EmbASI:
 
-Two variants are provided:
+  1) The Manby level-shift operator
+  2) The Huzinaga projection operator
 
-- huzinaga_projector: the plain form, used for the (non-self-consistent)
-  "huzinaga" projection scheme and for the post-hoc projection-energy
-  correction (PB_corr) in the self-consistent "huzinaga-sc" scheme.
-- huzinaga_projector_abs_trunc: the variant used by
-  AtomsEmbed.run_embasi_diag_emb_pot for the freeze-and-thaw/absolute
-  truncation workflow, which (when truncation is active) first slices
-  out the A-B coupling block of the supersystem matrices before forming
-  the projector.
+The Huzinaga projection operator also contains
+functionality for calculating the operator in a
+monomolecular basis, as is supported in the
+absolute truncation workflow.
+
 """
 import numpy as np
 from embasi.ks_array import SpinKpointArray
 
+def levelshift_projector(self, densmat, overlap, mu_val):
+    """Calculates level-shift projection operator
 
-def huzinaga_projector(hamiltonian, overlap, densmat, n_spins=None):
-    """Calculates the Huzinaga projection operator
+    Calculate the level-shift based projection operator from
+    Manby et al.[1]:
+                P^{B} = /mu S^{AB} D^{B} S^{AB}
+    where S^{AB} is the overlap matrix for the supermolecular system, and
+    the density matrix for subsystem B.
 
     [1] Manby, F. R.; Stella, M.; Goodpaster, J. D.; Miller, T. F. I.
     A Simple, Exact Density-Functional-Theory Embedding Scheme.
-    J. Chem. Theory Comput. 2012, 8 (8), 2564-2568.
+    J. Chem. Theory Comput. 2012, 8 (8), 2564–2568.
+    """
+    return mu_val * (overlap @ densmat @ overlap)
+
+def huzinaga_fock_operator(hamiltonian_hl, vemb, overlap, densmat, n_spins):
+    """Calculates the full Huzinaga equation
+
+    Parameters
+    ----------
+    hamiltonian_hl : SpinKpointArray or np.ndarray
+        Fock/Hamiltonian matrix of the high-level (subsystem A). May be
+        a full SpinKpointArray, or a single spin/k-point's bare matrix
+        (e.g. as passed per-callback-invocation from an ASI callback) -
+        in the latter case, pass n_spins explicitly, since a bare matrix
+        carries no n_spins of its own.
+    vemb : SpinKpointArray or np.ndarray
+        The embedding potential calculated as H^AB - H^A
+    overlap : SpinKpointArray or np.ndarray
+        Supersystem overlap matrix (same shape convention as hamiltonian).
+    densmat : SpinKpointArray or np.ndarray
+        Density matrix of the environment (subsystem B) (same shape
+        convention as hamiltonian).
+    n_spins : int or None
+        Number of spin channels, used to pick the -1.0 (unrestricted) vs
+        -0.5 (restricted) prefactor. Defaults to hamiltonian.n_spins,
+        which requires hamiltonian to be a SpinKpointArray; pass this
+        explicitly when hamiltonian is a bare per-spin/k-point matrix.
+
+    Returns
+    -------
+    SpinKpointArray or np.ndarray
+        The full Huzinaga embedded Fock/Hamiltonian matrix
+        (F_emb - (F_emb . \gamma^{B} . S.T + S . \gamma^{B} . F_emb.T))
+    """
+
+    if n_spins is None:
+        n_spins = hamiltonian.n_spins
+
+    f_emb = hamiltonian_hl + vemb
+
+    huz_projector = huzinaga_projector(f_emb, overlap, densmat, n_spins=n_spins)
+
+    return f_emb + huz_projector
+
+def huzinaga_projector(hamiltonian, overlap, densmat, n_spins=None):
+    """Calculates the Huzinaga projection operator
 
     Parameters
     ----------
@@ -114,7 +159,6 @@ def huzinaga_projector_abs_trunc(atomsembed):
             for PiK in range(atomsembed.n_kpoints):
                 ovlp_supermol = atomsembed.huzinaga_ovlp_in[PiS, PiK]
                 dm_supermol = atomsembed.huzinaga_dm_in[PiS, PiK]
-
                 fock_supermol = atomsembed.embedding_ham_in[PiS, PiK]
 
                 A_block_min, A_block_max, B_block_min, B_block_max = get_abs_trunc_indices(atomsembed)

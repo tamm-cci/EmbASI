@@ -604,22 +604,6 @@ class ProjectionEmbedding(EmbeddingBase):
         self.output_data_dict["CHARGEDAT"] = {}
         self.output_timing_dict = {}
 
-    def calculate_levelshift_projector(self, densmat, overlap):
-        """Calculates level-shift projection operator
-
-        Calculate the level-shift based projection operator from
-        Manby et al.[1]:
-                    P^{B} = /mu S^{AB} D^{B} S^{AB}
-        where S^{AB} is the overlap matrix for the supermolecular system, and
-        the density matrix for subsystem B.
-
-        [1] Manby, F. R.; Stella, M.; Goodpaster, J. D.; Miller, T. F. I.
-        A Simple, Exact Density-Functional-Theory Embedding Scheme.
-        J. Chem. Theory Comput. 2012, 8 (8), 2564–2568.
-        """
-
-        self.P_b = self.mu_val * (overlap @ densmat @ overlap)
-
     def freeze_and_thaw(self, densmat_A_LL, densmat_B_LL, overlap, ncycles=5, mixing_type="emb_pot"):
         """ Freeze-and-thaw absolute basis truncation algorithm of Graham et al.[1]
 
@@ -804,69 +788,51 @@ class ProjectionEmbedding(EmbeddingBase):
                                   sc_huz_dm=densmat_B_LL, sc_huz_ovlp=overlap,
                                   sc_huz_ham=self.AB_LL.hamiltonian_total)
 
-        densmat_A_LL = self.A_HL.density_matrices_out
+        densmat_A_HL = self.A_HL.density_matrices_out
         self.subsys_A_highlvl_totalen = self.A_HL.ev_corr_total_energy
+
+        self.order_1_embedding_corr = ((densmat_A_HL - densmat_A_LL) @ self.vemb).trace() * 27.211384500
 
         return densmat_A_LL, densmat_B_LL
 
-    def run(self):
-        """ Summary
-        The primary driver routine for performing QM-in-QM with a
-        Projection-based embedding scheme. This scheme draws upon
-        the work of Manby et al. [1, 2].
+    def construct_embedding_potential(self, dmab_in=None):
+        """Constructs the embedding potential v_emb and the projection operator
 
-        The embedding scheme uses the following total energy expression...
+        Performs calculations for the low-level reference supersytem and subsystem.
 
-        Importing and exporting of density matrices and hamiltonians is 
-        performed with the ASI package [3].
+        For projection=="sc-huzinaga" - the self-consistent Huzinaga equations
+        are constructed within the SCF cycles of the embedded Hamiltonian. This
+        reformulated version of the KS-equation requires information from the
+        high-level calculation (i.e., the Fock matrix constructed at the higher
+        level of theory for the subsystem). The projection operator therefore
+        cannot be returned naively. Please see qm_code_adaptors.PySCFAdaptor.run()
+        for an example of this in practice.
 
-        The workflow operates as follows:
-        1) Calculate the KS-DFT energy of the combined subsystems A+B. Localised
-           density matrices, /gamma^{A} and /gamma^{B} 
-        2a) Extract the localised density matrices 
-        2b) (Optional) Select atoms in subsystem B that contribute
-            significantly to subsystem A (threshold 0.5 |e|) via 
-            Mulliken analysis: 
-                q^{A}_{/mu, /nu} = /gamma^{A}_{/mu, /nu} S_{/mu, /nu}
-            Basis functions of said atoms within calculations of the 
-            embedded subsystem will be included as ghost atoms. Other
-            basis functions will be removed (i.e., associated atomic centers
-            not included in the QM calculation, and associated rows and 
-            columns in intermediate hamiltonians and density matrices
-            deleted).
-        2) Calculate the total energy for subsystem A with the density 
-           matrix, /gamma^{A}
-        3) 
+        However, for non-self consistent wavefunction methods (i.e., total energy
+        corrections on a fixed density/MO set), projection=="huzinaga" will return
+        the Huzinaga projection operator calculated for the low-level reference.
 
-        (For users of LaTeX, I am aware that a forward slash is used
-        in place of the traditional backward slash for mathematical symbols - 
-        unfortunately using backslashes in these comment blocks produces ugly
-        warnings within the comment blocks.)
+        Parameters
+        ----------
+        dmab_in : SpinKpointArray or None
+            Initialises the low-level supersystem reference from an input density
+            matrix - otherwise initialise the low-level supersystem reference
+            from the ground state density matrix
 
-        
-        ...
-
-        (1) Manby, F. R.; Stella, M.; Goodpaster, J. D.; Miller, T. F. I. 
-            A Simple, Exact Density-Functional-Theory Embedding Scheme. 
-            J. Chem. Theory Comput. 2012, 8 (8), 2564–2568.
-        (2) Lee, S. J. R.; Welborn, M.; Manby, F. R.; Miller, T. F. 
-            Projection-Based Wavefunction-in-DFT Embedding. Acc. Chem. Res. 
-            2019, 52 (5), 1359–1368.
-        (3) TODO: REF
+        Returns
+        -------
+        v_emb : SpinKpointArray
+            The embedding potential constructed as H^AB - H^A
+        P^B : SpinKpointArray or None
+            The projection operator if projection=="level-shift" or
+            projection=="huzinaga" and None if projection=="sc-huzinaga".
         """
-        import numpy as np
-        import tracemalloc
-        import time
 
-        tracemalloc.start(1)
+        if dmab_in is None:
+            self.AB_LL.run_scf()
+        else:
+            self.AB_LL.run_noscf(dm_in=dmab_in)
 
-        root_print("Embedding calculation begun...")
-
-        # Performs a single-point energy evaluation for a system composed of A
-        # and B. Returns localised density matrices for subsystems A and B, and
-        # the two-electron components of the hamiltonian (combined with
-        # nuclear-electron potential).
-        self.AB_LL.run_scf()
         self.subsys_AB_lowlvl_scftotalen = self.AB_LL.total_energy
         self.time_ab_lowlevel = self.AB_LL.last_run_time
         self.output_timing_dict["AB_LL_SCF"] = self.time_ab_lowlevel
@@ -876,11 +842,9 @@ class ProjectionEmbedding(EmbeddingBase):
         if self.parallel:
             overlap = self.AB_LL.overlap.copy()
             hamiltonian_AB_total = self.AB_LL.hamiltonian_total.copy()
-            #AB_hamiltonian_estat_plus_xc = self.AB_LL.hamiltonian_estat_plus_xc.copy()
         else:
             overlap = copy.deepcopy(self.AB_LL.overlap)
             hamiltonian_AB_total = copy.deepcopy(self.AB_LL.hamiltonian_total)
-            #AB_hamiltonian_estat_plus_xc = copy.deepcopy(self.AB_LL.hamiltonian_estat_plus_xc)
 
         # Read the localised density matrices output by the QM code or
         # perform SPADE localisation on the wrapper level.
@@ -891,11 +855,17 @@ class ProjectionEmbedding(EmbeddingBase):
             from embasi.spade_localisation import spade_localisation
 
             start = time.time()
-            densmat_A_LL, densmat_B_LL = spade_localisation(self.AB_LL, hamiltonian_AB_total, overlap,
-                                                             parallel=self.parallel,
-                                                             spade_ncores=self.spade_ncores,
-                                                             spade_manual_state=self.spade_manual_state,
-                                                             basis_illcond_thresh=self.basis_illcond_thresh)
+            results = spade_localisation(self.AB_LL, hamiltonian_AB_total, overlap,
+                                         parallel=self.parallel,
+                                         spade_ncores=self.spade_ncores,
+                                         spade_manual_state=self.spade_manual_state,
+                                         basis_illcond_thresh=self.basis_illcond_thresh,
+                                         return_mo_coeffs=True)
+            densmat_A_LL = results[0]
+            densmat_B_LL = results[1]
+            self.mo_coeffs_A_LL = results[2]
+            self.mo_coeffs_B_LL = results[3]
+
             end = time.time()
             self.time_spade = end - start
             self.output_timing_dict["SPADE_LOCALISATION"] = self.time_spade
@@ -956,6 +926,91 @@ class ProjectionEmbedding(EmbeddingBase):
         self.output_data_dict["CHARGEDAT"]["A_POPULATION"] = self.A_pop
         self.output_data_dict["CHARGEDAT"]["B_POPULATION"] = self.B_pop
 
+        # Calculate the energy for subsystem A with the lower level of theory
+        self.A_LL.input_fragment_nelectrons = self.A_pop
+        self.A_LL.run_noscf(dm_in=densmat_A_LL)
+        self.subsys_A_lowlvl_totalen = self.A_LL.ev_corr_total_energy
+        self.time_a_lowlevel = self.A_LL.last_run_time
+        self.output_timing_dict["A_LL_NONSCF"] = self.time_a_lowlevel
+        self.output_data_dict["TOTALENERGY"]["A_LL"] = self.subsys_A_lowlvl_totalen
+
+        # Initialises the density matrix for subsystem A, and calculated the
+        # hamiltonian components for subsystem A at the low-level reference.
+        if self.projection == "level-shift":
+            from embasi.embedding_projectors import levelshift_projector
+            P_b = levelshift_projector(densmat_B_LL, overlap, self.mu_val)
+        elif self.projection == "huzinaga":
+            from embasi.huzinaga_projector import huzinaga_projector
+            P_b = huzinaga_projector(hamiltonian_AB_total, overlap, densmat_B_LL)
+        else:
+            P_b = None
+
+        vemb = self.AB_LL.hamiltonian_total - self.A_LL.hamiltonian_total
+
+        return densmat_A_LL, densmat_B_LL, overlap, vemb, P_b
+
+    def run(self, dmab_in=None):
+        """ Summary
+        The primary driver routine for performing QM-in-QM with a
+        Projection-based embedding scheme. This scheme draws upon
+        the work of Manby et al. [1, 2].
+
+        The embedding scheme uses the following total energy expression...
+
+        Importing and exporting of density matrices and hamiltonians is 
+        performed with the ASI package [3].
+
+        The workflow operates as follows:
+        1) Calculate the KS-DFT energy of the combined subsystems A+B. Localised
+           density matrices, /gamma^{A} and /gamma^{B} 
+        2a) Extract the localised density matrices 
+        2b) (Optional) Select atoms in subsystem B that contribute
+            significantly to subsystem A (threshold 0.5 |e|) via 
+            Mulliken analysis: 
+                q^{A}_{/mu, /nu} = /gamma^{A}_{/mu, /nu} S_{/mu, /nu}
+            Basis functions of said atoms within calculations of the 
+            embedded subsystem will be included as ghost atoms. Other
+            basis functions will be removed (i.e., associated atomic centers
+            not included in the QM calculation, and associated rows and 
+            columns in intermediate hamiltonians and density matrices
+            deleted).
+        2) Calculate the total energy for subsystem A with the density 
+           matrix, /gamma^{A}
+        3) 
+
+        (For users of LaTeX, I am aware that a forward slash is used
+        in place of the traditional backward slash for mathematical symbols - 
+        unfortunately using backslashes in these comment blocks produces ugly
+        warnings within the comment blocks.)
+
+        Parameters
+        ----------
+        dmab_in : SpinKSArray
+            Input a low-level supersystem density matrix to construct the
+            embedding potential from.
+        ...
+
+        (1) Manby, F. R.; Stella, M.; Goodpaster, J. D.; Miller, T. F. I. 
+            A Simple, Exact Density-Functional-Theory Embedding Scheme. 
+            J. Chem. Theory Comput. 2012, 8 (8), 2564–2568.
+        (2) Lee, S. J. R.; Welborn, M.; Manby, F. R.; Miller, T. F. 
+            Projection-Based Wavefunction-in-DFT Embedding. Acc. Chem. Res. 
+            2019, 52 (5), 1359–1368.
+        """
+        import numpy as np
+        import tracemalloc
+        import time
+
+        tracemalloc.start(1)
+
+        root_print("Embedding calculation begun...")
+
+        # This routine does the heavy lifting of calculating the low-level reference,
+        # localising and partitioning the active and environment molecular orbitals
+        # and constructing the embedding potential and projection operators from
+        # the low-level subsytem reference calculation
+        densmat_A_LL, densmat_B_LL, overlap, self.vemb, self.P_b = self.construct_embedding_potential(dmab_in=dmab_in)
+
         # Calculate density matrix for subsystem A at the higher level of 
         # theory. Two terms are added to the hamiltonian matrix of the embedded
         # subsystem to form the full embedded Fock-matrix, F^{A}:
@@ -976,25 +1031,6 @@ class ProjectionEmbedding(EmbeddingBase):
             self.fat_total_time = end - start
             self.output_timing_dict["FAT_Total"] = self.fat_total_time
         else:
-            # Calculate the energy for subsystem A with the lower level of theory
-            self.A_LL.input_fragment_nelectrons = self.A_pop
-            self.A_LL.run_noscf(dm_in=densmat_A_LL)
-            self.subsys_A_lowlvl_totalen = self.A_LL.ev_corr_total_energy
-            self.time_a_lowlevel = self.A_LL.last_run_time
-            self.output_timing_dict["A_LL_NONSCF"] = self.time_a_lowlevel
-            self.output_data_dict["TOTALENERGY"]["A_LL"] = self.subsys_A_lowlvl_totalen
-
-            # Initialises the density matrix for subsystem A, and calculated the
-            # hamiltonian components for subsystem A at the low-level reference.
-            if self.projection == "level-shift":
-                self.calculate_levelshift_projector(densmat_B_LL, overlap)
-            elif self.projection == "huzinaga":
-                from embasi.huzinaga_projector import huzinaga_projector
-
-                self.P_b = huzinaga_projector(hamiltonian_AB_total, overlap, densmat_B_LL)
-            else:
-                self.P_b = None
-
             # Registered callbacks in ASI add the above components to the Fock-matrix
             # at every SCF iteration.
             self.A_HL.input_fragment_nelectrons = self.A_pop
@@ -1040,7 +1076,7 @@ class ProjectionEmbedding(EmbeddingBase):
             self.PB_corr = \
                 ((self.P_b @ densmat_A_HL).trace() * 27.211384500)
         else:
-            from embasi.huzinaga_projector import huzinaga_projector
+            from embasi.embedding_projectors import huzinaga_projector
 
             self.P_b = huzinaga_projector(self.A_HL.hamiltonian_total + self.vemb, overlap, densmat_B_LL)
             self.PB_corr = ((self.P_b @ densmat_A_HL).trace() * 27.211384500)
