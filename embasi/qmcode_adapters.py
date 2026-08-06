@@ -563,7 +563,7 @@ class QMCodeASIAdapter(QMCodeAdapter):
 
         # Now put all of the output arrays into a nice wrapper
         ham_kin = SpinKpointArray(asi.ham_storage[0], n_spins, n_kpoints)
-        ham_2ee = SpinKpointArray(asi.ham_storage[1], n_spins, n_kpoints)
+        ham_estat_xc = SpinKpointArray(asi.ham_storage[1], n_spins, n_kpoints)
         ham_tot = SpinKpointArray(asi.ham_storage[2], n_spins, n_kpoints)
         ovlp = SpinKpointArray(asi.overlap_storage, n_spins, n_kpoints)
 
@@ -585,7 +585,7 @@ class QMCodeASIAdapter(QMCodeAdapter):
             "n_basis": asi.n_basis,
             "basis_atoms": asi.basis_atoms,
             "ham_kin": ham_kin,
-            "ham_2ee": ham_2ee,
+            "ham_estat_xc": ham_2ee,
             "ham_tot": ham_tot,
             "ovlp": ovlp,
             "dm": dm,
@@ -866,6 +866,7 @@ class PySCFAdapter(QMCodeAdapter):
 
         ham_kin = SpinKpointArray({(0,0): atomsembed.atoms.calc.method.mol.intor('int1e_kin')}, n_spins, n_kpoints)
         ovlp = SpinKpointArray({(0,0): atomsembed.atoms.calc.method.mol.intor('int1e_ovlp')}, n_spins, n_kpoints)
+        vnuc = atomsembed.atoms.calc.method.mol.intor('int1e_nuc')
 
         if scf_conv:
             dm_out = atomsembed.atoms.calc.method.make_rdm1(mo_coeff, mo_occ)
@@ -877,7 +878,7 @@ class PySCFAdapter(QMCodeAdapter):
         hcore = atomsembed.atoms.calc.method.get_hcore()
         veff = atomsembed.atoms.calc.method.get_veff(dm=dm_out)
 
-        ham_2ee = SpinKpointArray({(0,0): veff}, n_spins, n_kpoints)
+        ham_estat_xc = SpinKpointArray({(0,0): vnuc + veff}, n_spins, n_kpoints)
         ham_tot = SpinKpointArray({(0,0): hcore + veff}, n_spins, n_kpoints)
 
         total_energy = atomsembed.atoms.calc.method.energy_tot(dm_out, hcore, veff) * 27.211384500
@@ -891,7 +892,7 @@ class PySCFAdapter(QMCodeAdapter):
         # the ASI-based adapters via the same truncated_mat_to_full call.
         if atomsembed.truncate:
             ham_kin = atomsembed.truncated_mat_to_full(ham_kin)
-            ham_2ee = atomsembed.truncated_mat_to_full(ham_2ee)
+            ham_2ee = atomsembed.truncated_mat_to_full(ham_estat)
             ham_tot = atomsembed.truncated_mat_to_full(ham_tot)
             ovlp = atomsembed.truncated_mat_to_full(ovlp)
             dm = atomsembed.truncated_mat_to_full(dm)
@@ -902,7 +903,7 @@ class PySCFAdapter(QMCodeAdapter):
                                       nbasis,
                                       basis_atoms,
                                       ham_kin,
-                                      ham_2ee,
+                                      ham_estat_xc,
                                       ham_tot,
                                       ovlp,
                                       dm
@@ -955,7 +956,7 @@ class SCFRunData:
     n_basis: int
     basis_atoms: list
     ham_kin: SpinKpointArray
-    ham_2ee: SpinKpointArray
+    ham_estat_xc: SpinKpointArray
     ham_tot: SpinKpointArray
     ovlp: SpinKpointArray
     dm: SpinKpointArray

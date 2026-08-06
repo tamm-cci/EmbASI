@@ -55,6 +55,8 @@ def embedded_get_fock_factory(mf, fock_func, mat_in=None, gamma_B=None, S=None):
                           diis=None, diis_start_cycle=None,
                           level_shift_factor=None, damp_factor=None,
                           fock_last=None):
+        from embasi.embedding_projectors import huzinaga_projector
+
         if h1e is None: h1e = mf.get_hcore()
         if vhf is None: vhf = mf.get_veff(mf.mol, dm)
 
@@ -63,7 +65,7 @@ def embedded_get_fock_factory(mf, fock_func, mat_in=None, gamma_B=None, S=None):
             vhf_aug = vhf_aug + mat_in
         if gamma_B is not None:
             f_emb = h1e + vhf_aug
-            vhf_aug = vhf_aug - 0.5 * (f_emb @ gamma_B @ S.T + S @ gamma_B @ f_emb.T)
+            vhf_aug = vhf_aug + huzinaga_projector(f_emb, S, gamma_B, n_spins=1)
 
         return fock_func(h1e=h1e, s1e=s1e, vhf=vhf_aug, dm=dm, cycle=cycle,
                          diis=diis, diis_start_cycle=diis_start_cycle,

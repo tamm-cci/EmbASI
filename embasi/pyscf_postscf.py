@@ -90,8 +90,6 @@ def run_postscf(mf, post_scf):
     wf.mo_occ = mf.mo_occ
     wf.mo_energy = mf.mo_energy
 
-    wf.kernel()
-
     if getattr(wf, "run_ccsd_t", False):
         return wf.e_corr + wf.ccsd_t()
 

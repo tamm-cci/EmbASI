@@ -800,6 +800,35 @@ class ProjectionEmbedding(EmbeddingBase):
 
         return densmat_A_LL, densmat_B_LL
 
+    def construct_embedded_fock(self, dmab_in=None):
+        """Returns construct_embedding_potential outputs with the full embedded
+           Fock matrix
+
+        Parameters
+        ----------
+        dmab_in : SpinKpointArray or None
+            Initialises the low-level supersystem reference from an input density
+            matrix - otherwise initialise the low-level supersystem reference
+            from the ground state density matrix
+
+        Returns
+        -------
+        densmat_A_LL : SpinKpointArray
+            The localised density matrix for subsystem A
+        densmat_B_LL : SpinKpointArray
+            The localised density matrix for subsystem B
+        embedded_fock : SpinKpointArray
+            The full embedded Fock matrix (H_AB_LL - H_A_LL + H_A_HL + P^B)
+        """
+        if self.projection == "huzinaga-sc":
+            raise Exception("The embedded Fock matrix can only be constructed for projection='level-shift'")
+
+        densmat_A_LL, densmat_B_LL, overlap, vemb, P_b = self.construct_embedding_potential(dmab_in=dmab_in)
+
+        embedded_fock = self.A_LL.hamiltonian_kinetic + self.A_LL.hamiltonian_estat_plus_xc + vemb + P_b
+
+        return densmat_A_LL, densmat_B_LL, embedded_fock
+
     def construct_embedding_potential(self, dmab_in=None):
         """Constructs the embedding potential v_emb and the projection operator
 
@@ -826,6 +855,10 @@ class ProjectionEmbedding(EmbeddingBase):
 
         Returns
         -------
+        densmat_A_LL : SpinKpointArray
+            The localised density matrix for subsystem A
+        densmat_B_LL : SpinKpointArray
+            The localised density matrix for subsystem B
         v_emb : SpinKpointArray
             The embedding potential constructed as H^AB - H^A
         P^B : SpinKpointArray or None

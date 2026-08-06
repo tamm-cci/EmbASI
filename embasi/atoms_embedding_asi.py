@@ -713,7 +713,7 @@ class AtomsEmbed():
         self.basis_atoms = results["basis_atoms"]
 
         self._ham_kin = results["ham_kin"]
-        self._ham_2ee = results["ham_2ee"]
+        self._ham_estat_xc = results["ham_estat_xc"]
         self._ham_tot = results["ham_tot"]
         self._ovlp = results["ovlp"]
         self._dm = results["dm"]
@@ -863,7 +863,7 @@ class AtomsEmbed():
 
     @property
     def hamiltonian_estat_plus_xc(self):
-        return self._ham_2ee
+        return self._ham_estat_xc
 
     @property
     def hamiltonian_kinetic(self):
