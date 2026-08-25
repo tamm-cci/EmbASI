@@ -800,7 +800,7 @@ class ProjectionEmbedding(EmbeddingBase):
 
         return densmat_A_LL, densmat_B_LL
 
-    def construct_embedded_fock(self, dmab_in=None):
+    def construct_embedded_fock(self, dmab_in=None, dma_in=None, dmb_in=None):
         """Returns construct_embedding_potential outputs with the full embedded
            Fock matrix
 
@@ -823,13 +823,13 @@ class ProjectionEmbedding(EmbeddingBase):
         if self.projection == "huzinaga-sc":
             raise Exception("The embedded Fock matrix can only be constructed for projection='level-shift'")
 
-        densmat_A_LL, densmat_B_LL, overlap, vemb, P_b = self.construct_embedding_potential(dmab_in=dmab_in)
+        densmat_A_LL, densmat_B_LL, overlap, vemb, P_b = self.construct_embedding_potential(dmab_in=dmab_in, dma_in=dma_in, dmb_in=dmb_in)
 
         embedded_fock = self.A_LL.hamiltonian_kinetic + self.A_LL.hamiltonian_estat_plus_xc + vemb + P_b
 
         return densmat_A_LL, densmat_B_LL, embedded_fock
 
-    def construct_embedding_potential(self, dmab_in=None):
+    def construct_embedding_potential(self, dmab_in=None, dma_in=None, dmb_in=None):
         """Constructs the embedding potential v_emb and the projection operator
 
         Performs calculations for the low-level reference supersytem and subsystem.
@@ -842,6 +842,21 @@ class ProjectionEmbedding(EmbeddingBase):
         cannot be returned naively. Please see qm_code_adaptors.PySCFAdaptor.run()
         for an example of this in practice.
 
+        There are two modes of operation:
+
+        1) Setting dm_ab and supplying no arguments - runs the standard embedding
+        potential construction routine (Full SCF -> localisation -> calculation
+        of the low level reference energies -> potential construction). Setting
+        dm_ab just starts from a provided initial guess to speed-up convergence
+        of the full scf step.
+
+        2) Setting dm_a and dm_b - From localised and partitioned density matrices
+        for the active (dm_a) and environment (dm_b), construct the embedding
+        potential without an additional localisation step. This mode ensures that
+        in a larger SCF cycle where construct_embedding_potential is a driver,
+        repeated localisations are avoided to prevent arbitrary switching of density
+        from the environment and the active region.
+
         However, for non-self consistent wavefunction methods (i.e., total energy
         corrections on a fixed density/MO set), projection=="huzinaga" will return
         the Huzinaga projection operator calculated for the low-level reference.
@@ -852,6 +867,12 @@ class ProjectionEmbedding(EmbeddingBase):
             Initialises the low-level supersystem reference from an input density
             matrix - otherwise initialise the low-level supersystem reference
             from the ground state density matrix
+        dma_in : SpinKpointArray or None
+            A pre-localised and partitioned for the active region. Mutually exclusive
+            with dmab_in.
+        dmb_in : SpinKpointArray or None
+            A pre-localised and partitioned for the active region. Mutually exclusive
+            with dmab_in.
 
         Returns
         -------
@@ -866,10 +887,23 @@ class ProjectionEmbedding(EmbeddingBase):
             projection=="huzinaga" and None if projection=="sc-huzinaga".
         """
 
-        if dmab_in is None:
-            self.AB_LL.run_scf()
+        if dmab_in is not None and ((dma_in is not None) or (dmb_in is not None)):
+            raise Exception("Only setting of dmab_in or both of dma_in and dmb_in supported.")
+
+        if ((dma_in is None) and (dmb_in is not None)) or ((dma_in is not None) and (dmb_in is None)):
+            raise Exception("Both dma_in and dmb_in must be set.")
+
+        if ((dma_in is not None) and (dmb_in is not None)):
+            skip_scf_and_loc = True
         else:
-            self.AB_LL.run_noscf(dm_in=dmab_in)
+            skip_scf_and_loc = False
+
+        if (dmab_in is None) and (not skip_scf_and_loc):
+            self.AB_LL.run_scf()
+        elif (not skip_scf_and_loc):
+            self.AB_LL.run_scf(dm_in=dmab_in)
+        else:
+            self.AB_LL.run_noscf(dm_in=(dma_in + dmb_in))
 
         self.subsys_AB_lowlvl_scftotalen = self.AB_LL.total_energy
         self.time_ab_lowlevel = self.AB_LL.last_run_time
@@ -889,7 +923,7 @@ class ProjectionEmbedding(EmbeddingBase):
         # TODO: @SPIN AND K-POINT LOOP
         basis_info = self.set_basis_info(self.AB_LL)
         self.AB_LL.basis_info = basis_info
-        if self.localisation == "SPADE":
+        if self.localisation == "SPADE" and (not skip_scf_and_loc):
             from embasi.spade_localisation import spade_localisation
 
             start = time.time()
@@ -907,9 +941,12 @@ class ProjectionEmbedding(EmbeddingBase):
             end = time.time()
             self.time_spade = end - start
             self.output_timing_dict["SPADE_LOCALISATION"] = self.time_spade
-        else:
+        elif ((not skip_scf_and_loc)):
             densmat_A_LL = self.AB_LL.density_matrices_out[0]
             densmat_B_LL = self.AB_LL.density_matrices_out[1]
+        else:
+            densmat_A_LL = dma_in
+            densmat_B_LL = dmb_in
 
         # Initialises the density matrix for subsystem A, and calculates the
         # hamiltonian components for subsystem A at the low-level reference.
