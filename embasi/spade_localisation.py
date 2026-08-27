@@ -8,7 +8,7 @@ from scalapack4py.npscal.math_utils.npscal2npscal import svd
 def spade_localisation(atomsembed, hamiltonian, overlap, parallel=False,
                        spade_ncores=0, spade_manual_state=0,
                        basis_illcond_thresh=1e-5, return_mo_coeffs=False,
-                       a_nelecs=None):
+                       a_nspade_mos=None):
     """Calculate the localised density matrices with the SPADE method
 
     As the eigenvectors (MO coefficient matrix) is not a part of the
@@ -139,7 +139,7 @@ def spade_localisation(atomsembed, hamiltonian, overlap, parallel=False,
                 u, svals, v = np.linalg.svd(evecs_occ_a_orthog, full_matrices=True)
 
             if a_nelecs is not None:
-                max_sval_change_idx = a_nelecs - spade_ncores
+                max_sval_change_idx = a_nspade_mos - spade_ncores
             else:
                 svals_diff = np.ediff1d(svals**2.0)
                 max_sval_change_idx = np.argmax(np.abs(svals_diff)) + spade_manual_state + 1

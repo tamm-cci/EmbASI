@@ -800,7 +800,7 @@ class ProjectionEmbedding(EmbeddingBase):
 
         return densmat_A_LL, densmat_B_LL
 
-    def construct_embedded_fock(self, dmab_in=None, dma_in=None, dmb_in=None, a_nelecs=None):
+    def construct_embedded_fock(self, dmab_in=None, dma_in=None, dmb_in=None, a_nspade_mos=None):
         """Returns construct_embedding_potential outputs with the full embedded
            Fock matrix
 
@@ -823,13 +823,13 @@ class ProjectionEmbedding(EmbeddingBase):
         if self.projection == "huzinaga-sc":
             raise Exception("The embedded Fock matrix can only be constructed for projection='level-shift'")
 
-        densmat_A_LL, densmat_B_LL, overlap, vemb, P_b = self.construct_embedding_potential(dmab_in=dmab_in, dma_in=dma_in, dmb_in=dmb_in, a_nelecs=a_nelecs)
+        densmat_A_LL, densmat_B_LL, overlap, vemb, P_b = self.construct_embedding_potential(dmab_in=dmab_in, dma_in=dma_in, dmb_in=dmb_in, a_nspade_mos=a_nspade_mos)
 
         embedded_fock = self.A_LL.hamiltonian_kinetic + self.A_LL.hamiltonian_estat_plus_xc + vemb + P_b
 
         return densmat_A_LL, densmat_B_LL, embedded_fock
 
-    def construct_embedding_potential(self, dmab_in=None, dma_in=None, dmb_in=None, a_nelecs=None):
+    def construct_embedding_potential(self, dmab_in=None, dma_in=None, dmb_in=None, a_nspade_mos=None):
         """Constructs the embedding potential v_emb and the projection operator
 
         Performs calculations for the low-level reference supersytem and subsystem.
@@ -933,7 +933,7 @@ class ProjectionEmbedding(EmbeddingBase):
                                          spade_manual_state=self.spade_manual_state,
                                          basis_illcond_thresh=self.basis_illcond_thresh,
                                          return_mo_coeffs=True,
-                                         a_nelecs=a_nelecs)
+                                         a_nspade_mos=a_nspade_mos)
             densmat_A_LL = results[0]
             densmat_B_LL = results[1]
             self.mo_coeffs_A_LL = results[2]
