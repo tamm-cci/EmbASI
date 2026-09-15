@@ -885,7 +885,7 @@ class AtomsEmbed():
         the subsystem orbitals of the environment from the active system:
             (1) F^{A-in-B} = h^{core} + g^{hilev}[/gamma^{A}]
                                 + v_{emb}[/gamma^{A}, /gamma^{B}] + P_{B}[1]
-        where /gamma^{A} is the density matrix for the subystem, A},g[\gamma]
+        where /gamma^{A} is the density matrix for the subystem, A},g[/gamma]
         are the two-electron interaction terms, is the embedding potential matrix,
             (2) v_{emb} = g^{low}[/gamma^{A} + /gamma^{B}] - g^{low}[/gamma^{A}]
         and h_core are the one-electron components of the hamiltonian (kinetic
