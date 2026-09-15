@@ -58,7 +58,7 @@ def huzinaga_fock_operator(hamiltonian_hl, vemb, overlap, densmat, n_spins):
     -------
     SpinKpointArray or np.ndarray
         The full Huzinaga embedded Fock/Hamiltonian matrix
-        (F_emb - (F_emb . \gamma^{B} . S.T + S . \gamma^{B} . F_emb.T))
+        (F_emb - (F_emb . /gamma^{B} . S.T + S . /gamma^{B} . F_emb.T))
     """
 
     if n_spins is None:

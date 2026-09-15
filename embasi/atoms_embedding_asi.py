@@ -883,11 +883,11 @@ class AtomsEmbed():
 
         Represents the Fock embedding matrix used to level-shift/orthogonalise
         the subsystem orbitals of the environment from the active system:
-            (1) F^{A-in-B} = h^{core} + g^{hilev}[\gamma^{A}]
-                                + v_{emb}[\gamma^{A}, \gamma^{B}] + P_{B}[1]
-        where \gamma^{A} is the density matrix for the subystem, A},g[\gamma]
+            (1) F^{A-in-B} = h^{core} + g^{hilev}[/gamma^{A}]
+                                + v_{emb}[/gamma^{A}, /gamma^{B}] + P_{B}[1]
+        where /gamma^{A} is the density matrix for the subystem, A},g[\gamma]
         are the two-electron interaction terms, is the embedding potential matrix,
-            (2) v_{emb} = g^{low}[\gamma^{A} + \gamma^{B}] - g^{low}[\gamma^{A}]
+            (2) v_{emb} = g^{low}[/gamma^{A} + /gamma^{B}] - g^{low}[/gamma^{A}]
         and h_core are the one-electron components of the hamiltonian (kinetic
         energy and nuclear-electron interactions).
 
@@ -902,16 +902,16 @@ class AtomsEmbed():
         constructed in FHI-aims  for the high-level calculation - components of
         F^{A-in-B} are calculated in this function are added to the Hamiltonian
         of FHI-aims before its entry into the eigensolver. As such, removing components of
-        the nuclear-potential between atoms of A (included in g^{low}[\gamma^{A}])
+        the nuclear-potential between atoms of A (included in g^{low}[/gamma^{A}])
         makes perfect sense, as they are are calculated natively within FHI-aims.
         For similar reasons, the kinetic energy components of h^{core} may be ignored.
 
         The final term calculated in the wrapper is then:
-            (2) F_{wrapper}^{A-in-B} = H_{emb}^{Tot, lolev}[\gamma^{A} + \gamma^{B}]
-             - H_{emb}^{Tot, lolev}[\gamma^{A}] - t_k(\gamma^{A} + \gamma^{B}}
-                                  - t_k(\gamma^{A}) + P_{B}
+            (2) F_{wrapper}^{A-in-B} = H_{emb}^{Tot, lolev}[/gamma^{A} + /gamma^{B}]
+             - H_{emb}^{Tot, lolev}[/gamma^{A}] - t_k(/amma^{A} + /gamma^{B}}
+                                  - t_k(/gamma^{A}) + P_{B}
         Where t_k is the kinetic energy contribution to the Hamiltonian and
-        H_{emb}^{Tot, lolev}[\gamma] is the total hamiltonian derived from the
+        H_{emb}^{Tot, lolev}[/gamma] is the total hamiltonian derived from the
         density matrix, gamma at the low-level reference level of thoery.
 
 
