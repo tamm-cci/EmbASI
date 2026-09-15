@@ -100,6 +100,8 @@ def hamiltonian_eigensolv(hamiltonian, overlap, nelec, nspins=1, nkpts=1, basis_
             n_good = n_basis - n_bad
 
             evals[(ispin,ikpt)], evecs[(ispin,ikpt)] = np.linalg.eig(xform_hamiltonian(hamiltonian[ispin,ikpt], xform_mat))
+            evals[(ispin,ikpt)] = np.real(evals[(ispin,ikpt)])
+            evecs[(ispin,ikpt)] = np.real(evecs[(ispin,ikpt)])
 
             if (not return_orthog):
                 evecs[(ispin,ikpt)] = back_xform_evecs(evecs[(ispin,ikpt)], xform_mat)
