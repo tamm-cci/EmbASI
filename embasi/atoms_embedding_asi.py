@@ -135,17 +135,11 @@ class AtomsEmbed():
         #    for idx, ghost in enumerate(self.atoms.info["ghosts"]):
         #        if ghost:
         #            ghost_list[idx] = True
-
-        if hasattr(self, "input_total_charge"):
-            total_charge = self.input_total_charge
-        elif hasattr(self, "input_fragment_nelectrons"):
-            total_charge = self.fragment_total_charge
-        else:
-            total_charge = 0.
+        total_charge = self.fragment_total_charge
 
         # Set the calculator to accept the total charge for the given fragment
         calc = self.qm_adapter.set_ghost_atoms(self, calc, self.ghost_list_calc)
-        calc = self.qm_adapter.set_qm_total_charge(self, calc, -float(total_charge))
+        calc = self.qm_adapter.set_qm_total_charge(self, calc, float(total_charge))
 
         # Ensure the Aims template shares the input parameters of the calculator object
         if hasattr(calc, "template"):
@@ -303,19 +297,28 @@ class AtomsEmbed():
 
         if self.parallel:
             from scalapack4py.npscal import NPScal
-            from scalapack4py.npscal.blacs_ctxt_management import DESCR_Register, BLACSDESCRManager
+            from scalapack4py.npscal.blacs_ctxt_management import descriptor_registry
             from ctypes import cdll, CDLL, RTLD_GLOBAL
 
             lib = os.environ['ASI_LIB_PATH']
+            grid = full_mat.ctxt
 
+            # Fallback block size, used only if these tags have never been
+            # registered before. self.blacs_descr_tag in particular is also
+            # used directly by this layer's own ASI callbacks (asi_default_
+            # callbacks.py) -- whichever registers first wins, and every
+            # later NPScal under that tag (regardless of where it's built)
+            # must reuse that block size, or elementwise ops between them
+            # fail with a block-size mismatch.
             mb = full_mat.descr.mb
             nb = full_mat.descr.nb
 
-            trunc_mat_row = NPScal(ctxt_tag=self.blacs_ctxt_tag, descr_tag=f"{self.blacs_descr_tag}_temp_rectangle_f2t", lib=lib,
-                                   gl_m=trunc_nbasis, gl_n=full_nbasis, dmb=mb, dnb=nb)
+            row_tag = f"{self.blacs_descr_tag}_temp_rectangle_f2t"
+            descriptor_registry.get_or_create(row_tag, trunc_nbasis, full_nbasis, mb, nb)
+            trunc_mat_row = NPScal(grid=grid, lib=lib, descriptor=row_tag)
 
-            trunc_mat = NPScal(ctxt_tag=self.blacs_ctxt_tag, descr_tag=self.blacs_descr_tag, lib=lib,
-                               gl_m=trunc_nbasis, gl_n=trunc_nbasis, dmb=mb, dnb=nb)
+            descriptor_registry.get_or_create(self.blacs_descr_tag, trunc_nbasis, trunc_nbasis, mb, nb)
+            trunc_mat = NPScal(grid=grid, lib=lib, descriptor=self.blacs_descr_tag)
 
         else:
             trunc_mat_row = np.zeros(shape=(trunc_nbasis, full_nbasis))
@@ -432,19 +435,24 @@ class AtomsEmbed():
         full_nbasis = self.basis_info.full_nbasis
         if self.parallel:
             from scalapack4py.npscal import NPScal
-            from scalapack4py.npscal.blacs_ctxt_management import DESCR_Register
+            from scalapack4py.npscal.blacs_ctxt_management import descriptor_registry
             from ctypes import cdll, CDLL, RTLD_GLOBAL
 
             lib = os.environ['ASI_LIB_PATH']
             new_descr_tag = "supersystem"
+            grid = trunc_mat.ctxt
 
+            # Fallback block size, used only if this tag has never been
+            # registered before -- see the matching comment in
+            # full_mat_to_truncated.
             mb = trunc_mat.descr.mb
             nb = trunc_mat.descr.nb
 
-            full_mat_row = NPScal(ctxt_tag=self.blacs_ctxt_tag, descr_tag=f"{self.blacs_descr_tag}_temp_rectangle_t2f", lib=lib,
-                                  gl_m=full_nbasis, gl_n=trunc_nbasis, dmb=mb, dnb=nb)
+            row_tag = f"{self.blacs_descr_tag}_temp_rectangle_t2f"
+            descriptor_registry.get_or_create(row_tag, full_nbasis, trunc_nbasis, mb, nb)
+            full_mat_row = NPScal(grid=grid, lib=lib, descriptor=row_tag)
 
-            full_mat = NPScal(ctxt_tag=self.blacs_ctxt_tag, descr_tag=new_descr_tag, lib=lib)
+            full_mat = NPScal(grid=grid, lib=lib, descriptor=new_descr_tag)
         else:
             full_mat_row = np.zeros(shape=(full_nbasis, trunc_nbasis))
             full_mat = np.zeros(shape=(full_nbasis, full_nbasis))
@@ -1017,7 +1025,10 @@ class AtomsEmbed():
         """Index map of basis functions to atoms
 
         """
-        return self._basis_atoms
+        if hasattr(self, "_basis_atoms"):
+            return self._basis_atoms
+        else:
+            return None
 
     @basis_atoms.setter
     def basis_atoms(self, val):
@@ -1028,7 +1039,10 @@ class AtomsEmbed():
         """Number of basis functions
 
         """
-        return self._n_basis
+        if hasattr(self, "_n_basis"):
+            return self._n_basis
+        else:
+            return None
 
     @n_basis.setter
     def n_basis(self, val):
@@ -1057,14 +1071,14 @@ class AtomsEmbed():
 
     @property
     def free_atom_nelectrons(self):
-
-        tot_nelec = np.sum(self.atoms.numbers)
-        ghost_nelec = np.sum(self.atoms.numbers[self.ghost_list_calc])
-        return tot_nelec - ghost_nelec
+        return np.sum(self.atoms.numbers[self.basis_info.active_atoms])
 
     @property
     def input_total_charge(self):
-        return self._input_total_charge
+        if hasattr(self, "_input_total_charge"):
+            return self._input_total_charge
+        else:
+            return float(0)
 
     @input_total_charge.setter
     def input_total_charge(self, val):
@@ -1080,4 +1094,7 @@ class AtomsEmbed():
 
     @property
     def fragment_total_charge(self):
-        return +(self.input_fragment_nelectrons - self.free_atom_nelectrons)
+        if hasattr(self, "_input_fragment_nelectrons"):
+            return self.input_total_charge + self.free_atom_nelectrons - self.input_fragment_nelectrons
+        else:
+            return self.input_total_charge

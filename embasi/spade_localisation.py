@@ -183,6 +183,21 @@ def spade_localisation(atomsembed, hamiltonian, overlap, parallel=False,
                 density_matrix_subsys_a[ispin,ikpt] = mpi_bcast_matrix(density_matrix_subsys_a[ispin,ikpt])
                 density_matrix_subsys_b[ispin,ikpt] = mpi_bcast_matrix(density_matrix_subsys_b[ispin,ikpt])
 
+    # density_matrix_subsys_a/b were each built via rot_evecs_occ_a/b @ .T --
+    # matmul chains starting from ovlp_evecs slices of DIFFERENT column
+    # counts (n_occ_A != n_occ_B), whose own block sizes are independently
+    # "optimal" for their own (different) shapes with no relation to each
+    # other. Both end up (n_basis, n_basis) here, but nothing makes them
+    # agree with each other or with overlap's -- and this codebase's callers
+    # rely on being able to add/subtract these against overlap-space and
+    # A_HL-space quantities (embedding.py's densmat_A_LL + densmat_B_LL, and
+    # densmat_A_HL - densmat_A_LL). Rechunk explicitly onto overlap's block
+    # size, the one reference both this function's caller and A_HL's own
+    # ASI-native arrays already interoperate against.
+    density_matrix_supersystem = density_matrix_supersystem.rechunk(like=overlap)
+    density_matrix_subsys_a = density_matrix_subsys_a.rechunk(like=overlap)
+    density_matrix_subsys_b = density_matrix_subsys_b.rechunk(like=overlap)
+
     root_print(f'SPADE total supersystem A+B charge: {(overlap @ density_matrix_supersystem).trace()}')
     root_print(f'SPADE localised subsystem A charge: {(overlap @ density_matrix_subsys_a).trace()}')
     root_print(f'SPADE localised subsystem B charge: {(overlap @ density_matrix_subsys_b).trace()}')

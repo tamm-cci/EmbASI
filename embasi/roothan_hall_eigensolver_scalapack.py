@@ -1,7 +1,7 @@
 import numpy as np
 from ctypes import RTLD_GLOBAL, CDLL, POINTER, byref, c_int, c_int64, c_int32, c_bool, c_double
 from embasi.parallel_utils import root_print, mpi_bcast_matrix
-from scalapack4py.npscal import NPScal
+from scalapack4py.npscal import rechunk
 import scalapack4py.npscal.math_utils.operations as op
 import os
 
@@ -53,25 +53,42 @@ def overlap_illcondition_check_parallel(overlap, thresh, inv=True, return_mask=F
     good_val_mask = (ovlp_evals > thresh)
     if n_bad > 0:
         # Transform overlap matrix
+        #
+        # ovlp_evecs[:, good_val_mask] goes through select_slice, which picks
+        # its own independently-"optimal" block size for the (n_good-wide)
+        # sub-matrix -- there is no implicit mechanism reconciling that back
+        # to overlap's. The explicit rechunk() below at the end of this
+        # function is what actually guarantees the returned xform_mat is
+        # consistent with overlap.
         ovlp_filtered = ovlp_evecs[:, good_val_mask]
         evals_filtered = ovlp_evals[good_val_mask]
 
-        evals_diag = NPScal(ctxt_tag=overlap.ctxt_tag, descr_tag="rank_reduced_eval", lib=overlap.sl,
-                           gl_m=n_good, gl_n=n_good, dmb=overlap.descr.mb, dnb=overlap.descr.nb,
-                           drsrc=overlap.descr.rsrc, dcsrc=overlap.descr.csrc, dlld=None)
-
         if inv:
-            evals_diag = op.diag(evals_filtered**(-0.5), ctxt_tag=overlap.ctxt_tag, descr_tag="rank_reduced_eval", lib=overlap.sl)
+            evals_diag = op.diag(evals_filtered**(-0.5), ctxt_tag=overlap.ctxt_tag, descr_tag="rank_reduced_eval", lib=overlap.sl,
+                                 dmb=overlap.descr.mb, dnb=overlap.descr.nb)
             ovlp_filtered = ovlp_filtered.copy() @ evals_diag
         else:
-            evals_diag = op.diag(evals_filtered**(0.5), ctxt_tag=overlap.ctxt_tag, descr_tag="rank_reduced_eval", lib=overlap.sl)
+            evals_diag = op.diag(evals_filtered**(0.5), ctxt_tag=overlap.ctxt_tag, descr_tag="rank_reduced_eval", lib=overlap.sl,
+                                 dmb=overlap.descr.mb, dnb=overlap.descr.nb)
             ovlp_filtered = evals_diag @ ovlp_filtered.copy().T
 
     else:
         if inv:
-            ovlp_filtered = ovlp_evecs @ op.diag(ovlp_evals**(-0.5), ctxt_tag=overlap.ctxt_tag, descr_tag=f"main_{overlap.gl_m}", lib=overlap.sl) @ ovlp_evecs.T
+            ovlp_filtered = ovlp_evecs @ op.diag(ovlp_evals**(-0.5), ctxt_tag=overlap.ctxt_tag, descr_tag=f"main_{overlap.gl_m}", lib=overlap.sl,
+                                                 dmb=overlap.descr.mb, dnb=overlap.descr.nb) @ ovlp_evecs.T
         else:
-            ovlp_filtered = ovlp_evecs @ op.diag(ovlp_evals**(0.5), ctxt_tag=overlap.ctxt_tag, descr_tag=f"main_{overlap.gl_m}", lib=overlap.sl) @ ovlp_evecs.T
+            ovlp_filtered = ovlp_evecs @ op.diag(ovlp_evals**(0.5), ctxt_tag=overlap.ctxt_tag, descr_tag=f"main_{overlap.gl_m}", lib=overlap.sl,
+                                                 dmb=overlap.descr.mb, dnb=overlap.descr.nb) @ ovlp_evecs.T
+
+    # matmul() always inherits its LEFT operand's block size (ovlp_filtered's,
+    # or ovlp_evecs's own slice-recomputed one in the n_bad==0 branch), never
+    # evals_diag's -- so passing overlap's block size into evals_diag above
+    # does not, by itself, fix the block size actually carried out of here.
+    # This function returns xform_mat as a value meant to interoperate with
+    # overlap (and, through the eigensolve, with arrays read straight off an
+    # ASI callback under the same context) -- rechunk explicitly onto it
+    # rather than leaving that to whoever calls this.
+    ovlp_filtered = rechunk(ovlp_filtered, like=overlap)
 
     if return_mask:
         return ovlp_filtered, n_bad, good_val_mask

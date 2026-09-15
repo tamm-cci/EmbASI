@@ -35,7 +35,8 @@ class EmbeddingBase(ABC):
         Calculator object for layer 2
 
     """
-    def __init__(self, atoms, embed_mask, calc_base_ll=None, calc_base_hl=None, run_dir="./EmbASI_calc"):
+    def __init__(self, atoms, embed_mask, calc_base_ll=None, calc_base_hl=None, run_dir="./EmbASI_calc",
+                 ignore_npscal_warnings=True):
         import os
 
         # Temporary workaround for PySCF-only calculations
@@ -51,6 +52,11 @@ class EmbeddingBase(ABC):
 
         self.qm_adapter_ll = qm_code_adapter(self.calculator_ll)
         self.qm_adapter_hl = qm_code_adapter(self.calculator_hl)
+
+        if ignore_npscal_warnings:
+            import warnings
+            from scalapack4py.npscal.utils import NPScalWarning
+            warnings.filterwarnings("ignore", category=NPScalWarning)
 
         try:
             os.makedirs(self.run_dir, exist_ok=True)
@@ -98,6 +104,9 @@ class EmbeddingBase(ABC):
                            ghosts=ghosts, no_scf=no_scf, descr_tag=descr_tag,
                            ctxt_tag=ctxt_tag, huzinaga=huzinaga,
                            insert_embedding_region=insert_embedding_region)
+
+        default_basis_info = self.set_basis_info(layer)
+        layer.basis_info = default_basis_info
 
         setattr(self, layer_name, layer)
 
@@ -323,7 +332,8 @@ class EmbeddingBase(ABC):
 
 class StandardDFT(EmbeddingBase):
 
-    def __init__(self, atoms, calc_base_ll, embed_mask=None, calc_base_hl=None, run_dir="./EmbASI_calc"):
+    def __init__(self, atoms, calc_base_ll, embed_mask=None, calc_base_hl=None, run_dir="./EmbASI_calc",
+                 ignore_npscal_warnings=True):
         """Runs a normal DFT calculation without embedding
 
         A class which runs a standard DFT calculation without
@@ -352,7 +362,8 @@ class StandardDFT(EmbeddingBase):
         calc_base_ll = deepcopy(calc_base_ll)
 
         super(StandardDFT, self).__init__(atoms, embed_mask, calc_base_ll,
-                                          calc_base_hl, run_dir=run_dir)
+                                          calc_base_hl, run_dir=run_dir,
+                                          ignore_npscal_warnings=ignore_npscal_warnings)
 
         calc_ll = self.qm_adapter_ll.set_full_scf_calc(calc_base_ll)
         self.set_layer(atoms, self.calc_names[0], calc_ll,
@@ -425,7 +436,8 @@ class ProjectionEmbedding(EmbeddingBase):
                  localisation='SPADE', spade_manual_state=0, spade_ncores=0,
                  projection="level-shift", freeze_and_thaw=False, mu_val=1.e+06,
                  parallel=False, gc=True, run_dir="./EmbASI_calc",
-                 basis_illcond_thresh=1e-5, scalapack_block_size=16, fat_mixing=0.2):
+                 basis_illcond_thresh=1e-5, scalapack_block_size=16, fat_mixing=0.2,
+                 ignore_npscal_warnings=True):
 
         from copy import copy, deepcopy
         from mpi4py import MPI
@@ -484,7 +496,8 @@ class ProjectionEmbedding(EmbeddingBase):
         # Initialise the ProjectionEmbedding object given EmbeddingBase
         super(ProjectionEmbedding, self).__init__(atoms, embed_mask,
                                                   calc_base_ll, calc_base_hl,
-                                                  run_dir=run_dir)
+                                                  run_dir=run_dir,
+                                                  ignore_npscal_warnings=ignore_npscal_warnings)
 
         # Determines whether arrays will be communicated in parallel
         self.parallel = parallel
@@ -572,7 +585,7 @@ class ProjectionEmbedding(EmbeddingBase):
         self.AB_LL.input_total_charge = total_charge
 
         self.set_layer(atoms, "A_LL", low_level_calculator_1,
-                       embed_mask, ghosts=2, no_scf=False,
+                       embed_mask, ghosts=0, no_scf=False,
                        ctxt_tag=subsys_ctxt_tag,
                        descr_tag=subsys_descr_tag,
                        huzinaga=self.flag_huz_sc)
@@ -580,7 +593,7 @@ class ProjectionEmbedding(EmbeddingBase):
         self.A_LL.truncate = self.truncate
 
         self.set_layer(atoms, "A_HL", high_level_calculator_1,
-                       embed_mask, ghosts=2, no_scf=False,
+                       embed_mask, ghosts=0, no_scf=False,
                        ctxt_tag=subsys_ctxt_tag,
                        descr_tag=subsys_descr_tag,
                        huzinaga=self.flag_huz_sc)
@@ -588,7 +601,7 @@ class ProjectionEmbedding(EmbeddingBase):
         self.A_HL.truncate = self.truncate
 
         self.set_layer(atoms, "B_LL", low_level_calculator_1,
-                       embed_mask, ghosts=1, no_scf=False,
+                       embed_mask, ghosts=0, no_scf=False,
                        ctxt_tag=supersys_ctxt_tag,
                        descr_tag=subsys_B_descr_tag,
                        huzinaga=self.flag_huz_sc)
@@ -1225,9 +1238,9 @@ class ProjectionEmbedding(EmbeddingBase):
 
         # And finally, now all the work is done, clear the ScaLAPACK
         # registers in case another calculation is ran.
-        from scalapack4py.npscal.blacs_ctxt_management import CTXT_Register, DESCR_Register
-        CTXT_Register.clear_register()
-        DESCR_Register.clear_register()
+        from scalapack4py.npscal.blacs_ctxt_management import BLACSGrid, descriptor_registry
+        BLACSGrid.clear_registry()
+        descriptor_registry.clear()
 
 
 class FrozenDensityEmbedding(EmbeddingBase):
@@ -1266,7 +1279,7 @@ class FrozenDensityEmbedding(EmbeddingBase):
     """
 
     def __init__(self, atoms, embed_mask, calc_base_ll, calc_base_hl,
-                 run_dir="./EmbASI_calc"):
+                 run_dir="./EmbASI_calc", ignore_npscal_warnings=False):
 
         from copy import copy, deepcopy
         from mpi4py import MPI
@@ -1277,7 +1290,8 @@ class FrozenDensityEmbedding(EmbeddingBase):
                                                      embed_mask,
                                                      calc_base_ll,
                                                      calc_base_hl,
-                                                     run_dir=run_dir)
+                                                     run_dir=run_dir,
+                                                     ignore_npscal_warnings=ignore_npscal_warnings)
 
         initial_calculator    = deepcopy(self.calculator_ll)
         low_level_calculator  = deepcopy(self.calculator_ll)
@@ -1427,7 +1441,7 @@ class ONIOMSubtractiveEmbedding(EmbeddingBase):
     def __init__(self, atoms, embed_mask, calc_base_ll, calc_base_hl,
                  total_charge=0, post_scf=None, covalent_cap=True,
                  cluster_hl=True, covalent_cap_species="H", covalent_cap_bond_len=1.0,
-                 parallel=True, run_dir="./EmbASI_calc"):
+                 parallel=True, run_dir="./EmbASI_calc", ignore_npscal_warnings=True):
 
         from copy import copy, deepcopy
         from mpi4py import MPI
@@ -1436,7 +1450,8 @@ class ONIOMSubtractiveEmbedding(EmbeddingBase):
         self.calc_names = ["AB_LL","A_LL","A_HL","A_HL_PP"]
 
         super(ONIOMSubtractiveEmbedding, self).__init__(atoms, embed_mask,
-                                                  calc_base_ll, calc_base_hl, run_dir=run_dir)
+                                                        calc_base_ll, calc_base_hl, run_dir=run_dir,
+                                                        ignore_npscal_warnings=ignore_npscal_warnings)
 
         # Set-up tags for BLACS descriptors and contexts
         if self.parallel:

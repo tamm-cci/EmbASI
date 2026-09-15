@@ -5,7 +5,8 @@ from asi4py.pyasi import triang2herm_inplace, triang_packed2full_hermit, matrix_
 from embasi.parallel_utils import root_print
 from mpi4py import MPI
 from scalapack4py.npscal import NPScal
-from scalapack4py.npscal.blacs_ctxt_management import BLACSGrid, descriptor_registry
+from scalapack4py.npscal.blacs_ctxt_management import DESCR_Register, CTXT_Register
+from scalapack4py.npscal.blacs_ctxt_management import BLACSContextManager, BLACSDESCRManager
 from scalapack4py.array_types import nullable_ndpointer, ctypes2ndarray
 import traceback, sys
 import tracemalloc
@@ -89,25 +90,20 @@ def dm_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
                 if MPI.COMM_WORLD.Get_rank() == 0:
                     data = data.copy()
             else:
-                descr_cast = asi.scalapack.wrap_blacs_desc(descr)
-                MP, NP = asi.scalapack.blacs_gridinfo(descr_cast.ctxt)[:2]
-                grid = BLACSGrid.get_or_create(ctxt_tag, asi.scalapack, nprow=MP, npcol=NP)
+                if not(CTXT_Register.check_register(ctxt_tag)):
+                    descr_cast = asi.scalapack.wrap_blacs_desc(descr)
+                    MP = asi.scalapack.blacs_gridinfo(descr_cast.ctxt)[0]
+                    NP = asi.scalapack.blacs_gridinfo(descr_cast.ctxt)[1]
+                    ctxt = BLACSContextManager(ctxt_tag, MP, NP, asi.scalapack)
+                                                
+                if not(DESCR_Register.check_register(descr_tag)):
+                    descr_cast = asi.scalapack.wrap_blacs_desc(descr)
+                    m, n, mb, nb = descr_cast.m, descr_cast.n, descr_cast.mb, descr_cast.nb
+                    rsrc, csrc, lld = descr_cast.rsrc, descr_cast.csrc, descr_cast.lld
+                    descr = BLACSDESCRManager(ctxt_tag, descr_tag, asi.scalapack, m, n,
+                                              mb, nb, rsrc, csrc, lld)
 
-                m, n, mb, nb = descr_cast.m, descr_cast.n, descr_cast.mb, descr_cast.nb
-                rsrc, csrc = descr_cast.rsrc, descr_cast.csrc
-
-                # Stash the first ASI-native descriptor seen for this context
-                # as a reference on the grid, for explicit rechunk(x, like=grid)
-                # calls elsewhere -- nothing consults this automatically (no
-                # implicit mechanism reconciles arrays built on this grid to
-                # it); callers that need a specific array's own block size
-                # matched should prefer rechunk(x, like=<that array>) instead.
-                if grid.default_mb is None:
-                    grid.set_default_block_size(mb, nb)
-
-                descriptor_registry.get_or_create(descr_tag, m, n, mb, nb, rsrc, csrc)
-
-                data = NPScal(loc_array=data, grid=grid, descriptor=descr_tag, lib=asi.scalapack)
+                data = NPScal(loc_array=data, ctxt_tag=ctxt_tag, descr_tag=descr_tag, lib=asi.scalapack)
 
         elif (matrix_descr_ptr.contents.storage_type in {1,2}):
             assert not descr, """default_saving_callback supports only dense full 
@@ -180,25 +176,19 @@ def ovlp_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
                 if MPI.COMM_WORLD.Get_rank() == 0:
                     data = data.copy()
             else:
-                descr_cast = asi.scalapack.wrap_blacs_desc(descr)
-                MP, NP = asi.scalapack.blacs_gridinfo(descr_cast.ctxt)[:2]
-                grid = BLACSGrid.get_or_create(ctxt_tag, asi.scalapack, nprow=MP, npcol=NP)
-
-                m, n, mb, nb = descr_cast.m, descr_cast.n, descr_cast.mb, descr_cast.nb
-                rsrc, csrc = descr_cast.rsrc, descr_cast.csrc
-
-                # Stash the first ASI-native descriptor seen for this context
-                # as a reference on the grid, for explicit rechunk(x, like=grid)
-                # calls elsewhere -- nothing consults this automatically (no
-                # implicit mechanism reconciles arrays built on this grid to
-                # it); callers that need a specific array's own block size
-                # matched should prefer rechunk(x, like=<that array>) instead.
-                if grid.default_mb is None:
-                    grid.set_default_block_size(mb, nb)
-
-                descriptor_registry.get_or_create(descr_tag, m, n, mb, nb, rsrc, csrc)
-
-                data = NPScal(loc_array=data, grid=grid, descriptor=descr_tag, lib=asi.scalapack)
+                if not(CTXT_Register.check_register(ctxt_tag)):
+                    descr_cast = asi.scalapack.wrap_blacs_desc(descr)
+                    MP = asi.scalapack.blacs_gridinfo(descr_cast.ctxt)[0]
+                    NP = asi.scalapack.blacs_gridinfo(descr_cast.ctxt)[1]
+                    ctxt = BLACSContextManager(ctxt_tag, MP, NP, asi.scalapack)
+                                                
+                if not(DESCR_Register.check_register(descr_tag)):
+                    descr_cast = asi.scalapack.wrap_blacs_desc(descr)
+                    m, n, mb, nb = descr_cast.m, descr_cast.n, descr_cast.mb, descr_cast.nb
+                    rsrc, csrc, lld = descr_cast.rsrc, descr_cast.csrc, descr_cast.lld
+                    descr = BLACSDESCRManager(ctxt_tag, descr_tag, asi.scalapack, m, n,
+                                              mb, nb, rsrc, csrc, lld)
+                data = NPScal(loc_array=data, ctxt_tag=ctxt_tag, descr_tag=descr_tag, lib=asi.scalapack)
 
         elif (matrix_descr_ptr.contents.storage_type in {1,2}):
             assert not descr, """default_saving_callback supports only dense full 
@@ -266,25 +256,19 @@ def ham_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
                 if MPI.COMM_WORLD.Get_rank() == 0:
                     data = data.copy()
             else:
-                descr_cast = asi.scalapack.wrap_blacs_desc(descr)
-                MP, NP = asi.scalapack.blacs_gridinfo(descr_cast.ctxt)[:2]
-                grid = BLACSGrid.get_or_create(ctxt_tag, asi.scalapack, nprow=MP, npcol=NP)
+                if not(CTXT_Register.check_register(ctxt_tag)):
+                    descr_cast = asi.scalapack.wrap_blacs_desc(descr)
+                    MP = asi.scalapack.blacs_gridinfo(descr_cast.ctxt)[0]
+                    NP = asi.scalapack.blacs_gridinfo(descr_cast.ctxt)[1]
+                    ctxt = BLACSContextManager(ctxt_tag, MP, NP, asi.scalapack)
 
-                m, n, mb, nb = descr_cast.m, descr_cast.n, descr_cast.mb, descr_cast.nb
-                rsrc, csrc = descr_cast.rsrc, descr_cast.csrc
-
-                # Stash the first ASI-native descriptor seen for this context
-                # as a reference on the grid, for explicit rechunk(x, like=grid)
-                # calls elsewhere -- nothing consults this automatically (no
-                # implicit mechanism reconciles arrays built on this grid to
-                # it); callers that need a specific array's own block size
-                # matched should prefer rechunk(x, like=<that array>) instead.
-                if grid.default_mb is None:
-                    grid.set_default_block_size(mb, nb)
-
-                descriptor_registry.get_or_create(descr_tag, m, n, mb, nb, rsrc, csrc)
-
-                data = NPScal(loc_array=data, grid=grid, descriptor=descr_tag, lib=asi.scalapack)
+                if not(DESCR_Register.check_register(descr_tag)):
+                    descr_cast = asi.scalapack.wrap_blacs_desc(descr)
+                    m, n, mb, nb = descr_cast.m, descr_cast.n, descr_cast.mb, descr_cast.nb
+                    rsrc, csrc, lld = descr_cast.rsrc, descr_cast.csrc, descr_cast.lld
+                    descr = BLACSDESCRManager(ctxt_tag, descr_tag, asi.scalapack, m, n,
+                                              mb, nb, rsrc, csrc, lld)
+                data = NPScal(loc_array=data, ctxt_tag=ctxt_tag, descr_tag=descr_tag, lib=asi.scalapack)
 
         elif (matrix_descr_ptr.contents.storage_type in {1,2}): #
             assert not descr, """default_saving_callback supports only dense 
@@ -374,25 +358,19 @@ def ham_saving_and_huzinaga_callback(aux, iK, iS, descr, data, matrix_descr_ptr)
                 if MPI.COMM_WORLD.Get_rank() == 0:
                     data = data.copy()
             else:
-                descr_cast = asi.scalapack.wrap_blacs_desc(descr)
-                MP, NP = asi.scalapack.blacs_gridinfo(descr_cast.ctxt)[:2]
-                grid = BLACSGrid.get_or_create(ctxt_tag, asi.scalapack, nprow=MP, npcol=NP)
+                if not(CTXT_Register.check_register(ctxt_tag)):
+                    descr_cast = asi.scalapack.wrap_blacs_desc(descr)
+                    MP = asi.scalapack.blacs_gridinfo(descr_cast.ctxt)[0]
+                    NP = asi.scalapack.blacs_gridinfo(descr_cast.ctxt)[1]
+                    ctxt = BLACSContextManager(ctxt_tag, MP, NP, asi.scalapack)
 
-                m, n, mb, nb = descr_cast.m, descr_cast.n, descr_cast.mb, descr_cast.nb
-                rsrc, csrc = descr_cast.rsrc, descr_cast.csrc
-
-                # Stash the first ASI-native descriptor seen for this context
-                # as a reference on the grid, for explicit rechunk(x, like=grid)
-                # calls elsewhere -- nothing consults this automatically (no
-                # implicit mechanism reconciles arrays built on this grid to
-                # it); callers that need a specific array's own block size
-                # matched should prefer rechunk(x, like=<that array>) instead.
-                if grid.default_mb is None:
-                    grid.set_default_block_size(mb, nb)
-
-                descriptor_registry.get_or_create(descr_tag, m, n, mb, nb, rsrc, csrc)
-
-                data = NPScal(loc_array=data, grid=grid, descriptor=descr_tag, lib=asi.scalapack)
+                if not(DESCR_Register.check_register(descr_tag)):
+                    descr_cast = asi.scalapack.wrap_blacs_desc(descr)
+                    m, n, mb, nb = descr_cast.m, descr_cast.n, descr_cast.mb, descr_cast.nb
+                    rsrc, csrc, lld = descr_cast.rsrc, descr_cast.csrc, descr_cast.lld
+                    descr = BLACSDESCRManager(ctxt_tag, descr_tag, asi.scalapack, m, n,
+                                              mb, nb, rsrc, csrc, lld)
+                data = NPScal(loc_array=data, ctxt_tag=ctxt_tag, descr_tag=descr_tag, lib=asi.scalapack)
 
         elif (matrix_descr_ptr.contents.storage_type in {1,2}): #
             assert not descr, """default_saving_callback supports only dense 
@@ -515,10 +493,13 @@ def matrix_loading_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
             if ((ctxt_tag is None) and (descr_tag is None)):
                 asi.scalapack.scatter_numpy(m, descr, data, asi.hamiltonian_dtype)
             else:
-                if not isinstance(m, NPScal):
-                    raise Exception("BLACS-distributed data not recognised")
+                if not(CTXT_Register.check_register(ctxt_tag)):
+                    raise Exception("Context not recognised")
 
-                src_descr = m.descr
+                if not(DESCR_Register.check_register(descr_tag)):
+                    raise Exception("BLACS descriptor not recognised")
+
+                src_descr = DESCR_Register.get_register(descr_tag)
                 dest_descr = asi.scalapack.wrap_blacs_desc(descr)
 
                 data = ctypes2ndarray(data, shape=(dest_descr.locrow, dest_descr.loccol)).T

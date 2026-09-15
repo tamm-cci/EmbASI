@@ -585,7 +585,7 @@ class QMCodeASIAdapter(QMCodeAdapter):
             "n_basis": asi.n_basis,
             "basis_atoms": asi.basis_atoms,
             "ham_kin": ham_kin,
-            "ham_estat_xc": ham_estat_xc,
+            "ham_estat_xc": ham_2ee,
             "ham_tot": ham_tot,
             "ovlp": ovlp,
             "dm": dm,
