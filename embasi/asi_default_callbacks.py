@@ -350,7 +350,7 @@ def ham_saving_and_huzinaga_callback(aux, iK, iS, descr, data, matrix_descr_ptr)
         Numerical value indexing matrix shape (See: ASI docs)
 
     """
-    from embasi.huzinaga_projector import huzinaga_projector, get_abs_trunc_indices
+    from embasi.embedding_projectors import huzinaga_projector, get_abs_trunc_indices
 
     try:
         #asi, storage_dict, vemb, huz_dm, huz_ovlp, cnt_dict, ctxt_tag, descr_tag, label = cast(aux, py_object).value

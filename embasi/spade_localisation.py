@@ -126,6 +126,22 @@ def spade_localisation(atomsembed, hamiltonian, overlap, parallel=False,
         root_print(f'SPADE CORE localised subsystem A charge: {(overlap @ density_matrix_subsys_a).trace()}')
         root_print(f'SPADE CORE localised subsystem B charge: {(overlap @ density_matrix_subsys_b).trace()}')
 
+    # For an open-shell (n_spins==2) reference, the whole supersystem's
+    # spin (Nalpha - Nbeta) is read off the same occ_mat already used
+    # above for max_occ_state - it's exactly the alpha/beta electron
+    # split hamiltonian_eigensolv's own aufbau derived from the
+    # converged reference Fock. This is the target spin that subsystem
+    # A should carry entirely, so subsystem B nets to zero.
+    supersystem_spin = None
+    if atomsembed.n_spins == 2:
+        n_occ_alpha_total = np.count_nonzero(occ_mat[0,0])
+        n_occ_beta_total = np.count_nonzero(occ_mat[1,0])
+        supersystem_spin = n_occ_alpha_total - n_occ_beta_total
+        root_print(f'Supersystem spin (Nalpha-Nbeta), to be carried entirely '
+                   f'by subsystem A: {supersystem_spin}')
+
+    max_sval_change_idx_alpha_by_kpt = {}
+
     for ispin in range(atomsembed.n_spins):
         for ikpt in range(atomsembed.n_kpoints):
             max_occ_state = np.count_nonzero(occ_mat[ispin,ikpt])
@@ -138,11 +154,34 @@ def spade_localisation(atomsembed, hamiltonian, overlap, parallel=False,
             else:
                 u, svals, v = np.linalg.svd(evecs_occ_a_orthog, full_matrices=True)
 
-            if a_nspade_mos is not None:
+            beta_channel = (ispin == 1) and (atomsembed.n_spins == 2)
+
+            if beta_channel:
+                # Do not independently gap-search the beta channel: two
+                # unrelated SVD gap searches (one per channel) have no
+                # reason to agree on a partition that nets subsystem B
+                # to zero spin. Instead force the cutoff so subsystem A
+                # carries the whole supersystem spin exactly, and
+                # subsystem B nets to zero by construction.
+                max_sval_change_idx = max_sval_change_idx_alpha_by_kpt[ikpt] - supersystem_spin
+                n_occ_beta_channel = max_occ_state - spade_ncores
+
+                if not (0 <= max_sval_change_idx <= n_occ_beta_channel):
+                    raise Exception(
+                        f"SPADE beta-channel cutoff ({max_sval_change_idx}), forced from "
+                        f"the alpha-channel partition ({max_sval_change_idx_alpha_by_kpt[ikpt]}) "
+                        f"and the supersystem spin ({supersystem_spin}), falls outside the "
+                        f"valid range [0, {n_occ_beta_channel}]. Subsystem A cannot be "
+                        f"assigned this much spin from the beta-occupied MOs available."
+                    )
+            elif a_nspade_mos is not None:
                 max_sval_change_idx = a_nspade_mos - spade_ncores
             else:
                 svals_diff = np.ediff1d(svals**2.0)
                 max_sval_change_idx = np.argmax(np.abs(svals_diff)) + spade_manual_state + 1
+
+            if ispin == 0:
+                max_sval_change_idx_alpha_by_kpt[ikpt] = max_sval_change_idx
 
             root_print(f'MAX OCC STATE {max_occ_state} for Spin Channel {ispin}')
             root_print(f'SPADE STATE FOR: Spin Channel {ispin}, K-point {ikpt}')

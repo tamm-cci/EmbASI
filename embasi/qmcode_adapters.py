@@ -248,6 +248,26 @@ class QMCodeAdapter(ABC):
         """
         pass
 
+    def get_qm_input_spin(self, calc):
+        """Returns the spin (Nalpha - Nbeta) already configured on this
+        calculator, if the underlying QM code exposes such a concept at
+        the calculator level (e.g. PySCF's ``mol.spin``).
+
+        None (the default) for QM codes which set spin through a
+        different mechanism entirely (e.g. FHI-aims' raw ASE ``spin``/
+        ``default_initial_moment`` keywords, passed straight through to
+        control.in) - this signals to AtomsEmbed.fragment_spin that spin
+        should not be touched by set_qm_total_charge for this adapter.
+
+        Parameters
+        ----------
+        calc : ASECalculator
+            The calculator as originally configured by the user, before
+            EmbASI performs any fragment (ghost/truncation/charge)
+            mutation on it.
+        """
+        return None
+
     def set_full_scf_calc(self, calc):
         calc = self.set_embasi_calculation_type(calc, "ks_fullscf")
 
@@ -689,6 +709,35 @@ class PySCFAdapter(QMCodeAdapter):
         calc.method_scan.max_cycle = max_cycles
         return calc
 
+    def get_qm_input_spin(self, calc):
+        return calc.mol.spin
+
+    def _set_parity_safe_placeholder_spin(self, calc):
+        """Sets calc.mol.spin to satisfy mol.build()'s parity check
+
+        set_ghost_atoms/set_truncated_atoms mutate calc.mol.atom (and,
+        for ghosts, calc.mol.basis) *before* set_qm_total_charge (called
+        right after, in calc_initializer) applies the fragment's actual
+        charge and spin together. mol.build() requires
+        (nelectron - spin) % 2 == 0 though, so this needs a valid
+        placeholder immediately - one with the correct parity for
+        whatever electron count calc.mol.atom/calc.mol.charge currently
+        imply (which, at this intermediate point, is generally NOT yet
+        the fragment's final electron count). The exact spin value
+        doesn't matter here since set_qm_total_charge overwrites it
+        with the real, final one right afterwards.
+
+        atomsembed.fragment_spin must NOT be used here directly: it is
+        the fragment's *final* target spin, which is only guaranteed
+        consistent with the electron count set_qm_total_charge is about
+        to apply together with it - not with whatever calc.mol
+        currently (still) describes.
+        """
+        from pyscf.gto.mole import charge as elem_charge
+
+        current_nelec = sum(elem_charge(entry[0]) for entry in calc.mol.atom) - calc.mol.charge
+        calc.mol.spin = round(current_nelec) % 2
+
     def set_ghost_atoms(self, atomsembed, calc, ghost_list):
         from pyscf import gto
 
@@ -712,19 +761,13 @@ class PySCFAdapter(QMCodeAdapter):
 
         calc.mol.basis = new_basis
 
-        # Satisfy PySCF's internal nelec/spin book-keeping: this
-        # won't be the final value passed to the calculation but
-        # avoids a nasty crash
-        if not round(atomsembed.free_atom_nelectrons) % 2 == 0:
-            calc.mol.spin = 1
+        self._set_parity_safe_placeholder_spin(calc)
 
         calc.mol.build()
 
         return calc
 
     def set_truncated_atoms(self, atomsembed, calc, active_atoms):
-        from pyscf.gto.mole import charge
-
         old_atom = calc.mol.atom
         old_basis = calc.mol.basis
 
@@ -739,15 +782,7 @@ class PySCFAdapter(QMCodeAdapter):
         calc.mol.atom = new_atom
         calc.mol.basis = new_basis
 
-        # Dropping atoms changes the neutral-fragment electron count,
-        # which may no longer be consistent with the default mol.spin=0.
-        # Satisfy PySCF's internal nelec/spin book-keeping enough for
-        # build() below to succeed - set_qm_total_charge (called right
-        # after this, in calc_initializer) sets the actual fragment
-        # charge/spin and rebuilds again.
-        nelec_trunc = sum(charge(entry[0]) for entry in new_atom)
-        if nelec_trunc % 2 != 0:
-            calc.mol.spin = 1
+        self._set_parity_safe_placeholder_spin(calc)
 
         calc.mol.build()
 
@@ -771,17 +806,35 @@ class PySCFAdapter(QMCodeAdapter):
 
     def set_qm_total_charge(self, atomsembed, calc, charge):
         calc.mol.charge = charge
-        calc.mol.spin = 0
+        calc.mol.spin = atomsembed.fragment_spin
         calc.mol.build()
         return calc
 
     def run_scf(self, atomsembed):
-        if atomsembed.density_matrix_in is None:
-            dm_in = atomsembed.atoms.calc.method.get_init_guess()
-        else:
-            dm_in = atomsembed.density_matrix_in[0,0]
+        from pyscf.scf import uhf as pyscf_uhf
+        from pyscf.scf import rohf as pyscf_rohf
 
         mf = atomsembed.atoms.calc.method
+
+        # UHF/UKS and ROHF/ROKS both carry two independent spin channels
+        # in dm/veff (shape (2, nao, nao)), even though ROHF/ROKS's
+        # mo_coeff stays a single shared (nao, nao) set of orbitals with
+        # a 1D mo_occ - ROHF does NOT subclass uhf.UHF (it subclasses
+        # RHF directly), so both base classes need checking explicitly.
+        # RHF/RKS carry one channel. Detected from the mf object itself
+        # (the SCF method class the user built calc_base_ll/hl with),
+        # not from atomsembed.n_spins - which only reflects whatever a
+        # *previous* run happened to report, and isn't set at all
+        # before the first run.
+        n_spins = 2 if isinstance(mf, (pyscf_uhf.UHF, pyscf_rohf.ROHF)) else 1
+
+        if atomsembed.density_matrix_in is None:
+            dm_in = mf.get_init_guess()
+        elif n_spins == 2:
+            dm_in = np.array([atomsembed.density_matrix_in[0,0],
+                              atomsembed.density_matrix_in[1,0]])
+        else:
+            dm_in = atomsembed.density_matrix_in[0,0]
 
         # Both the static embedding potential (level-shift, and the
         # 'emb_pot' term of Huzinaga projection) and the dynamic Huzinaga
@@ -804,12 +857,23 @@ class PySCFAdapter(QMCodeAdapter):
         if needs_fock_override:
             from embasi.pyscf_scf_hooks import embedded_get_fock_factory
 
+            def _spinks_to_ndarray(spinks):
+                # Overlap (S below) is spin-independent by construction
+                # and stays a plain (nao, nao) 2D array even when
+                # n_spins==2 - numpy's batched @ broadcasts a bare 2D
+                # array against a (2, nao, nao) stack just fine, so
+                # huzinaga_projector needs no special-casing for it.
+                if n_spins == 2:
+                    return np.array([spinks[0,0], spinks[1,0]])
+                else:
+                    return spinks[0,0]
+
             mat_in = None
             if atomsembed.fock_embedding_matrix is not None:
                 if atomsembed.truncate:
-                    mat_in = atomsembed.fock_embedding_matrix_trunc[0,0]
+                    mat_in = _spinks_to_ndarray(atomsembed.fock_embedding_matrix_trunc)
                 else:
-                    mat_in = atomsembed.fock_embedding_matrix[0,0]
+                    mat_in = _spinks_to_ndarray(atomsembed.fock_embedding_matrix)
 
             gamma_B = S = None
             if atomsembed.flag_huz and atomsembed.huzinaga_dm_in is not None:
@@ -819,15 +883,15 @@ class PySCFAdapter(QMCodeAdapter):
                 # inside mf.kernel() on the truncated Mole, so gamma_B/S
                 # need to match its (trunc_nbasis, trunc_nbasis) Fock here.
                 if atomsembed.truncate:
-                    gamma_B = atomsembed.full_mat_to_truncated(atomsembed.huzinaga_dm_in)[0,0]
+                    gamma_B = _spinks_to_ndarray(atomsembed.full_mat_to_truncated(atomsembed.huzinaga_dm_in))
                     S = atomsembed.full_mat_to_truncated(atomsembed.huzinaga_ovlp_in)[0,0]
                 else:
-                    gamma_B = atomsembed.huzinaga_dm_in[0,0]
+                    gamma_B = _spinks_to_ndarray(atomsembed.huzinaga_dm_in)
                     S = atomsembed.huzinaga_ovlp_in[0,0]
 
             fock_func = mf.get_fock
             mf.get_fock = embedded_get_fock_factory(mf, fock_func, mat_in=mat_in,
-                                                    gamma_B=gamma_B, S=S)
+                                                    gamma_B=gamma_B, S=S, n_spins=n_spins)
 
         total_energy = mf.kernel(dm0=dm_in)
 
@@ -849,39 +913,50 @@ class PySCFAdapter(QMCodeAdapter):
         if needs_fock_override:
             mf.get_fock = fock_func
 
-        scf_conv = atomsembed.atoms.calc.method.converged
-        mo_energy = atomsembed.atoms.calc.method.mo_energy
-        mo_coeff = atomsembed.atoms.calc.method.mo_coeff
-        mo_occ = atomsembed.atoms.calc.method.mo_occ
+        scf_conv = mf.converged
+        mo_coeff = mf.mo_coeff
+        mo_occ = mf.mo_occ
 
-        aoslice = atomsembed.atoms.calc.mol.aoslice_by_atom()
+        aoslice = mf.mol.aoslice_by_atom()
         basis_atoms = []
         for atom_idx, basis in enumerate(aoslice):
             basis_atoms += len(range(basis[2],basis[3])) * [atom_idx]
         basis_atoms = np.array(basis_atoms)
 
         nbasis = len(basis_atoms)
-        n_spins = 1
         n_kpoints = 1
 
-        ham_kin = SpinKpointArray({(0,0): atomsembed.atoms.calc.method.mol.intor('int1e_kin')}, n_spins, n_kpoints)
-        ovlp = SpinKpointArray({(0,0): atomsembed.atoms.calc.method.mol.intor('int1e_ovlp')}, n_spins, n_kpoints)
-        vnuc = atomsembed.atoms.calc.method.mol.intor('int1e_nuc')
+        kin_mat = mf.mol.intor('int1e_kin')
+        ovlp_mat = mf.mol.intor('int1e_ovlp')
+        vnuc = mf.mol.intor('int1e_nuc')
 
         if scf_conv:
-            dm_out = atomsembed.atoms.calc.method.make_rdm1(mo_coeff, mo_occ)
-            dm = SpinKpointArray({(0,0): atomsembed.atoms.calc.method.make_rdm1(mo_coeff, mo_occ)}, n_spins, n_kpoints)
+            dm_out = mf.make_rdm1(mo_coeff, mo_occ)
         else:
             dm_out = dm_in
+
+        hcore = mf.get_hcore()
+        veff = mf.get_veff(dm=dm_out)
+
+        total_energy = mf.energy_tot(dm_out, hcore, veff) * 27.211384500
+
+        # kin/ovlp are one-electron, spin-independent operators - the
+        # same matrix for both channels. Duplicated into both (0,0) and
+        # (1,0) slots when n_spins==2, mirroring what
+        # QMCodeASIAdapter.extract_matrices already does for FHI-aims'
+        # spin-independent overlap (qmcode_adapters.py, AimsAdapter).
+        if n_spins == 2:
+            ham_kin = SpinKpointArray({(0,0): kin_mat, (1,0): kin_mat}, n_spins, n_kpoints)
+            ovlp = SpinKpointArray({(0,0): ovlp_mat, (1,0): ovlp_mat}, n_spins, n_kpoints)
+            dm = SpinKpointArray({(0,0): dm_out[0], (1,0): dm_out[1]}, n_spins, n_kpoints)
+            ham_estat_xc = SpinKpointArray({(0,0): vnuc + veff[0], (1,0): vnuc + veff[1]}, n_spins, n_kpoints)
+            ham_tot = SpinKpointArray({(0,0): hcore + veff[0], (1,0): hcore + veff[1]}, n_spins, n_kpoints)
+        else:
+            ham_kin = SpinKpointArray({(0,0): kin_mat}, n_spins, n_kpoints)
+            ovlp = SpinKpointArray({(0,0): ovlp_mat}, n_spins, n_kpoints)
             dm = SpinKpointArray({(0,0): dm_out}, n_spins, n_kpoints)
-
-        hcore = atomsembed.atoms.calc.method.get_hcore()
-        veff = atomsembed.atoms.calc.method.get_veff(dm=dm_out)
-
-        ham_estat_xc = SpinKpointArray({(0,0): vnuc + veff}, n_spins, n_kpoints)
-        ham_tot = SpinKpointArray({(0,0): hcore + veff}, n_spins, n_kpoints)
-
-        total_energy = atomsembed.atoms.calc.method.energy_tot(dm_out, hcore, veff) * 27.211384500
+            ham_estat_xc = SpinKpointArray({(0,0): vnuc + veff}, n_spins, n_kpoints)
+            ham_tot = SpinKpointArray({(0,0): hcore + veff}, n_spins, n_kpoints)
 
         # Everything above was computed on the truncated Mole (shape
         # trunc_nbasis x trunc_nbasis). Pad back up to the full
@@ -892,7 +967,7 @@ class PySCFAdapter(QMCodeAdapter):
         # the ASI-based adapters via the same truncated_mat_to_full call.
         if atomsembed.truncate:
             ham_kin = atomsembed.truncated_mat_to_full(ham_kin)
-            ham_2ee = atomsembed.truncated_mat_to_full(ham_estat)
+            ham_estat_xc = atomsembed.truncated_mat_to_full(ham_estat_xc)
             ham_tot = atomsembed.truncated_mat_to_full(ham_tot)
             ovlp = atomsembed.truncated_mat_to_full(ovlp)
             dm = atomsembed.truncated_mat_to_full(dm)

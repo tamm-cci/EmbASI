@@ -292,6 +292,36 @@ class EmbeddingBase(ABC):
 
         return population
 
+    def calc_subsys_pop_by_spin(self, overlap_matrix, density_matrix):
+        """Population of a subsystem density matrix, resolved per spin channel
+
+        As calc_subsys_pop, but without collapsing the spin axis via
+        SpinKpointArray.trace() - needed to derive a fragment's spin
+        (Nalpha - Nbeta) rather than just its total electron count.
+
+        Parameters
+        ----------
+        overlap_matrix: SpinKpointArray
+            Supersystem overlap matrix in AO basis.
+        density_matrix: SpinKpointArray
+            Subsystem density matrix in AO basis.
+
+        Returns
+        -------
+        populations: list of float, len == density_matrix.n_spins
+            Electron population of the subsystem, one entry per spin
+            channel (summed over k-points).
+        """
+
+        populations = []
+        for ispin in range(density_matrix.n_spins):
+            pop = 0.0
+            for ikpt in range(density_matrix.n_kpoints):
+                pop += op.trace(overlap_matrix[ispin, ikpt] @ density_matrix[ispin, ikpt])
+            populations.append(pop)
+
+        return populations
+
     @abstractmethod
     def run(self):
         pass
@@ -660,11 +690,23 @@ class ProjectionEmbedding(EmbeddingBase):
         update_densmat = densmat_A_LL + densmat_B_LL
 
         self.A_LL.input_fragment_nelectrons = self.A_pop
+        if self.A_spin is not None:
+            self.A_LL.input_fragment_spin = self.A_spin
         self.A_LL.run_noscf(dm_in=densmat_A_LL)
         self.B_LL.input_fragment_nelectrons = self.B_pop
+        if self.B_spin is not None:
+            self.B_LL.input_fragment_spin = self.B_spin
         self.B_LL.run_noscf(dm_in=densmat_B_LL)
 
         # TODO: @SPIN AND K-POINT LOOP
+        # NOTE: run_embasi_diag_emb_pot's own wrapper-level eigensolve
+        # (hamiltonian_eigensolv) fills alpha/beta occupation by a naive
+        # cross-channel aufbau on the total electron count alone - it
+        # does not yet target input_fragment_spin directly. For a
+        # well-converged embedded Fock this should reproduce the same
+        # split, but unlike the deterministic SPADE partition above,
+        # that is not guaranteed by construction in this freeze-and-thaw
+        # path.
 
         self.output_data_dict["FATCONVINFO"] = {}
         self.output_data_dict["FATCONVINFO"]["HIST_LEN"] = hist_len
@@ -699,6 +741,8 @@ class ProjectionEmbedding(EmbeddingBase):
             start_time = time.time()
             # RUN EMBEDDING CALCULATION
             self.A_LL.input_fragment_nelectrons = self.A_pop
+            if self.A_spin is not None:
+                self.A_LL.input_fragment_spin = self.A_spin
             if self.projection == "huzinaga-sc":
                 # Produces a converged initial density for future iterations
                 #if i==0:
@@ -720,6 +764,8 @@ class ProjectionEmbedding(EmbeddingBase):
 
             start_time = time.time()
             self.B_LL.input_fragment_nelectrons = self.B_pop
+            if self.B_spin is not None:
+                self.B_LL.input_fragment_spin = self.B_spin
             if self.projection == "huzinaga-sc":
                 #if i==0:
                 #    self.B_LL.run_emb_scf(dm_in=densmat_B_LL, emb_pot=self.vemb,
@@ -1015,8 +1061,32 @@ class ProjectionEmbedding(EmbeddingBase):
         self.output_data_dict["CHARGEDAT"]["A_POPULATION"] = self.A_pop
         self.output_data_dict["CHARGEDAT"]["B_POPULATION"] = self.B_pop
 
+        # Resolve each fragment's spin (Nalpha - Nbeta) from the same
+        # SPADE partition used for the electron count above. Only
+        # meaningful when the low-level reference ran open-shell
+        # (densmat_*_LL then carry two independent spin channels, forced
+        # by spade_localisation to net subsystem B to zero spin); left
+        # unset (None) for a closed-shell (n_spins==1) reference, so
+        # AtomsEmbed.fragment_spin falls back to whatever spin the
+        # user's own mf/mol was already built with.
+        if densmat_A_LL.n_spins == 2:
+            A_pop_alpha, A_pop_beta = self.calc_subsys_pop_by_spin(overlap, densmat_A_LL)
+            B_pop_alpha, B_pop_beta = self.calc_subsys_pop_by_spin(overlap, densmat_B_LL)
+            self.A_spin = round(A_pop_alpha - A_pop_beta)
+            self.B_spin = round(B_pop_alpha - B_pop_beta)
+
+            root_print(f" Spin (Nalpha-Nbeta) of Subsystem A: {self.A_spin}")
+            root_print(f" Spin (Nalpha-Nbeta) of Subsystem B: {self.B_spin}")
+            self.output_data_dict["CHARGEDAT"]["A_SPIN"] = self.A_spin
+            self.output_data_dict["CHARGEDAT"]["B_SPIN"] = self.B_spin
+        else:
+            self.A_spin = None
+            self.B_spin = None
+
         # Calculate the energy for subsystem A with the lower level of theory
         self.A_LL.input_fragment_nelectrons = self.A_pop
+        if self.A_spin is not None:
+            self.A_LL.input_fragment_spin = self.A_spin
         self.A_LL.run_noscf(dm_in=densmat_A_LL)
         self.subsys_A_lowlvl_totalen = self.A_LL.ev_corr_total_energy
         self.time_a_lowlevel = self.A_LL.last_run_time
@@ -1029,7 +1099,7 @@ class ProjectionEmbedding(EmbeddingBase):
             from embasi.embedding_projectors import levelshift_projector
             P_b = levelshift_projector(densmat_B_LL, overlap, self.mu_val)
         elif self.projection == "huzinaga":
-            from embasi.huzinaga_projector import huzinaga_projector
+            from embasi.embedding_projectors import huzinaga_projector
             P_b = huzinaga_projector(hamiltonian_AB_total, overlap, densmat_B_LL)
         else:
             P_b = None
@@ -1123,6 +1193,8 @@ class ProjectionEmbedding(EmbeddingBase):
             # Registered callbacks in ASI add the above components to the Fock-matrix
             # at every SCF iteration.
             self.A_HL.input_fragment_nelectrons = self.A_pop
+            if self.A_spin is not None:
+                self.A_HL.input_fragment_spin = self.A_spin
             self.vemb = self.AB_LL.hamiltonian_total - self.A_LL.hamiltonian_total
 
             self.A_HL.run_emb_scf(dm_in=densmat_A_LL, emb_pot=self.vemb,

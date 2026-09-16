@@ -92,6 +92,13 @@ class AtomsEmbed():
         self.qm_adapter = qm_code_adapter(initial_calc)
         self.initial_calc = initial_calc
 
+        # The spin (Nalpha - Nbeta) the user configured on this calculator
+        # before EmbASI ever touched it (e.g. PySCF's mol.spin). None for
+        # QM codes which set spin through a different mechanism entirely
+        # (e.g. FHI-aims' raw ASE 'spin' keyword) - see
+        # QMCodeAdapter.get_qm_input_spin.
+        self._input_spin = self.qm_adapter.get_qm_input_spin(initial_calc)
+
         if self.embed_mask is not None:
             self.reorder_atoms_from_embed_mask()
             self.atoms.info['embedding_mask'] = self.embed_mask
@@ -593,7 +600,7 @@ class AtomsEmbed():
         import time
         from embasi.roothan_hall_eigensolver_scalapack import hamiltonian_eigensolv_parallel
         from embasi.roothan_hall_eigensolver import hamiltonian_eigensolv
-        from embasi.huzinaga_projector import huzinaga_projector_abs_trunc
+        from embasi.embedding_projectors import huzinaga_projector_abs_trunc
 
         self.huzinaga_dm_in = sc_huz_dm
         self.huzinaga_ovlp_in = sc_huz_ovlp
@@ -1098,3 +1105,34 @@ class AtomsEmbed():
             return self.input_total_charge + self.free_atom_nelectrons - self.input_fragment_nelectrons
         else:
             return self.input_total_charge
+
+    @property
+    def input_spin(self):
+        """Spin (Nalpha - Nbeta) configured on the calculator before
+        EmbASI touched it. See QMCodeAdapter.get_qm_input_spin."""
+        return self._input_spin
+
+    @property
+    def input_fragment_spin(self):
+        return getattr(self, "_input_fragment_spin", None)
+
+    @input_fragment_spin.setter
+    def input_fragment_spin(self, val):
+        self._input_fragment_spin = val
+
+    @property
+    def fragment_spin(self):
+        """The spin (Nalpha - Nbeta) to use for this fragment's Mole.
+
+        Mirrors fragment_total_charge: if a fragment-specific spin has
+        been derived (e.g. from the SPADE partition, via
+        input_fragment_spin), use it. Otherwise fall back to whatever
+        spin the user originally configured on the whole-system
+        calculator (input_spin) - e.g. for AB_LL, which always runs on
+        the full, untruncated system, so its spin is exactly what the
+        user asked for.
+        """
+        if hasattr(self, "_input_fragment_spin"):
+            return self._input_fragment_spin
+        else:
+            return self.input_spin

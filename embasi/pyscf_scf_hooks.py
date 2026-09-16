@@ -10,7 +10,7 @@ diagonalises each cycle.
 """
 
 
-def embedded_get_fock_factory(mf, fock_func, mat_in=None, gamma_B=None, S=None):
+def embedded_get_fock_factory(mf, fock_func, mat_in=None, gamma_B=None, S=None, n_spins=1):
     """Builds a get_fock replacement that injects embedding physics
 
     PySCF's SCF.get_fock is called exactly once per SCF cycle, right
@@ -39,9 +39,17 @@ def embedded_get_fock_factory(mf, fock_func, mat_in=None, gamma_B=None, S=None):
     gamma_B : np.ndarray or None
         Environment (subsystem B) density matrix, for the self-consistent
         Huzinaga projector. None to skip the projector term entirely.
+        Shape (2, nao, nao) for n_spins=2 (UHF/UKS/ROHF/ROKS), else
+        (nao, nao).
     S : np.ndarray or None
         Supersystem overlap matrix. Required (non-None) whenever gamma_B
-        is given.
+        is given. Always plain (nao, nao) - overlap is spin-independent,
+        and numpy's batched @ broadcasts it against a (2, nao, nao)
+        gamma_B/hamiltonian without needing an explicit spin axis here.
+    n_spins : int
+        Number of spin channels mat_in/gamma_B carry (1 or 2) - selects
+        the -0.5 (restricted) vs -1.0 (unrestricted) Huzinaga prefactor.
+        Defaults to 1.
 
     Returns
     -------
@@ -64,8 +72,25 @@ def embedded_get_fock_factory(mf, fock_func, mat_in=None, gamma_B=None, S=None):
         if mat_in is not None:
             vhf_aug = vhf_aug + mat_in
         if gamma_B is not None:
+            import numpy as np
+
             f_emb = h1e + vhf_aug
-            vhf_aug = vhf_aug + huzinaga_projector(f_emb, S, gamma_B, n_spins=1)
+            if n_spins == 2:
+                # huzinaga_projector uses plain .T, which for a bare
+                # ndarray transposes ALL axes, not just the trailing
+                # matrix ones - fine for the 2D (nao, nao) case, but
+                # wrong on a stacked (2, nao, nao) array (it would swap
+                # the spin axis into a matrix axis instead of leaving it
+                # alone). Call it once per spin channel on proper 2D
+                # slices instead, exactly the "bare per-spin/k-point
+                # matrix" usage its docstring anticipates.
+                proj = np.stack([
+                    huzinaga_projector(f_emb[s], S, gamma_B[s], n_spins=n_spins)
+                    for s in range(n_spins)
+                ])
+            else:
+                proj = huzinaga_projector(f_emb, S, gamma_B, n_spins=n_spins)
+            vhf_aug = vhf_aug + proj
 
         return fock_func(h1e=h1e, s1e=s1e, vhf=vhf_aug, dm=dm, cycle=cycle,
                          diis=diis, diis_start_cycle=diis_start_cycle,
