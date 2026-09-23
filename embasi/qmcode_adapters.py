@@ -839,15 +839,15 @@ class PySCFAdapter(QMCodeAdapter):
         # Both the static embedding potential (level-shift, and the
         # 'emb_pot' term of Huzinaga projection) and the dynamic Huzinaga
         # projector (which depends on the current, per-iteration Fock, not
-        # just a fixed matrix) are injected via a single get_fock override,
-        # rather than patching get_hcore. get_fock is called exactly once
-        # per SCF cycle, right before diagonalisation, so this needs no
-        # replication of PySCF's own SCF loop - damping/DIIS/level-shift
-        # are all still handled by delegating to the original get_fock.
-        # get_hcore itself is deliberately left untouched: energy_elec/
-        # energy_tot never call get_fock (they take h1e/vhf directly, or
-        # fall back to get_hcore/get_veff), so leaving get_hcore bare keeps
-        # the energy bookkeeping below exactly as before, and CCSD/MP2
+        # just a fixed matrix) are injected via a single get_fock override.
+        # get_fock is called exactly once per SCF cycle, right before
+        # diagonalisation, so this needs no replication of PySCF's own SCF
+        # loop - damping/DIIS/level-shift are all still handled by
+        # delegating to the original get_fock. get_hcore is deliberately
+        # left untouched: energy_elec/energy_tot never call get_fock (they
+        # take h1e/vhf directly, or fall back to get_hcore/get_veff), so the
+        # energy and Hamiltonian extracted below (energy_tot(dm, hcore, veff),
+        # hcore + veff) are built on the bare core Hamiltonian. CCSD/MP2
         # rebuild their reference Fock via mf.get_fock(vhf=vhf, dm=dm)
         # (see pyscf.cc.ccsd._ChemistsERIs._common_init_), so this is also
         # the call the post-SCF correction actually needs patched.

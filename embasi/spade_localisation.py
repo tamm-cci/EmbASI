@@ -54,17 +54,16 @@ def spade_localisation(atomsembed, hamiltonian, overlap, parallel=False,
     nelecs = atomsembed.free_atom_nelectrons - atomsembed.input_total_charge
 
     # For an open-shell (n_spins==2) reference, the supersystem spin
-    # (Nalpha - Nbeta) is taken from the spin the converged calculation was
-    # actually run at (atomsembed.fragment_spin == the user's mol.spin for
-    # AB_LL), and it is passed INTO the eigensolve so each channel is filled
-    # with its own electron count. It must drive the occupations, not only the
-    # beta-cut offset below: a cross-channel aufbau on the total count alone
-    # returns the singlet's Nalpha == Nbeta filling for any state whose
-    # occupied levels in one channel lie above empty levels in the other
-    # (e.g. the pi->pi* triplet of a nitrile: alpha pi* at +0.20 Ha occupied,
-    # beta pi at -0.24 Ha empty). The occupied counts and the offset would then
-    # disagree, pushing -S onto subsystem B and dropping the alpha SOMO from
-    # the partitioned density altogether.
+    # (Nalpha - Nbeta) is the spin the converged calculation was run at
+    # (atomsembed.fragment_spin == the user's mol.spin for AB_LL). It is
+    # passed into the eigensolve so each channel is filled with its own
+    # electron count, and the same value sets the beta-channel SPADE cut
+    # below, so subsystem A carries all of the spin and subsystem B none.
+    # Filling each channel separately also represents states whose occupied
+    # levels in one channel lie above empty levels in the other (e.g. the
+    # pi->pi* triplet of a nitrile: alpha pi* at +0.20 Ha occupied, beta pi
+    # at -0.24 Ha empty), which a cross-channel aufbau on the total count
+    # would fill as the singlet.
     target_spin = atomsembed.fragment_spin if atomsembed.n_spins == 2 else None
     if parallel:
         evals, evecs, evecs_orthog, occ_mat = hamiltonian_eigensolv_parallel(hamiltonian, \
@@ -148,9 +147,10 @@ def spade_localisation(atomsembed, hamiltonian, overlap, parallel=False,
         n_occ_beta_total = np.count_nonzero(occ_mat[1,0])
         supersystem_spin = n_occ_alpha_total - n_occ_beta_total
         if target_spin is None:
-            # The QM adapter does not expose the spin it ran at (e.g. FHI-aims:
-            # get_qm_input_spin has no override yet), so the occupations came
-            # from the cross-channel aufbau. Best effort; see fill_occupations.
+            # The QM adapter does not expose the spin it ran at (e.g. FHI-aims,
+            # whose adapter does not override get_qm_input_spin), so the
+            # occupations come from the cross-channel aufbau. Best effort; see
+            # fill_occupations.
             root_print('WARNING: supersystem spin unknown to the QM adapter; '
                        'using the cross-channel aufbau split, which cannot '
                        'represent excited-configuration open shells.')
