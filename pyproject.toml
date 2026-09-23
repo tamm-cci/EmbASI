@@ -18,9 +18,10 @@ classifiers = [
             "Operating System :: OS Independent",
 ]
 dependencies = [
-             "ase==3.24.0",
-	     "asi4py>=1.4.5",
-	     "scalapack4py>=0.2.0",
+             "mpi4py",
+	     "scalapack4py @ git+https://gitlab.com/pvst/scalapack4py.git@v1.0_release",
+             "asi4py @ git+https://gitlab.com/pvst/asi.git@doc_corrections#egg=pkg&subdirectory=pyasi",
+             "ase>=3.24.0",
 	     "pyscf>=2.8.0",
 ]
 
