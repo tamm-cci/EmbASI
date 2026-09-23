@@ -95,11 +95,12 @@ def overlap_illcondition_check_parallel(overlap, thresh, inv=True, return_mask=F
     else:
         return ovlp_filtered, n_bad
 
-def hamiltonian_eigensolv_parallel(hamiltonian, overlap, nelec, nspins=1, nkpts=1, return_orthog=False, basis_illcond_thresh=1e-5):
+def hamiltonian_eigensolv_parallel(hamiltonian, overlap, nelec, nspins=1, nkpts=1, return_orthog=False, basis_illcond_thresh=1e-5, spin=None):
 
     from embasi.parallel_utils import root_print
     from scalapack4py.npscal.math_utils.npscal2npscal import eig
     from .ks_array import SpinKpointArray
+    from .roothan_hall_eigensolver import fill_occupations
 
     n_basis = overlap[0,0].gl_m
 
@@ -132,26 +133,7 @@ def hamiltonian_eigensolv_parallel(hamiltonian, overlap, nelec, nspins=1, nkpts=
     # Only deal with spins for now - kpoints will need some way
     # to communicate k-indexed evals between nodes and also intelligently
     # compare eigenvalues
-    occ_mat = {}
-    if nspins > 1:
-        remaining_electrons = int(round(nelec))
-        alpha_nelecs = 0
-        beta_nelecs = 0
-        occ_mat[(0,0)] = np.zeros(np.size(evals[(0,0)]))
-        occ_mat[(1,0)] = np.zeros(np.size(evals[(0,0)]))
-
-        while remaining_electrons > 0:
-            if evals[(0,0)][alpha_nelecs] < evals[(1,0)][beta_nelecs]:
-                occ_mat[(0,0)][alpha_nelecs] = 1.0
-                alpha_nelecs += 1
-            else:
-                occ_mat[(1,0)][beta_nelecs] = 1.0
-                beta_nelecs += 1
-
-            remaining_electrons += -1
-    else:
-        occ_mat[(0,0)] = np.zeros(np.size(evals[(0,0)]))
-        occ_mat[(0,0)][:round(nelec/2)] = 2.0
+    occ_mat = fill_occupations(evals, nelec, nspins, spin)
 
     evecs = SpinKpointArray(evecs, nspins, nkpts)
     evals = SpinKpointArray(evals, nspins, nkpts)

@@ -52,6 +52,20 @@ def spade_localisation(atomsembed, hamiltonian, overlap, parallel=False,
     root_print('Starting SPADE localisation...')
 
     nelecs = atomsembed.free_atom_nelectrons - atomsembed.input_total_charge
+
+    # For an open-shell (n_spins==2) reference, the supersystem spin
+    # (Nalpha - Nbeta) is taken from the spin the converged calculation was
+    # actually run at (atomsembed.fragment_spin == the user's mol.spin for
+    # AB_LL), and it is passed INTO the eigensolve so each channel is filled
+    # with its own electron count. It must drive the occupations, not only the
+    # beta-cut offset below: a cross-channel aufbau on the total count alone
+    # returns the singlet's Nalpha == Nbeta filling for any state whose
+    # occupied levels in one channel lie above empty levels in the other
+    # (e.g. the pi->pi* triplet of a nitrile: alpha pi* at +0.20 Ha occupied,
+    # beta pi at -0.24 Ha empty). The occupied counts and the offset would then
+    # disagree, pushing -S onto subsystem B and dropping the alpha SOMO from
+    # the partitioned density altogether.
+    target_spin = atomsembed.fragment_spin if atomsembed.n_spins == 2 else None
     if parallel:
         evals, evecs, evecs_orthog, occ_mat = hamiltonian_eigensolv_parallel(hamiltonian, \
                                                                              overlap, \
@@ -59,7 +73,8 @@ def spade_localisation(atomsembed, hamiltonian, overlap, parallel=False,
                                                                              nspins=atomsembed.n_spins, \
                                                                              nkpts=atomsembed.n_kpoints, \
                                                                              basis_illcond_thresh=basis_illcond_thresh,
-                                                                             return_orthog=True)
+                                                                             return_orthog=True,
+                                                                             spin=target_spin)
     else:
         evals, evecs, evecs_orthog, occ_mat = hamiltonian_eigensolv(hamiltonian, \
                                                       overlap, \
@@ -67,7 +82,8 @@ def spade_localisation(atomsembed, hamiltonian, overlap, parallel=False,
                                                       nspins=atomsembed.n_spins,
                                                       nkpts=atomsembed.n_kpoints,
                                                       basis_illcond_thresh=basis_illcond_thresh,
-                                                      return_orthog=True)
+                                                      return_orthog=True,
+                                                      spin=target_spin)
 
 
     mask_val = []
@@ -126,19 +142,25 @@ def spade_localisation(atomsembed, hamiltonian, overlap, parallel=False,
         root_print(f'SPADE CORE localised subsystem A charge: {(overlap @ density_matrix_subsys_a).trace()}')
         root_print(f'SPADE CORE localised subsystem B charge: {(overlap @ density_matrix_subsys_b).trace()}')
 
-    # For an open-shell (n_spins==2) reference, the whole supersystem's
-    # spin (Nalpha - Nbeta) is read off the same occ_mat already used
-    # above for max_occ_state - it's exactly the alpha/beta electron
-    # split hamiltonian_eigensolv's own aufbau derived from the
-    # converged reference Fock. This is the target spin that subsystem
-    # A should carry entirely, so subsystem B nets to zero.
     supersystem_spin = None
     if atomsembed.n_spins == 2:
         n_occ_alpha_total = np.count_nonzero(occ_mat[0,0])
         n_occ_beta_total = np.count_nonzero(occ_mat[1,0])
         supersystem_spin = n_occ_alpha_total - n_occ_beta_total
+        if target_spin is None:
+            # The QM adapter does not expose the spin it ran at (e.g. FHI-aims:
+            # get_qm_input_spin has no override yet), so the occupations came
+            # from the cross-channel aufbau. Best effort; see fill_occupations.
+            root_print('WARNING: supersystem spin unknown to the QM adapter; '
+                       'using the cross-channel aufbau split, which cannot '
+                       'represent excited-configuration open shells.')
+        elif supersystem_spin != int(round(target_spin)):
+            raise Exception(
+                f"SPADE occupations give Nalpha-Nbeta={supersystem_spin} but the "
+                f"calculation ran at spin {target_spin}")
         root_print(f'Supersystem spin (Nalpha-Nbeta), to be carried entirely '
-                   f'by subsystem A: {supersystem_spin}')
+                   f'by subsystem A: {supersystem_spin} '
+                   f'(Nalpha={n_occ_alpha_total}, Nbeta={n_occ_beta_total})')
 
     max_sval_change_idx_alpha_by_kpt = {}
 

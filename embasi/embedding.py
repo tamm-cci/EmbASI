@@ -699,14 +699,11 @@ class ProjectionEmbedding(EmbeddingBase):
         self.B_LL.run_noscf(dm_in=densmat_B_LL)
 
         # TODO: @SPIN AND K-POINT LOOP
-        # NOTE: run_embasi_diag_emb_pot's own wrapper-level eigensolve
-        # (hamiltonian_eigensolv) fills alpha/beta occupation by a naive
-        # cross-channel aufbau on the total electron count alone - it
-        # does not yet target input_fragment_spin directly. For a
-        # well-converged embedded Fock this should reproduce the same
-        # split, but unlike the deterministic SPADE partition above,
-        # that is not guaranteed by construction in this freeze-and-thaw
-        # path.
+        # NOTE: run_embasi_diag_emb_pot's own wrapper-level eigensolve fills
+        # alpha/beta per channel from input_fragment_spin (set above from the
+        # SPADE partition), so it targets the same split by construction. Only
+        # a QM adapter that cannot report its spin (e.g. FHI-aims) falls back
+        # to the cross-channel aufbau on the total electron count.
 
         self.output_data_dict["FATCONVINFO"] = {}
         self.output_data_dict["FATCONVINFO"]["HIST_LEN"] = hist_len

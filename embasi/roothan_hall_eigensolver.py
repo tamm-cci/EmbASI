@@ -81,7 +81,7 @@ def overlap_illcondition_check(overlap, thresh, inv=True, return_mask=False):
     else:
         return ovlp_filtered, n_bad
 
-def hamiltonian_eigensolv(hamiltonian, overlap, nelec, nspins=1, nkpts=1, basis_illcond_thresh=1e-5, return_orthog=False):
+def hamiltonian_eigensolv(hamiltonian, overlap, nelec, nspins=1, nkpts=1, basis_illcond_thresh=1e-5, return_orthog=False, spin=None):
 
     from embasi.parallel_utils import root_print
     from .ks_array import SpinKpointArray
@@ -122,26 +122,7 @@ def hamiltonian_eigensolv(hamiltonian, overlap, nelec, nspins=1, nkpts=1, basis_
     # Only deal with spins for now - kpoints will need some way
     # to communicate k-indexed evals between nodes and also intelligently
     # compare eigenvalues
-    occ_mat = {}
-    if nspins > 1:
-        remaining_electrons = round(nelec)
-        alpha_nelecs = 0
-        beta_nelecs = 0
-        occ_mat[(0,0)] = np.zeros(np.size(evals[(0,0)]))
-        occ_mat[(1,0)] = np.zeros(np.size(evals[(0,0)]))
-
-        while remaining_electrons > 0:
-            if evals[(0,0)][alpha_nelecs] < evals[(1,0)][beta_nelecs]:
-                occ_mat[(0,0)][alpha_nelecs] = 1.0
-                alpha_nelecs += 1
-            else:
-                occ_mat[(1,0)][beta_nelecs] = 1.0
-                beta_nelecs += 1
-
-            remaining_electrons += -1
-    else:
-        occ_mat[(0,0)] = np.zeros(np.size(evals[(0,0)]))
-        occ_mat[(0,0)][:round(nelec/2)] = 2.0
+    occ_mat = fill_occupations(evals, nelec, nspins, spin)
 
     evecs = SpinKpointArray(evecs, nspins, nkpts)
     evals = SpinKpointArray(evals, nspins, nkpts)
@@ -152,3 +133,48 @@ def hamiltonian_eigensolv(hamiltonian, overlap, nelec, nspins=1, nkpts=1, basis_
         return evals, evecs, evecs_orthog, occ_mat
     else:
         return evals, evecs, occ_mat
+
+
+def fill_occupations(evals, nelec, nspins, spin=None):
+    """Occupation matrix for the (sorted) eigenvalues of a re-diagonalised Fock.
+
+    With ``spin`` (Nalpha - Nbeta) known, each channel is filled on its own:
+    Nalpha = (N + S)/2 and Nbeta = (N - S)/2 lowest states - the fixed-spin
+    aufbau the SCF itself used, so a converged Fock reproduces the SCF's
+    occupations exactly.
+
+    Without it, falls back to a cross-channel aufbau on the total count alone.
+    That cannot represent a state whose occupied levels in one channel lie
+    above empty levels in the other - e.g. any excited-configuration triplet
+    of a closed-shell molecule, where it silently returns the singlet's
+    Nalpha == Nbeta filling. Pass ``spin`` whenever the caller knows it.
+    """
+    occ_mat = {}
+    n_states = np.size(evals[(0,0)])
+    if nspins > 1:
+        n_total = int(round(nelec))
+        occ_mat[(0,0)] = np.zeros(n_states)
+        occ_mat[(1,0)] = np.zeros(n_states)
+        if spin is not None:
+            s = int(round(spin))
+            if abs(s) > n_total or (n_total - s) % 2 != 0:
+                raise ValueError(f"spin {s} is incompatible with {n_total} electrons")
+            n_alpha, n_beta = (n_total + s) // 2, (n_total - s) // 2
+            if max(n_alpha, n_beta) > n_states:
+                raise ValueError(f"({n_alpha}, {n_beta}) electrons do not fit {n_states} states")
+            occ_mat[(0,0)][:n_alpha] = 1.0
+            occ_mat[(1,0)][:n_beta] = 1.0
+        else:
+            alpha_nelecs = 0
+            beta_nelecs = 0
+            for _ in range(n_total):
+                if evals[(0,0)][alpha_nelecs] < evals[(1,0)][beta_nelecs]:
+                    occ_mat[(0,0)][alpha_nelecs] = 1.0
+                    alpha_nelecs += 1
+                else:
+                    occ_mat[(1,0)][beta_nelecs] = 1.0
+                    beta_nelecs += 1
+    else:
+        occ_mat[(0,0)] = np.zeros(n_states)
+        occ_mat[(0,0)][:round(nelec/2)] = 2.0
+    return occ_mat

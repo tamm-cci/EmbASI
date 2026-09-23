@@ -626,14 +626,16 @@ class AtomsEmbed():
                                                                    nspins=self.n_spins, \
                                                                    nkpts=self.n_kpoints, \
                                                                    return_orthog=False, \
-                                                                   basis_illcond_thresh=1e-5)
+                                                                   basis_illcond_thresh=1e-5, \
+                                                                   spin=self._occupation_spin())
         else:
             evals, evecs, occ_mat = hamiltonian_eigensolv(emb_ham, \
                                                           ovlp, \
                                                           nelecs, \
                                                           nspins=self.n_spins, \
                                                           nkpts=self.n_kpoints, \
-                                                          basis_illcond_thresh=1e-5)
+                                                          basis_illcond_thresh=1e-5, \
+                                                          spin=self._occupation_spin())
 
         dm_out = {}
         for ispin in range(self.n_spins):
@@ -837,14 +839,16 @@ class AtomsEmbed():
                                                                    nspins=self.n_spins, \
                                                                    nkpts=self.n_kpoints, \
                                                                    return_orthog=False, \
-                                                                   basis_illcond_thresh=1e-5)
+                                                                   basis_illcond_thresh=1e-5, \
+                                                                   spin=self._occupation_spin())
         else:
             evals, evecs, occ_mat = hamiltonian_eigensolv(post_calc_ham, \
                                                           ovlp, \
                                                           nelecs, \
                                                           nspins=self.n_spins, \
                                                           nkpts=self.n_kpoints, \
-                                                          basis_illcond_thresh=1e-5)
+                                                          basis_illcond_thresh=1e-5, \
+                                                          spin=self._occupation_spin())
 
         ev_sum = 0.
         for spin in range(evals.n_spins):
@@ -1119,6 +1123,15 @@ class AtomsEmbed():
     @input_fragment_spin.setter
     def input_fragment_spin(self, val):
         self._input_fragment_spin = val
+
+    def _occupation_spin(self):
+        """Spin (Nalpha - Nbeta) to fill a re-diagonalised Fock with, or None.
+
+        None for a closed-shell (n_spins == 1) calculation, or when the spin is
+        unknown (e.g. FHI-aims), in which case hamiltonian_eigensolv falls back
+        to its cross-channel aufbau. See roothan_hall_eigensolver.fill_occupations.
+        """
+        return self.fragment_spin if self.n_spins > 1 else None
 
     @property
     def fragment_spin(self):
