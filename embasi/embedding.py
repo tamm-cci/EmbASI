@@ -451,6 +451,28 @@ class ProjectionEmbedding(EmbeddingBase):
         a Mulliken charge metrix. Turned off if None. Defaults to None.
     spade_ncores: int
         Turns on separate core-valence localisation
+    localisation: str
+        'SPADE' (default), 'UNO-SPADE' or 'qmcode'. 'UNO-SPADE' applies SPADE
+        to the doubly occupied unrestricted natural orbitals only and assigns
+        every fractional/singly occupied natural orbital to subsystem A, so the
+        environment is one closed-shell orbital set shared by both spins (see
+        embasi.uno_spade_localisation). For a closed-shell reference it is plain
+        SPADE. With 'UNO-SPADE', a_nspade_mos counts the doubly occupied
+        orbitals assigned to A.
+    uno_occ_window: tuple of float
+        'UNO-SPADE' only: natural-orbital occupations above the upper bound are
+        treated as doubly occupied. Defaults to (0.02, 1.98).
+    uno_n_env: int or None
+        'UNO-SPADE' only: fix the number of doubly occupied natural orbitals
+        assigned to the environment, so B has the same size at every geometry
+        of a scan (subsystem A takes the rest). Cannot be combined with
+        a_nspade_mos. Defaults to None (SPADE's singular-value gap).
+    scf_stability: bool
+        PySCF only: after the supersystem (AB_LL) SCF converges, run internal
+        stability analysis and follow any instability to a stable solution
+        (see embasi.pyscf_stability). Removes the dependence on the starting
+        guess where a saddle point (e.g. a closed-shell solution of a stretched
+        bond) coexists with a lower broken-symmetry minimum. Defaults to False.
 
     References
     ----------
@@ -465,6 +487,7 @@ class ProjectionEmbedding(EmbeddingBase):
                  truncate_basis_thresh=None, truncate_basis_atoms=None,
                  localisation='SPADE', spade_manual_state=0, spade_ncores=0,
                  projection="level-shift", freeze_and_thaw=False, mu_val=1.e+06,
+                 uno_occ_window=(0.02, 1.98), uno_n_env=None, scf_stability=False,
                  parallel=False, gc=True, run_dir="./EmbASI_calc",
                  basis_illcond_thresh=1e-5, scalapack_block_size=16, fat_mixing=0.2,
                  ignore_npscal_warnings=True):
@@ -577,14 +600,19 @@ class ProjectionEmbedding(EmbeddingBase):
 
         # Set keywords needed for localisation
         self.localisation = localisation
+        self.uno_occ_window = uno_occ_window
+        self.uno_n_env = uno_n_env
         if self.localisation == "SPADE":
             root_print("Localisation method: SPADE")
+        elif self.localisation == "UNO-SPADE":
+            root_print("Localisation method: UNO-SPADE (SPADE on the doubly occupied "
+                       "unrestricted natural orbitals; closed-shell environment)")
         elif self.localisation == "qmcode":
             root_print("Localisation method: QM Code")
             low_level_calculator_1 = \
                 self.qm_adapter_ll.set_qm_localise(low_level_calculator_1)
         else:
-            raise Exception("Invalid entry for localisation: use 'SPADE' or 'qmcode' ")
+            raise Exception("Invalid entry for localisation: use 'SPADE', 'UNO-SPADE' or 'qmcode' ")
 
 
         # Determines the BLACS context and descriptors used for the communication
@@ -613,6 +641,8 @@ class ProjectionEmbedding(EmbeddingBase):
                        ctxt_tag=supersys_ctxt_tag,
                        descr_tag=supersys_descr_tag)
         self.AB_LL.input_total_charge = total_charge
+        # Follow internal instabilities of the supersystem SCF (PySCF adapter only).
+        self.AB_LL.scf_stability = scf_stability
 
         self.set_layer(atoms, "A_LL", low_level_calculator_1,
                        embed_mask, ghosts=0, no_scf=False,
@@ -979,17 +1009,24 @@ class ProjectionEmbedding(EmbeddingBase):
         # TODO: @SPIN AND K-POINT LOOP
         basis_info = self.set_basis_info(self.AB_LL)
         self.AB_LL.basis_info = basis_info
-        if self.localisation == "SPADE" and (not skip_scf_and_loc):
+        if self.localisation in ("SPADE", "UNO-SPADE") and (not skip_scf_and_loc):
             from embasi.spade_localisation import spade_localisation
+            from embasi.uno_spade_localisation import uno_spade_localisation
 
             start = time.time()
-            results = spade_localisation(self.AB_LL, hamiltonian_AB_total, overlap,
-                                         parallel=self.parallel,
-                                         spade_ncores=self.spade_ncores,
-                                         spade_manual_state=self.spade_manual_state,
-                                         basis_illcond_thresh=self.basis_illcond_thresh,
-                                         return_mo_coeffs=True,
-                                         a_nspade_mos=a_nspade_mos)
+            extra = {}
+            if self.localisation == "UNO-SPADE":
+                localise = uno_spade_localisation
+                extra = {"occ_window": self.uno_occ_window, "n_env": self.uno_n_env}
+            else:
+                localise = spade_localisation
+            results = localise(self.AB_LL, hamiltonian_AB_total, overlap,
+                               parallel=self.parallel,
+                               spade_ncores=self.spade_ncores,
+                               spade_manual_state=self.spade_manual_state,
+                               basis_illcond_thresh=self.basis_illcond_thresh,
+                               return_mo_coeffs=True,
+                               a_nspade_mos=a_nspade_mos, **extra)
             densmat_A_LL = results[0]
             densmat_B_LL = results[1]
             self.mo_coeffs_A_LL = results[2]

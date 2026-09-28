@@ -894,6 +894,12 @@ class PySCFAdapter(QMCodeAdapter):
                                                     gamma_B=gamma_B, S=S, n_spins=n_spins)
 
         total_energy = mf.kernel(dm0=dm_in)
+        # Follow internal instabilities to a stable solution (supersystem layer only; the
+        # fragment layers run with an embedding potential patched into get_fock).
+        if getattr(atomsembed, "scf_stability", False) and not needs_fock_override:
+            from embasi.pyscf_stability import follow_internal_instabilities
+            follow_internal_instabilities(mf)
+            total_energy = mf.e_tot
 
         # Post-SCF (correlated wavefunction) correction, if requested. This
         # must run here, before the get_fock override below is undone -
