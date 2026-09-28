@@ -113,7 +113,7 @@ def spade_localisation(atomsembed, hamiltonian, overlap, parallel=False,
                 if parallel:
                     u, svals, v = svd(evecs_occ_a_orthog)
                 else:
-                    u, svals, v = np.linalg.svd(evecs_occ_a_orthog, full_matrices=True, dtype=np.float64)
+                    u, svals, v = np.linalg.svd(evecs_occ_a_orthog, full_matrices=True)
 
                 svals_diff = np.ediff1d(svals**2.0)
                 max_sval_change_idx = np.argmax(np.abs(svals_diff)) + 1

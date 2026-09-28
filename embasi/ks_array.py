@@ -263,13 +263,10 @@ class SpinKpointArray:
         new_instance.ndim = self.ndim
         new_instance.transpose = self.transpose.copy()
         new_instance = new_instance.N
-        try:
-            new_instance.data = copy.deepcopy(self.data)
-        except:
-            new_instance.data = {}
-            for isp in range(self.n_spins):
-                for ikpt in range(self.n_kpoints):
-                    new_instance.data[isp,ikpt] = self.data[isp,ikpt].copy()
+        # Per-entry .copy(): a data copy for both ndarray and NPScal entries
+        # (deepcopy cannot copy an NPScal, whose grid holds ctypes pointers).
+        new_instance.data = {key: (value.copy() if hasattr(value, "copy") else copy.deepcopy(value))
+                             for key, value in self.data.items()}
 
         return new_instance
 

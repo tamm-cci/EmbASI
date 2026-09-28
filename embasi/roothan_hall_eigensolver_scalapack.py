@@ -30,11 +30,10 @@ def calculate_occ_mat(eigenvalues, nelec):
 
 def calculate_densmat(eigenvectors, occ_mat):
 
-    import copy
-
-    occ_evecs = copy.copy(eigenvectors)
-    for idx in range(np.size(occ_mat)):
-        occ_evecs[:,idx] = occ_evecs[:,idx] * np.sqrt(occ_mat[idx])
+    # Scale each eigenvector column by sqrt(occupation): a local, broadcast
+    # multiply for both NPScal and ndarray (no per-column communication),
+    # which also leaves the caller's eigenvectors untouched.
+    occ_evecs = eigenvectors * np.sqrt(np.asarray(occ_mat))[np.newaxis, :]
 
     return occ_evecs @ occ_evecs.T
 
@@ -42,26 +41,26 @@ def overlap_illcondition_check_parallel(overlap, thresh, inv=True, return_mask=F
 
     from scipy.linalg import eig_banded, eigh
     from embasi.parallel_utils import root_print
-    from scalapack4py.npscal.math_utils.npscal2npscal import eig
+    from scalapack4py.npscal.math_utils.npscal2npscal import eigh
 
     n_basis = overlap.gl_m
-    ovlp_evals, ovlp_evecs = eig(overlap, vl=thresh, vu=100000)
+    # Only the eigenpairs above the threshold: eigh returns exactly those
+    # (m values, n x m vectors), so everything it returns is kept and the
+    # rest of the basis is the discarded, near-linearly-dependent part.
+    ovlp_evals, ovlp_evecs = eigh(overlap, vl=thresh, vu=100000)
+    if ovlp_evecs is None:
+        raise ValueError(f"overlap has no eigenvalues above the threshold {thresh}")
 
-    # Count non-singular values
-    n_bad = (ovlp_evals < thresh).sum()
-    n_good = overlap.gl_m - n_bad
-    good_val_mask = (ovlp_evals > thresh)
+    n_bad = n_basis - len(ovlp_evals)
+    n_good = len(ovlp_evals)
+    good_val_mask = np.ones(n_good, dtype=bool)   # over the returned eigenvalues
     if n_bad > 0:
-        # Transform overlap matrix
-        #
-        # ovlp_evecs[:, good_val_mask] goes through select_slice, which picks
-        # its own independently-"optimal" block size for the (n_good-wide)
-        # sub-matrix -- there is no implicit mechanism reconciling that back
-        # to overlap's. The explicit rechunk() below at the end of this
-        # function is what actually guarantees the returned xform_mat is
-        # consistent with overlap.
-        ovlp_filtered = ovlp_evecs[:, good_val_mask]
-        evals_filtered = ovlp_evals[good_val_mask]
+        # Transform overlap matrix (canonical orthogonalisation onto the
+        # n_good retained eigenvectors). The explicit rechunk() at the end of
+        # this function guarantees the returned xform_mat is consistent with
+        # overlap's distribution.
+        ovlp_filtered = ovlp_evecs
+        evals_filtered = ovlp_evals
 
         if inv:
             evals_diag = op.diag(evals_filtered**(-0.5), ctxt_tag=overlap.ctxt_tag, descr_tag="rank_reduced_eval", lib=overlap.sl,
@@ -98,7 +97,7 @@ def overlap_illcondition_check_parallel(overlap, thresh, inv=True, return_mask=F
 def hamiltonian_eigensolv_parallel(hamiltonian, overlap, nelec, nspins=1, nkpts=1, return_orthog=False, basis_illcond_thresh=1e-5, spin=None):
 
     from embasi.parallel_utils import root_print
-    from scalapack4py.npscal.math_utils.npscal2npscal import eig
+    from scalapack4py.npscal.math_utils.npscal2npscal import eigh
     from .ks_array import SpinKpointArray
     from .roothan_hall_eigensolver import fill_occupations
 
@@ -114,7 +113,7 @@ def hamiltonian_eigensolv_parallel(hamiltonian, overlap, nelec, nspins=1, nkpts=
             xform_mat, n_bad = overlap_illcondition_check_parallel(overlap[ispin,ikpt], basis_illcond_thresh)
             n_good = n_basis - n_bad
 
-            evals[(ispin,ikpt)], evecs[(ispin,ikpt)] = eig(xform_hamiltonian(hamiltonian[ispin,ikpt], xform_mat))
+            evals[(ispin,ikpt)], evecs[(ispin,ikpt)] = eigh(xform_hamiltonian(hamiltonian[ispin,ikpt], xform_mat))
 
             if (not return_orthog):
                 idx = np.argsort(evals[(ispin,ikpt)])

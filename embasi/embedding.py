@@ -317,7 +317,8 @@ class EmbeddingBase(ABC):
         for ispin in range(density_matrix.n_spins):
             pop = 0.0
             for ikpt in range(density_matrix.n_kpoints):
-                pop += op.trace(overlap_matrix[ispin, ikpt] @ density_matrix[ispin, ikpt])
+                # Tr(S D) without forming S @ D: O(n^2) instead of O(n^3).
+                pop += np.einsum("ij,ji->", overlap_matrix[ispin, ikpt], density_matrix[ispin, ikpt])
             populations.append(pop)
 
         return populations
