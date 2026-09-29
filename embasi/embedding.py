@@ -1412,7 +1412,7 @@ class FrozenDensityEmbedding(EmbeddingBase):
         low_level_calculator = \
             self.qm_adapter_ll.set_embasi_calculation_type(low_level_calculator,
                                                              "frozendensity-readandwrite")
-        initial_calculator = \
+        high_level_calculator = \
             self.qm_adapter_ll.set_embasi_calculation_type(high_level_calculator,
                                                              "frozendensity-readandwrite")
 
@@ -1469,7 +1469,7 @@ class FrozenDensityEmbedding(EmbeddingBase):
             print("SCF cycle: ", n_cycle)
 
             if n_cycle == 1:
-                self.MU0.run()
+                self.MU0.run_frozen_density()
                 try:
                     tmp = os.path.join(self.run_dir, "F2A1")
                     os.mkdir(tmp)
@@ -1485,12 +1485,12 @@ class FrozenDensityEmbedding(EmbeddingBase):
                 shutil.copy(MU0_opot, F1A2_opot)
 
             # Cluster Calculation
-            self.F1A2.run()
+            self.F1A2.run_frozen_density()
             shutil.move(F1A2_nden, F2A1_oden)
             shutil.move(F1A2_npot, F2A1_opot)
 
             # Environment Calculation
-            self.F2A1.run()
+            self.F2A1.run_frozen_density()
             shutil.move(F2A1_nden,F1A2_oden)
             shutil.move(F2A1_npot, F1A2_opot)
 

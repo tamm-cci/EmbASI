@@ -536,6 +536,17 @@ class AtomsEmbed():
 
         self.density_matrix_in = None
 
+    def run_frozen_density(self):
+        """A wrapper function for executing a frozen density embedding
+        calculation, with the calculator exactly as configured for the layer
+        (the frozen density read/write keywords are set at layer creation)
+        """
+        from copy import deepcopy
+
+        self.runtime_calc = deepcopy(self.initial_calc)
+
+        self.run()
+
     def run_noscf(self, dm_in=None, close_calc=True):
         """A wrapper function for executing a total energy evaluation
         """
