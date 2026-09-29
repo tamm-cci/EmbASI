@@ -745,6 +745,7 @@ class AtomsEmbed():
         self._ham_tot = results["ham_tot"]
         self._ovlp = results["ovlp"]
         self._dm = results["dm"]
+        self._dm_localised = results.get("dm_localised")
 
         if close_calc and self.qm_adapter.uses_asi_callbacks:
             self.atoms.calc.asi.close()
@@ -1034,6 +1035,19 @@ class AtomsEmbed():
         out_mats: list of np.ndarrays
         """
         return self._dm
+
+    @property
+    def localised_density_matrices_out(self):
+        """Localised output density matrices of subsystems A and B
+
+        Only exported by QM codes performing the MO localisation
+        themselves (e.g., FHI-aims with qm_embedding_mo_localise).
+
+        Returns
+        -------
+        out_mats: list of SpinKpointArray, or None
+        """
+        return getattr(self, "_dm_localised", None)
 
     @property
     def overlap(self):

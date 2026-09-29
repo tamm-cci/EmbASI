@@ -591,12 +591,15 @@ class QMCodeASIAdapter(QMCodeAdapter):
             ovlp[0, 0] = ovlp[0, 0]
             ovlp[1, 0] = ovlp[0, 0]
 
-        # THIS IS CODE BREAKING FOR QM CODE LOCALISATION - I WILL NEED A FIX TO RESTORE
+        # With QM code localisation (qm_embedding_mo_localise), FHI-aims
+        # exports the localised density matrices of subsystems A and B
+        # rather than the supersystem density matrix, which is their sum.
         if 1 in asi.dm_storage.keys():
-            dm = []
-            dm.append(SpinKpointArray(asi.dm_storage[0], n_spins, n_kpoints))
-            dm.append(SpinKpointArray(asi.dm_storage[1], n_spins, n_kpoints))
+            dm_localised = [SpinKpointArray(asi.dm_storage[0], n_spins, n_kpoints),
+                            SpinKpointArray(asi.dm_storage[1], n_spins, n_kpoints)]
+            dm = dm_localised[0] + dm_localised[1]
         else:
+            dm_localised = None
             dm = SpinKpointArray(asi.dm_storage[0], n_spins, n_kpoints)
 
         return {
@@ -609,6 +612,7 @@ class QMCodeASIAdapter(QMCodeAdapter):
             "ham_tot": ham_tot,
             "ovlp": ovlp,
             "dm": dm,
+            "dm_localised": dm_localised,
         }
 
     def run_scf(self, atomsembed):

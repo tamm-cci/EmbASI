@@ -610,8 +610,8 @@ class ProjectionEmbedding(EmbeddingBase):
                        "unrestricted natural orbitals; closed-shell environment)")
         elif self.localisation == "qmcode":
             root_print("Localisation method: QM Code")
-            low_level_calculator_1 = \
-                self.qm_adapter_ll.set_qm_localise(low_level_calculator_1)
+            low_level_calculator_2 = \
+                self.qm_adapter_ll.set_qm_localise(low_level_calculator_2)
         else:
             raise Exception("Invalid entry for localisation: use 'SPADE', 'UNO-SPADE' or 'qmcode' ")
 
@@ -1037,8 +1037,7 @@ class ProjectionEmbedding(EmbeddingBase):
             self.time_spade = end - start
             self.output_timing_dict["SPADE_LOCALISATION"] = self.time_spade
         elif ((not skip_scf_and_loc)):
-            densmat_A_LL = self.AB_LL.density_matrices_out[0]
-            densmat_B_LL = self.AB_LL.density_matrices_out[1]
+            densmat_A_LL, densmat_B_LL = self.AB_LL.localised_density_matrices_out
         else:
             densmat_A_LL = dma_in
             densmat_B_LL = dmb_in
