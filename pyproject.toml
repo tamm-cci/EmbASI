@@ -19,8 +19,8 @@ classifiers = [
 ]
 dependencies = [
              "mpi4py",
-	     "scalapack4py @ git+https://gitlab.com/pvst/scalapack4py.git@v1.0_release",
-             "asi4py @ git+https://gitlab.com/pvst/asi.git@doc_corrections#egg=pkg&subdirectory=pyasi",
+	     "scalapack4py",
+             "asi4py",
              "ase>=3.24.0",
 	     "pyscf>=2.8.0",
 ]
