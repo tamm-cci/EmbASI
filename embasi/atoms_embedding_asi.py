@@ -1107,6 +1107,15 @@ class AtomsEmbed():
 
     @property
     def free_atom_nelectrons(self):
+        """Electrons of the neutral free atoms in the active (basis) region.
+
+        `active_atoms` indexes the full system, but `run()` replaces
+        `self.atoms` by `self.atoms[active_atoms]` before the calculator's
+        initializer asks for this, so once truncated every atom left is an
+        active one.
+        """
+        if self.truncate and len(self.atoms) == self.basis_info.trunc_natoms:
+            return np.sum(self.atoms.numbers)
         return np.sum(self.atoms.numbers[self.basis_info.active_atoms])
 
     @property
