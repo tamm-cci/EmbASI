@@ -37,17 +37,23 @@ def calculate_densmat(eigenvectors, occ_mat):
 
     return occ_evecs @ occ_evecs.T
 
+def _diag_like(values, like):
+    """Distributed diagonal matrix of the replicated 1-D values, on like's
+    grid and block size. Each rank fills in its own block (scalapack4py's
+    vectorised nps.diag), where op.diag set the entries one at a time."""
+    from scalapack4py.npscal import diag
+    return diag(values, grid=like.grid, dmb=like.descr.mb, dnb=like.descr.nb)
+
 def overlap_illcondition_check_parallel(overlap, thresh, inv=True, return_mask=False):
 
-    from scipy.linalg import eig_banded, eigh
     from embasi.parallel_utils import root_print
-    from scalapack4py.npscal.math_utils.npscal2npscal import eigh
+    from scalapack4py.npscal.linalg import eigh
 
     n_basis = overlap.gl_m
     # Only the eigenpairs above the threshold: eigh returns exactly those
     # (m values, n x m vectors), so everything it returns is kept and the
     # rest of the basis is the discarded, near-linearly-dependent part.
-    ovlp_evals, ovlp_evecs = eigh(overlap, vl=thresh, vu=100000)
+    ovlp_evals, ovlp_evecs = eigh(overlap, vl=thresh)
     if ovlp_evecs is None:
         raise ValueError(f"overlap has no eigenvalues above the threshold {thresh}")
 
@@ -63,21 +69,17 @@ def overlap_illcondition_check_parallel(overlap, thresh, inv=True, return_mask=F
         evals_filtered = ovlp_evals
 
         if inv:
-            evals_diag = op.diag(evals_filtered**(-0.5), ctxt_tag=overlap.ctxt_tag, descr_tag="rank_reduced_eval", lib=overlap.sl,
-                                 dmb=overlap.descr.mb, dnb=overlap.descr.nb)
+            evals_diag = _diag_like(evals_filtered**(-0.5), overlap)
             ovlp_filtered = ovlp_filtered.copy() @ evals_diag
         else:
-            evals_diag = op.diag(evals_filtered**(0.5), ctxt_tag=overlap.ctxt_tag, descr_tag="rank_reduced_eval", lib=overlap.sl,
-                                 dmb=overlap.descr.mb, dnb=overlap.descr.nb)
+            evals_diag = _diag_like(evals_filtered**(0.5), overlap)
             ovlp_filtered = evals_diag @ ovlp_filtered.copy().T
 
     else:
         if inv:
-            ovlp_filtered = ovlp_evecs @ op.diag(ovlp_evals**(-0.5), ctxt_tag=overlap.ctxt_tag, descr_tag=f"main_{overlap.gl_m}", lib=overlap.sl,
-                                                 dmb=overlap.descr.mb, dnb=overlap.descr.nb) @ ovlp_evecs.T
+            ovlp_filtered = ovlp_evecs @ _diag_like(ovlp_evals**(-0.5), overlap) @ ovlp_evecs.T
         else:
-            ovlp_filtered = ovlp_evecs @ op.diag(ovlp_evals**(0.5), ctxt_tag=overlap.ctxt_tag, descr_tag=f"main_{overlap.gl_m}", lib=overlap.sl,
-                                                 dmb=overlap.descr.mb, dnb=overlap.descr.nb) @ ovlp_evecs.T
+            ovlp_filtered = ovlp_evecs @ _diag_like(ovlp_evals**(0.5), overlap) @ ovlp_evecs.T
 
     # matmul() always inherits its LEFT operand's block size (ovlp_filtered's,
     # or ovlp_evecs's own slice-recomputed one in the n_bad==0 branch), never
@@ -97,7 +99,7 @@ def overlap_illcondition_check_parallel(overlap, thresh, inv=True, return_mask=F
 def hamiltonian_eigensolv_parallel(hamiltonian, overlap, nelec, nspins=1, nkpts=1, return_orthog=False, basis_illcond_thresh=1e-5, spin=None):
 
     from embasi.parallel_utils import root_print
-    from scalapack4py.npscal.math_utils.npscal2npscal import eigh
+    from scalapack4py.npscal.linalg import eigh
     from .ks_array import SpinKpointArray
     from .roothan_hall_eigensolver import fill_occupations
 

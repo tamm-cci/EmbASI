@@ -2,7 +2,7 @@ import numpy as np
 from embasi.parallel_utils import root_print, mpi_bcast_matrix
 from embasi.roothan_hall_eigensolver import hamiltonian_eigensolv
 from embasi.roothan_hall_eigensolver_scalapack import hamiltonian_eigensolv_parallel
-from scalapack4py.npscal.math_utils.npscal2npscal import svd
+from scalapack4py.npscal.linalg import svd
 
 
 def spade_localisation(atomsembed, hamiltonian, overlap, parallel=False,

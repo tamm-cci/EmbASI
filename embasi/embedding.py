@@ -53,10 +53,20 @@ class EmbeddingBase(ABC):
         self.qm_adapter_ll = qm_code_adapter(self.calculator_ll)
         self.qm_adapter_hl = qm_code_adapter(self.calculator_hl)
 
+        import warnings
+        from scalapack4py.npscal.utils import (
+            NPScalWarning, OversubscriptionWarning, EigenvectorOrthogonalityWarning,
+            warn_if_oversubscribed,
+        )
         if ignore_npscal_warnings:
-            import warnings
-            from scalapack4py.npscal.utils import NPScalWarning
             warnings.filterwarnings("ignore", category=NPScalWarning)
+            # Still shown: these flag a many-times slower run, or less
+            # orthogonal eigenvectors, not block-size bookkeeping.
+            for category in (OversubscriptionWarning, EigenvectorOrthogonalityWarning):
+                warnings.filterwarnings("default", category=category)
+        # EmbASI builds its grids from ASI callbacks rather than npscal.init(),
+        # so check for BLAS thread oversubscription here. Collective.
+        warn_if_oversubscribed()
 
         try:
             os.makedirs(self.run_dir, exist_ok=True)
@@ -1342,11 +1352,10 @@ class ProjectionEmbedding(EmbeddingBase):
         root_print(f" -----------======================--------- " )
         root_print(f" " )
 
-        # And finally, now all the work is done, clear the ScaLAPACK
-        # registers in case another calculation is ran.
-        from scalapack4py.npscal.blacs_ctxt_management import BLACSGrid, descriptor_registry
-        BLACSGrid.clear_registry()
-        descriptor_registry.clear()
+        # And finally, now all the work is done, free the BLACS grids and
+        # clear the descriptor registry in case another calculation is ran.
+        from scalapack4py.npscal import finalize
+        finalize()
 
 
 class FrozenDensityEmbedding(EmbeddingBase):
