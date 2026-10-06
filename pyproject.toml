@@ -19,10 +19,10 @@ classifiers = [
 ]
 dependencies = [
              "mpi4py",
-	     "scalapack4py",
+	           "scalapack4py",
              "asi4py",
              "ase>=3.24.0",
-	     "pyscf>=2.8.0",
+	           "pyscf>=2.8.0",
 ]
 
 
