@@ -80,7 +80,7 @@ class Basis_info:
     @property
     def trunc_basis_atoms(self):
         """ Index list which maps basis functions after truncation to atoms.
-  
+
         """
         return self._trunc_basis_atoms
 

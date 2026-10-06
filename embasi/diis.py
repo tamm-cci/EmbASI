@@ -67,7 +67,9 @@ class DIIS():
 
         time_s = time.time()
         for idx1 in range(solve_mat_size - 1):
-            self.solve_mat[idx1, solve_mat_size-2] = op.trace(self.update_matrix_err_hist[idx1].T @ self.update_matrix_err_hist[solve_mat_size-2])
+            # Tr(E_i^T E_j) = sum_ij E_i * E_j: O(n^2), no matrix product.
+            self.solve_mat[idx1, solve_mat_size-2] = np.einsum(
+                "ij,ij->", self.update_matrix_err_hist[idx1], self.update_matrix_err_hist[solve_mat_size-2])
             self.solve_mat[solve_mat_size-2, idx1] = self.solve_mat[idx1, solve_mat_size-2]
         if self.debug: root_print(f"Time for Coeff Calc Matmul: {time.time()-time_s}")
         # Assign
