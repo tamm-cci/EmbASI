@@ -62,9 +62,19 @@ def pbe_in_pbe_trunc(tmp_path_factory, projection):
     return _run(tmp_path_factory, projection, "PBE", "embedded_ll_reference", THRESH)
 
 
+_PBE0_ENERGIES = {}
+
+
+def _pbe0_energy(tmp_path_factory, projection, corr, thresh):
+    key = (projection, corr, thresh)
+    if key not in _PBE0_ENERGIES:
+        _PBE0_ENERGIES[key] = _run(tmp_path_factory, projection, "PBE0", corr, thresh)[0].DFT_AinB_total_energy
+    return _PBE0_ENERGIES[key]
+
+
 @pytest.fixture(scope="module")
 def pbe0_in_pbe(tmp_path_factory, projection):
-    return {(corr, thresh): _run(tmp_path_factory, projection, "PBE0", corr, thresh)[0].DFT_AinB_total_energy
+    return {(corr, thresh): _pbe0_energy(tmp_path_factory, projection, corr, thresh)
             for corr in ("1storder", "embedded_ll_reference")
             for thresh in (None, THRESH)}
 
@@ -112,3 +122,14 @@ def test_truncation_error_is_reduced(pbe0_in_pbe):
     err = {corr: pbe0_in_pbe[(corr, THRESH)] - pbe0_in_pbe[(corr, None)]
            for corr in ("1storder", "embedded_ll_reference")}
     assert abs(err["embedded_ll_reference"]) < 0.1 * abs(err["1storder"])
+
+
+def test_sc_huzinaga_truncation_error_matches_huzinaga(tmp_path_factory):
+    """With truncation the self-consistent projector must still be built in the full
+    basis (gamma_B and S couple the kept AOs through the dropped ones) and then cut,
+    as the one-shot Huzinaga projector is. Cutting gamma_B and S first gave a
+    truncation error of -0.90 eV here against -0.11 eV for 'huzinaga'."""
+    err = {proj: _pbe0_energy(tmp_path_factory, proj, "embedded_ll_reference", THRESH)
+           - _pbe0_energy(tmp_path_factory, proj, "embedded_ll_reference", None)
+           for proj in PROJECTIONS}
+    assert err["huzinaga-sc"] == pytest.approx(err["huzinaga"], abs=0.02)

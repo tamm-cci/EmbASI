@@ -879,23 +879,27 @@ class PySCFAdapter(QMCodeAdapter):
                 else:
                     mat_in = _spinks_to_ndarray(atomsembed.fock_embedding_matrix)
 
-            gamma_B = S = None
+            gamma_B = S = fock_full = None
+            to_full = to_trunc = None
             if atomsembed.flag_huz and atomsembed.huzinaga_dm_in is not None:
-                # huzinaga_dm_in/huzinaga_ovlp_in are always stored full-size
-                # (run_embasi_diag_emb_pot's absolute-truncation projector
-                # needs them that way), but the Fock override below runs
-                # inside mf.kernel() on the truncated Mole, so gamma_B/S
-                # need to match its (trunc_nbasis, trunc_nbasis) Fock here.
+                # huzinaga_dm_in/huzinaga_ovlp_in are stored full-size. With
+                # truncation the projector is still built in the full basis
+                # (gamma_B and S couple the kept AOs through the dropped ones)
+                # from the current fragment Fock padded with the supersystem
+                # embedding potential, and only then truncated - as the
+                # FHI-aims callback (ham_saving_and_huzinaga_callback) does.
+                gamma_B = _spinks_to_ndarray(atomsembed.huzinaga_dm_in)
+                S = atomsembed.huzinaga_ovlp_in[0,0]
                 if atomsembed.truncate:
-                    gamma_B = _spinks_to_ndarray(atomsembed.full_mat_to_truncated(atomsembed.huzinaga_dm_in))
-                    S = atomsembed.full_mat_to_truncated(atomsembed.huzinaga_ovlp_in)[0,0]
-                else:
-                    gamma_B = _spinks_to_ndarray(atomsembed.huzinaga_dm_in)
-                    S = atomsembed.huzinaga_ovlp_in[0,0]
+                    fock_full = _spinks_to_ndarray(atomsembed.fock_embedding_matrix)
+                    to_full = atomsembed.truncated_mat_to_full
+                    to_trunc = atomsembed.full_mat_to_truncated
 
             fock_func = mf.get_fock
             mf.get_fock = embedded_get_fock_factory(mf, fock_func, mat_in=mat_in,
-                                                    gamma_B=gamma_B, S=S, n_spins=n_spins)
+                                                    gamma_B=gamma_B, S=S, n_spins=n_spins,
+                                                    fock_full=fock_full,
+                                                    to_full=to_full, to_trunc=to_trunc)
 
         total_energy = mf.kernel(dm0=dm_in)
         # Follow internal instabilities to a stable solution (supersystem layer only; the

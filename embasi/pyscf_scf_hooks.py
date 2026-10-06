@@ -10,7 +10,8 @@ diagonalises each cycle.
 """
 
 
-def embedded_get_fock_factory(mf, fock_func, mat_in=None, gamma_B=None, S=None, n_spins=1):
+def embedded_get_fock_factory(mf, fock_func, mat_in=None, gamma_B=None, S=None, n_spins=1,
+                              fock_full=None, to_full=None, to_trunc=None):
     """Builds a get_fock replacement that injects embedding physics
 
     PySCF's SCF.get_fock is called exactly once per SCF cycle, right
@@ -50,6 +51,16 @@ def embedded_get_fock_factory(mf, fock_func, mat_in=None, gamma_B=None, S=None, 
         Number of spin channels mat_in/gamma_B carry (1 or 2) - selects
         the -0.5 (restricted) vs -1.0 (unrestricted) Huzinaga prefactor.
         Defaults to 1.
+    fock_full : np.ndarray or None
+        Basis truncation only: the full-basis embedding potential, whose
+        elements outside the truncated block stand in for the Fock
+        matrix there. gamma_B and S are then full-size, the projector is
+        built in the full basis from to_full(h1e + vhf) + fock_full and
+        truncated with to_trunc. None without truncation.
+    to_full, to_trunc : callable or None
+        Pad a truncated matrix to the full basis, and cut a full one to
+        the truncated basis (AtomsEmbed.truncated_mat_to_full and
+        full_mat_to_truncated). Required with fock_full.
 
     Returns
     -------
@@ -75,21 +86,34 @@ def embedded_get_fock_factory(mf, fock_func, mat_in=None, gamma_B=None, S=None, 
             import numpy as np
 
             f_emb = h1e + vhf_aug
-            if n_spins == 2:
-                # huzinaga_projector uses plain .T, which for a bare
-                # ndarray transposes ALL axes, not just the trailing
-                # matrix ones - fine for the 2D (nao, nao) case, but
-                # wrong on a stacked (2, nao, nao) array (it would swap
-                # the spin axis into a matrix axis instead of leaving it
-                # alone). Call it once per spin channel on proper 2D
-                # slices instead, exactly the "bare per-spin/k-point
-                # matrix" usage its docstring anticipates.
-                proj = np.stack([
-                    huzinaga_projector(f_emb[s], S, gamma_B[s], n_spins=n_spins)
-                    for s in range(n_spins)
-                ])
+            if fock_full is not None:
+                # Truncated basis: build the projector in the full basis
+                # from the current fragment Fock padded with the full
+                # embedding potential, then truncate it.
+                f_bare = h1e + vhf
+
+                def proj_one(s):
+                    f = f_bare[s] if n_spins == 2 else f_bare
+                    ff = fock_full[s] if n_spins == 2 else fock_full
+                    g = gamma_B[s] if n_spins == 2 else gamma_B
+                    return to_trunc(huzinaga_projector(to_full(f) + ff, S, g, n_spins=n_spins))
             else:
-                proj = huzinaga_projector(f_emb, S, gamma_B, n_spins=n_spins)
+                def proj_one(s):
+                    f = f_emb[s] if n_spins == 2 else f_emb
+                    g = gamma_B[s] if n_spins == 2 else gamma_B
+                    return huzinaga_projector(f, S, g, n_spins=n_spins)
+
+            # huzinaga_projector uses plain .T, which for a bare ndarray
+            # transposes ALL axes, not just the trailing matrix ones -
+            # fine for the 2D (nao, nao) case, but wrong on a stacked
+            # (2, nao, nao) array (it would swap the spin axis into a
+            # matrix axis instead of leaving it alone). Call it once per
+            # spin channel on proper 2D slices instead, exactly the "bare
+            # per-spin/k-point matrix" usage its docstring anticipates.
+            if n_spins == 2:
+                proj = np.stack([proj_one(s) for s in range(n_spins)])
+            else:
+                proj = proj_one(0)
             vhf_aug = vhf_aug + proj
 
         return fock_func(h1e=h1e, s1e=s1e, vhf=vhf_aug, dm=dm, cycle=cycle,
