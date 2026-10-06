@@ -947,6 +947,13 @@ class PySCFAdapter(QMCodeAdapter):
         if scf_conv:
             dm_out = mf.make_rdm1(mo_coeff, mo_occ)
         else:
+            # Expected for total-energy-only runs (max_cycle=0); otherwise
+            # the SCF failed and the input density is returned in its place.
+            if mf.max_cycle > 0:
+                import warnings
+                warnings.warn(f"PySCF SCF for {atomsembed.outdir} did not converge in "
+                              f"{mf.max_cycle} cycles; returning the input density matrix "
+                              f"(conv_tol={mf.conv_tol}).", RuntimeWarning)
             dm_out = dm_in
 
         hcore = mf.get_hcore()

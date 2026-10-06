@@ -1355,13 +1355,19 @@ class ProjectionEmbedding(EmbeddingBase):
             self.output_timing_dict["AB_LL_NONSCF_POSTPROC"] = self.time_ab_lowlevel_pp
             self.output_data_dict["TOTALENERGY"]["AB_LL_PP"] = self.subsys_AB_lowlvl_nonscftotalen
 
-        # Calculate projected density correction to total energy
-        if self.truncate and self.projection == "level-shift":
-            self.PB_corr = \
-                ((trunc_P_b @ trunc_densmat_A_HL).trace() * 27.211384500)
-        elif (not self.truncate) and self.projection == "level-shift":
-            self.PB_corr = \
-                ((self.P_b @ densmat_A_HL).trace() * 27.211384500)
+        # Calculate projected density correction to total energy. With
+        # embedded_ll_reference the low-level reference density of A comes
+        # from an SCF with the same projector, so its projector energy is
+        # subtracted as well (it is zero for the SPADE density of 1storder).
+        if self.projection == "level-shift":
+            densmat_A_pb = densmat_A_HL
+            if self.total_energy_corr == "embedded_ll_reference":
+                densmat_A_pb = densmat_A_HL - densmat_A_LL
+            if self.truncate:
+                self.PB_corr = ((self.A_HL.full_mat_to_truncated(self.P_b) @
+                                 self.A_HL.full_mat_to_truncated(densmat_A_pb)).trace() * 27.211384500)
+            else:
+                self.PB_corr = ((self.P_b @ densmat_A_pb).trace() * 27.211384500)
         else:
             from embasi.embedding_projectors import huzinaga_projector
 

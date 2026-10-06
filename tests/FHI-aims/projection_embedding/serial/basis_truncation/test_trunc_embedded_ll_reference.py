@@ -13,7 +13,7 @@ from ase.data.s22 import s26, create_s22_system
 from embasi.embedding import ProjectionEmbedding
 
 THRESH = 0.1
-PROJECTIONS = ["huzinaga", "huzinaga-sc"]
+PROJECTIONS = ["level-shift", "huzinaga", "huzinaga-sc"]
 
 
 def _calc(xc):
