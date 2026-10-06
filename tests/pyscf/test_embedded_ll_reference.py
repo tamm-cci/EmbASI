@@ -16,6 +16,7 @@ from pyscf.pbc.tools.pyscf_ase import PySCF, ase_atoms_to_pyscf
 from embasi.embedding import ProjectionEmbedding
 
 THRESH = 0.05
+PROJECTIONS = ["huzinaga", "huzinaga-sc"]
 
 
 def _system():
@@ -32,7 +33,7 @@ def _system():
     return atoms, mask, mol
 
 
-def _run(tmp_path_factory, hl_xc, total_energy_corr, thresh):
+def _run(tmp_path_factory, projection, hl_xc, total_energy_corr, thresh):
     atoms, mask, mol = _system()
 
     def mf(xc):
@@ -43,7 +44,7 @@ def _run(tmp_path_factory, hl_xc, total_energy_corr, thresh):
     emb = ProjectionEmbedding(atoms, embed_mask=mask,
                               calc_base_ll=PySCF(method=mf("PBE")),
                               calc_base_hl=PySCF(method=mf(hl_xc)),
-                              projection="huzinaga-sc", localisation="SPADE",
+                              projection=projection, localisation="SPADE",
                               truncate_basis_thresh=thresh,
                               total_energy_corr=total_energy_corr,
                               run_dir=str(tmp_path_factory.mktemp("emb")))
@@ -51,14 +52,19 @@ def _run(tmp_path_factory, hl_xc, total_energy_corr, thresh):
     return emb, mol
 
 
-@pytest.fixture(scope="module")
-def pbe_in_pbe_trunc(tmp_path_factory):
-    return _run(tmp_path_factory, "PBE", "embedded_ll_reference", THRESH)
+@pytest.fixture(scope="module", params=PROJECTIONS)
+def projection(request):
+    return request.param
 
 
 @pytest.fixture(scope="module")
-def pbe0_in_pbe(tmp_path_factory):
-    return {(corr, thresh): _run(tmp_path_factory, "PBE0", corr, thresh)[0].DFT_AinB_total_energy
+def pbe_in_pbe_trunc(tmp_path_factory, projection):
+    return _run(tmp_path_factory, projection, "PBE", "embedded_ll_reference", THRESH)
+
+
+@pytest.fixture(scope="module")
+def pbe0_in_pbe(tmp_path_factory, projection):
+    return {(corr, thresh): _run(tmp_path_factory, projection, "PBE0", corr, thresh)[0].DFT_AinB_total_energy
             for corr in ("1storder", "embedded_ll_reference")
             for thresh in (None, THRESH)}
 

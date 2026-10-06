@@ -13,6 +13,7 @@ from ase.data.s22 import s26, create_s22_system
 from embasi.embedding import ProjectionEmbedding
 
 THRESH = 0.1
+PROJECTIONS = ["huzinaga", "huzinaga-sc"]
 
 
 def _calc(xc):
@@ -27,12 +28,12 @@ def _calc(xc):
                 )
 
 
-def _run(tmp_path_factory, hl_xc, thresh):
+def _run(tmp_path_factory, projection, hl_xc, thresh):
     os.environ["AIMS_SPECIES_DIR"] = os.environ["AIMS_ROOT_DIR"] + "/species_defaults/defaults_2020/light"
     methanol = create_s22_system(s26[22])[:6]
     emb = ProjectionEmbedding(methanol, embed_mask=[2, 1, 2, 2, 2, 1],
                               calc_base_ll=_calc("PBE"), calc_base_hl=_calc(hl_xc),
-                              mu_val=1.e+6, projection="huzinaga-sc", localisation="SPADE",
+                              mu_val=1.e+6, projection=projection, localisation="SPADE",
                               truncate_basis_thresh=thresh,
                               total_energy_corr="embedded_ll_reference",
                               run_dir=str(tmp_path_factory.mktemp("MeOH_monomer")))
@@ -40,13 +41,18 @@ def _run(tmp_path_factory, hl_xc, thresh):
     return emb
 
 
+@pytest.fixture(scope="module", params=PROJECTIONS)
+def projection(request):
+    return request.param
+
+
 @pytest.fixture(scope="module")
-def pbe0_in_pbe_trunc(tmp_path_factory):
-    return _run(tmp_path_factory, "PBE0", THRESH)
+def pbe0_in_pbe_trunc(tmp_path_factory, projection):
+    return _run(tmp_path_factory, projection, "PBE0", THRESH)
 
 
-def test_same_functional_is_exact_with_truncation(tmp_path_factory):
-    emb = _run(tmp_path_factory, "PBE", THRESH)
+def test_same_functional_is_exact_with_truncation(tmp_path_factory, projection):
+    emb = _run(tmp_path_factory, projection, "PBE", THRESH)
     assert 0 < emb.basis_info.trunc_natoms < len(emb.AB_LL.atoms)
     assert emb.DFT_AinB_total_energy == pytest.approx(emb.subsys_AB_lowlvl_scftotalen, abs=1e-6)
 
@@ -74,7 +80,7 @@ def test_truncated_two_electron_potential_cancels(pbe0_in_pbe_trunc):
     assert np.abs(ham_full[0] - ham_full[1]).max() > 10 * residual
 
 
-def test_truncation_error_is_small(pbe0_in_pbe_trunc, tmp_path_factory):
-    full = _run(tmp_path_factory, "PBE0", None)
+def test_truncation_error_is_small(pbe0_in_pbe_trunc, tmp_path_factory, projection):
+    full = _run(tmp_path_factory, projection, "PBE0", None)
     # 1storder gives ~4.8 eV here.
     assert abs(pbe0_in_pbe_trunc.DFT_AinB_total_energy - full.DFT_AinB_total_energy) < 0.1
