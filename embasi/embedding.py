@@ -460,6 +460,17 @@ class ProjectionEmbedding(EmbeddingBase):
     truncate_basis: float or None:
         Truncates the basis functions of the environment based on
         a Mulliken charge metrix. Turned off if None. Defaults to None.
+    total_energy_corr: str
+        How the low-level reference energy of subsystem A is evaluated:
+        '1storder' (default) uses the supersystem density of A with a
+        first-order correction tr[(DM^(A_HL)-DM^(A_LL)) v_emb]; 'nonscf'
+        re-evaluates the low-level energies non-self-consistently with the
+        high-level density of A; 'embedded_ll_reference' runs a low-level
+        embedded SCF for A with the same basis (truncated, if requested),
+        embedding potential and projector as the high-level calculation and
+        uses its density and energy as the reference (the "type-in-type"
+        correction of [2,3]). The latter is exact for DFT-in-DFT with the
+        same functional and is recommended with basis truncation.
     spade_ncores: int
         Turns on separate core-valence localisation
     localisation: str
@@ -490,6 +501,12 @@ class ProjectionEmbedding(EmbeddingBase):
     [1] Manby, F. R.; Stella, M.; Goodpaster, J. D.; Miller, T. F. I.
     A Simple, Exact Density-Functional-Theory Embedding Scheme. J. Chem.
     Theory Comput. 2012, 8 (8), 2564–2568.
+    [2] Bennie, S. J.; Stella, M.; Miller, T. F.; Manby, F. R. Accelerating
+    Wavefunction in Density-Functional-Theory Embedding by Truncating the
+    Active Basis Set. J. Chem. Phys. 2015, 143 (2), 024105.
+    [3] Lee, S. J. R.; Ding, F.; Manby, F. R.; Miller, T. F. Analytical
+    Gradients for Projection-Based Wavefunction-in-DFT Embedding. J. Chem.
+    Phys. 2019, 151 (6), 064112.
 
     """
 
@@ -550,12 +567,17 @@ class ProjectionEmbedding(EmbeddingBase):
         if self.abs_truncate and (not (self.total_energy_corr == "nonscf")):
             raise Exception("total_energy_corr must be set to 'nonscf' if truncate_basis_thresh is 'absolute'")
 
-        if self.total_energy_corr == "1storder":
+        if self.total_energy_corr in ("1storder", "embedded_ll_reference"):
             self.calc_names = ["AB_LL","A_LL","A_HL"]
         elif self.total_energy_corr == "nonscf":
             self.calc_names = ["AB_LL","A_LL","A_HL","B_LL"]
         else:
-            raise Exception("Invalid entry for total_energy_corr: use '1storder' or 'nonscf' ")
+            raise Exception("Invalid entry for total_energy_corr: use '1storder', "
+                            "'nonscf' or 'embedded_ll_reference' ")
+
+        if self.total_energy_corr == "embedded_ll_reference" and self.fat_on:
+            raise Exception("total_energy_corr='embedded_ll_reference' is not "
+                            "implemented with freeze_and_thaw=True")
 
         # Initialise the ProjectionEmbedding object given EmbeddingBase
         super(ProjectionEmbedding, self).__init__(atoms, embed_mask,
@@ -662,6 +684,19 @@ class ProjectionEmbedding(EmbeddingBase):
                        huzinaga=self.flag_huz_sc)
         self.A_LL.abs_truncate = self.abs_truncate
         self.A_LL.truncate = self.truncate
+
+        # With a truncated basis, embedded_ll_reference follows Bennie et al.
+        # and builds the two-electron part of the embedding potential from the
+        # full-basis density of A, evaluated in an untruncated layer (A_LL_full).
+        self.full_basis_vemb = (self.total_energy_corr == "embedded_ll_reference") and self.truncate
+        if self.full_basis_vemb:
+            self.calc_names.append("A_LL_full")
+            self.set_layer(atoms, "A_LL_full", low_level_calculator_1,
+                           embed_mask, ghosts=0, no_scf=False,
+                           ctxt_tag=subsys_ctxt_tag,
+                           descr_tag=supersys_descr_tag)
+            self.A_LL_full.abs_truncate = False
+            self.A_LL_full.truncate = False
 
         self.set_layer(atoms, "A_HL", high_level_calculator_1,
                        embed_mask, ghosts=0, no_scf=False,
@@ -1148,7 +1183,35 @@ class ProjectionEmbedding(EmbeddingBase):
         else:
             P_b = None
 
+        # H^AB - H^A[trunc(gamma^A)] carries the nuclear attraction of the atoms
+        # dropped from the truncated layers, but its two-electron part belongs
+        # to the truncated density of A (which has the wrong electron count).
+        # Replace the latter, within the truncated block, by the two-electron
+        # potential of the full density of A:
+        #   v_corr = trunc(H^A_full[pad(trunc(gamma^A))] - H^A_full[gamma^A])
+        # (one-electron terms cancel, as both are evaluated in the same layer).
+        # Outside the truncated block vemb keeps the supersystem Fock, as used
+        # by the Huzinaga projector.
+        self.vemb_trunc_corr = None
+        if self.full_basis_vemb:
+            self.A_LL_full.input_fragment_nelectrons = self.A_pop
+            if self.A_spin is not None:
+                self.A_LL_full.input_fragment_spin = self.A_spin
+            self.A_LL_full.run_noscf(dm_in=densmat_A_LL)
+            ham_A_full = self.A_LL_full.hamiltonian_total.copy()
+            self.subsys_A_lowlvl_fullbasis_totalen = self.A_LL_full.ev_corr_total_energy
+            self.output_data_dict["TOTALENERGY"]["A_LL_FULL"] = self.subsys_A_lowlvl_fullbasis_totalen
+
+            densmat_A_LL_cut = self.A_LL.truncated_mat_to_full(self.A_LL.full_mat_to_truncated(densmat_A_LL))
+            self.A_LL_full.run_noscf(dm_in=densmat_A_LL_cut)
+            ham_A_full_cut = self.A_LL_full.hamiltonian_total.copy()
+
+            self.vemb_trunc_corr = self.A_LL.truncated_mat_to_full(
+                self.A_LL.full_mat_to_truncated(ham_A_full_cut - ham_A_full))
+
         vemb = self.AB_LL.hamiltonian_total - self.A_LL.hamiltonian_total
+        if self.vemb_trunc_corr is not None:
+            vemb = vemb + self.vemb_trunc_corr
 
         return densmat_A_LL, densmat_B_LL, overlap, vemb, P_b
 
@@ -1240,6 +1303,8 @@ class ProjectionEmbedding(EmbeddingBase):
             if self.A_spin is not None:
                 self.A_HL.input_fragment_spin = self.A_spin
             self.vemb = self.AB_LL.hamiltonian_total - self.A_LL.hamiltonian_total
+            if self.vemb_trunc_corr is not None:
+                self.vemb = self.vemb + self.vemb_trunc_corr
 
             self.A_HL.run_emb_scf(dm_in=densmat_A_LL, emb_pot=self.vemb,
                                   sc_huz_dm=densmat_B_LL, sc_huz_ovlp=overlap,
@@ -1250,6 +1315,23 @@ class ProjectionEmbedding(EmbeddingBase):
 
             self.time_a_highlevel = self.A_HL.last_run_time
             self.subsys_A_highlvl_totalen = self.A_HL.ev_corr_total_energy
+
+            if self.total_energy_corr == "embedded_ll_reference":
+                # Low-level reference for A from an embedded SCF in the same
+                # (possibly truncated) basis, embedding potential and projector
+                # as A_HL (the "type-in-type" correction of Bennie et al.).
+                # The reference density and energy then carry the same
+                # truncation error as A_HL, which cancels in the total energy.
+                self.A_LL.input_fragment_nelectrons = self.A_pop
+                if self.A_spin is not None:
+                    self.A_LL.input_fragment_spin = self.A_spin
+                self.A_LL.run_emb_scf(dm_in=densmat_A_LL, emb_pot=self.vemb,
+                                      sc_huz_dm=densmat_B_LL, sc_huz_ovlp=overlap,
+                                      sc_huz_ham=self.vemb, proj_pot=self.P_b)
+                densmat_A_LL = self.A_LL.density_matrices_out.copy()
+                self.subsys_A_lowlvl_totalen = self.A_LL.ev_corr_total_energy
+                self.output_timing_dict["A_LL_EMB_SCF"] = self.A_LL.last_run_time
+                self.output_data_dict["TOTALENERGY"]["A_LL_EMB_SCF"] = self.subsys_A_lowlvl_totalen
             self.output_timing_dict["A_HL_SCF"] = self.time_a_highlevel
             self.output_data_dict["TOTALENERGY"]["A_HL"] = self.A_HL.ev_corr_total_energy
 
@@ -1295,7 +1377,7 @@ class ProjectionEmbedding(EmbeddingBase):
             self.subsys_A_highlvl_totalen = self.subsys_A_highlvl_totalen + \
                 self.A_HL.post_scf_corr_energy - self.A_HL.dft_energy
 
-        if self.total_energy_corr == "1storder":
+        if self.total_energy_corr in ("1storder", "embedded_ll_reference"):
             if self.truncate:
                 self.order_1_embedding_corr = (self.A_HL.full_mat_to_truncated(densmat_A_HL - densmat_A_LL) @ \
                                                self.A_HL.full_mat_to_truncated(self.vemb)).trace() * 27.211384500
@@ -1342,7 +1424,7 @@ class ProjectionEmbedding(EmbeddingBase):
         root_print(f" Total Energy (A Low-Level): {self.subsys_A_lowlvl_totalen} eV" )
         root_print(f" Total Energy (A High-Level): {self.subsys_A_highlvl_totalen} eV" )
         root_print(f" Projection operator energy correction DM^(A_HL) @ Pb: {self.PB_corr} eV" )
-        if self.total_energy_corr == "1storder":
+        if self.total_energy_corr in ("1storder", "embedded_ll_reference"):
             root_print(f" First order energy correction (DM^(A_HL)-DM^(A_LL)) @ v_emb): {self.order_1_embedding_corr} eV" )
         root_print(f"  " )
         root_print(f" Final Energies Information:")
