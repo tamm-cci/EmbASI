@@ -7,7 +7,7 @@ import time
 
 '''
 An example for running QM/QM embedding simulations with a truncated
-basis for the high-level calculations for a nonanol molecule. The
+basis for the high-level calculations for a zeolite framework. The
 OH fragment is calculated at the higher level of theory (PBE0), and
 the hydrocarbon chain is calculated at the lower level of theory (PBE).
 
@@ -75,9 +75,9 @@ calc_hl = Aims(xc='PBE0', profile=AimsProfile(command="NOCALC"),
 #    cubes=water_cube
   )
 
-# Read nonanol geometry and set-up embedding mask
+# Read zeolite geometry and set-up embedding mask
 zeolite = read("zeolite.xyz")
-embed_mask = len(nonanol)*[2]
+embed_mask = len(zeolite)*[2]
 embed_mask[4], embed_mask[5] = 1, 1
 embed_mask[12], embed_mask[13] = 1, 1
 embed_mask[20] = 1
