@@ -163,20 +163,33 @@ class CommutatorDIIS():
     together. Each entry of a SpinKpointArray (spin, k-point) is a
     separate block of the error vector.
 
-    Only dense (serial) np.ndarray blocks are supported.
+    Blocks may be dense np.ndarray (serial) or distributed NPScal
+    (parallel) arrays. With NPScal, every inner product is reduced over
+    the whole BLACS grid, so all ranks build the same B matrix and
+    obtain the same coefficients.
+
+    The error inner products <e_i|e_j> are stored between updates, so
+    each update computes only the n_hist products of the newest error
+    vector, not the full n_hist (n_hist + 1) / 2.
     """
 
     def __init__(self, hist_len=8):
         self.hist_len = hist_len
         self.fock_hist = []
         self.err_hist = []
+        # Unscaled <e_i|e_j> for the errors in err_hist, in the same order
+        self.err_prod = np.zeros((0, 0))
 
     @staticmethod
     def _inner(errs_1, errs_2):
+        """Re <errs_1|errs_2>, summed over subsystems and (spin, k-point)
+        blocks. Written as sum(conj(a) * b) rather than np.vdot, which
+        NPScal does not implement; np.sum of an NPScal is reduced over the
+        whole grid, so the result is the same global value on every rank."""
         total = 0.0
         for err_1, err_2 in zip(errs_1, errs_2):
             for key in err_1.data.keys():
-                total += np.real(np.vdot(err_1.data[key], err_2.data[key]))
+                total += float(np.real(np.sum(np.conj(err_1.data[key]) * err_2.data[key])))
         return total
 
     def update(self, focks, errs):
@@ -184,20 +197,28 @@ class CommutatorDIIS():
         returns the extrapolated Fock matrices, in the same order"""
         self.fock_hist.append([fock.copy() for fock in focks])
         self.err_hist.append([err.copy() for err in errs])
+
+        # Grow the stored products by the newest row/column only
+        n_old = self.err_prod.shape[0]
+        new_row = np.array([self._inner(self.err_hist[i], self.err_hist[-1])
+                            for i in range(n_old + 1)])
+        err_prod = np.zeros((n_old + 1, n_old + 1))
+        err_prod[:n_old, :n_old] = self.err_prod
+        err_prod[n_old, :] = err_prod[:, n_old] = new_row
+        self.err_prod = err_prod
+
         if len(self.fock_hist) > self.hist_len:
             self.fock_hist.pop(0)
             self.err_hist.pop(0)
+            self.err_prod = self.err_prod[1:, 1:]
 
         n_hist = len(self.fock_hist)
         if n_hist == 1:
             return [fock.copy() for fock in focks]
 
         b_mat = np.zeros((n_hist + 1, n_hist + 1))
-        for i in range(n_hist):
-            for j in range(i + 1):
-                b_mat[i, j] = b_mat[j, i] = self._inner(self.err_hist[i], self.err_hist[j])
         # Scale for conditioning: the coefficients are scale invariant
-        b_mat[:n_hist, :n_hist] /= np.max(np.abs(np.diag(b_mat)[:n_hist]))
+        b_mat[:n_hist, :n_hist] = self.err_prod / np.max(np.abs(np.diag(self.err_prod)))
         b_mat[n_hist, :n_hist] = b_mat[:n_hist, n_hist] = -1.0
         rhs = np.zeros(n_hist + 1)
         rhs[n_hist] = -1.0

@@ -1000,10 +1000,8 @@ class ProjectionEmbedding(EmbeddingBase):
         from .diis import CommutatorDIIS
         from embasi.ks_array import SpinKpointArray
 
-        if self.parallel:
-            raise NotImplementedError("fat_update='fock_diis' is only implemented "
-                                      "for serial (parallel=False) runs")
-
+        # Serial (np.ndarray) and parallel (NPScal) blocks take the same path:
+        # @, -, np.abs and np.max (reduced over the grid) are all NPScal-aware.
         def to_layer_basis(layer, mat):
             return layer.full_mat_to_truncated(mat) if layer.truncate else mat
 
@@ -1015,7 +1013,7 @@ class ProjectionEmbedding(EmbeddingBase):
             return SpinKpointArray(err, fock.n_spins, fock.n_kpoints)
 
         def max_abs(err):
-            return max(np.max(np.abs(block)) for block in err.data.values())
+            return max(float(np.max(np.abs(block))) for block in err.data.values())
 
         fat_info = self.output_data_dict["FATCONVINFO"]
         fat_info["UPDATE"] = "fock_diis"
