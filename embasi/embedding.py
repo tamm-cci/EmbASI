@@ -518,6 +518,7 @@ class ProjectionEmbedding(EmbeddingBase):
                  uno_occ_window=(0.02, 1.98), uno_n_env=None, scf_stability=False,
                  parallel=False, gc=True, run_dir="./EmbASI_calc",
                  basis_illcond_thresh=1e-5, scalapack_block_size=16, fat_mixing=0.2,
+                 fat_update="fock_diis", fat_damp=0.0, fat_damp_thresh=0.1,
                  ignore_npscal_warnings=True):
 
         from copy import copy, deepcopy
@@ -722,6 +723,21 @@ class ProjectionEmbedding(EmbeddingBase):
 
         self.fat_mixing = fat_mixing
 
+        # Freeze-and-thaw update: "fock_diis" (commutator DIIS on the embedded
+        # Fock matrices of A and B) or "densmat" (legacy mixing of the total
+        # density matrix, using fat_mixing)
+        if fat_update not in ("fock_diis", "densmat"):
+            raise Exception("Invalid entry for fat_update: use 'fock_diis' or 'densmat'")
+        self.fat_update = fat_update
+
+        # Fock damping for fat_update="fock_diis": while max|[F,D]| exceeds
+        # fat_damp_thresh, the next Fock matrix is (1 - fat_damp) * F + fat_damp * F_prev
+        # instead of the DIIS extrapolation. 0 disables damping.
+        if not (0.0 <= fat_damp < 1.0):
+            raise Exception("fat_damp must satisfy 0 <= fat_damp < 1")
+        self.fat_damp = fat_damp
+        self.fat_damp_thresh = fat_damp_thresh
+
         # A temporary solution to storing data output data
         self.output_data_dict = {}
         self.output_data_dict["TOTALENERGY"] = {}
@@ -792,6 +808,14 @@ class ProjectionEmbedding(EmbeddingBase):
         self.output_data_dict["FATCONVINFO"]["SUBSYS_A_DIAG_TIME"] = 0.
         self.output_data_dict["FATCONVINFO"]["SUBSYS_B_DIAG_TIME"] = 0.
         self.output_data_dict["FATCONVINFO"]["DIIS_TIME"] = 0.
+
+        if mixing_type == "fock_diis":
+            densmat_A_LL, densmat_B_LL = self._fat_cycles_fock_diis(densmat_A_LL, densmat_B_LL,
+                                                                    overlap, ncycles, hist_len=8,
+                                                                    damp=self.fat_damp,
+                                                                    damp_thresh=self.fat_damp_thresh)
+            # The legacy density-mixing loop below is skipped
+            ncycles = 0
 
         for i in range(ncycles):
 
@@ -897,7 +921,7 @@ class ProjectionEmbedding(EmbeddingBase):
                     tot_densmat_ab, coeffs = diis_dens_ab.diis_step(tot_densmat_ab)
 
                     for ispin in range(update_densmat.n_spins):
-                        for ikpts in range(update_densmat.n_kpoints):
+                        for ikpt in range(update_densmat.n_kpoints):
                             update_densmat[ispin,ikpt], _ = \
                                 diis_spin_k[(ispin,ikpt)].diis_step(update_densmat[ispin,ikpt], \
                                                                     coeff_mat=coeffs)
@@ -934,6 +958,148 @@ class ProjectionEmbedding(EmbeddingBase):
         self.order_1_embedding_corr = ((densmat_A_HL - densmat_A_LL) @ self.vemb).trace() * 27.211384500
 
         return densmat_A_HL, densmat_A_LL, densmat_B_LL
+
+    def _fat_cycles_fock_diis(self, densmat_A, densmat_B, overlap, ncycles,
+                              hist_len=8, comm_tol=1e-5, energy_tol=1e-6,
+                              damp=0.0, damp_thresh=0.1):
+        """Freeze-and-thaw cycles with commutator DIIS on the embedded Fock matrices
+
+        Each cycle:
+          1. builds the supersystem Fock matrix F[gamma^A + gamma^B] once
+             (AB_LL.run_noscf),
+          2. forms the embedded Fock matrices of both subsystems from the
+             same densities, F~_A = F_AA + P_A[gamma^B] and
+             F~_B = F_BB + P_B[gamma^A], in their own (truncated) bases,
+          3. checks the commutators e_X = F~_X D_X S_XX - S_XX D_X F~_X,
+          4. extrapolates F~_A and F~_B with shared DIIS coefficients and
+             diagonalises each once for the new gamma^A and gamma^B.
+
+        The densities that enter the Fock matrix and the projectors are
+        always the same, each stays idempotent with an exact electron
+        count, and the commutator is zero only at self-consistency.
+
+        On return, AB_LL.hamiltonian_total is the Fock matrix of the
+        returned densities (the loop exits after a Fock build, before a
+        further diagonalisation).
+
+        Parameters
+        ----------
+        comm_tol : float
+            Convergence threshold on max |e_X| (a.u.)
+        energy_tol : float
+            Convergence threshold on the change in supersystem energy (eV)
+        damp : float
+            Damping factor beta. While max|e_X| > damp_thresh, the Fock
+            matrices diagonalised are (1 - beta) F~_X + beta F~_X(previous
+            input) instead of the DIIS extrapolation. The DIIS history
+            always holds the undamped F~_X, so the extrapolation starts
+            from a full history once damping switches off. 0 disables it.
+        damp_thresh : float
+            max|e_X| (a.u.) above which damped steps are taken
+        """
+        from .diis import CommutatorDIIS
+        from embasi.ks_array import SpinKpointArray
+
+        if self.parallel:
+            raise NotImplementedError("fat_update='fock_diis' is only implemented "
+                                      "for serial (parallel=False) runs")
+
+        def to_layer_basis(layer, mat):
+            return layer.full_mat_to_truncated(mat) if layer.truncate else mat
+
+        def commutator(fock, dm, ovlp):
+            err = {}
+            for key in fock.data.keys():
+                f, d, s = fock.data[key], dm.data[key], ovlp.data[key]
+                err[key] = f @ d @ s - s @ d @ f
+            return SpinKpointArray(err, fock.n_spins, fock.n_kpoints)
+
+        def max_abs(err):
+            return max(np.max(np.abs(block)) for block in err.data.values())
+
+        fat_info = self.output_data_dict["FATCONVINFO"]
+        fat_info["UPDATE"] = "fock_diis"
+        fat_info["COMMUTATOR_ERR"] = []
+        fat_info["DAMPED_STEP"] = []
+
+        diis = CommutatorDIIS(hist_len)
+        old_energy = None
+        converged = False
+        # Fock matrices diagonalised in the previous cycle (damping reference)
+        fock_A_in = None
+        fock_B_in = None
+
+        for i in range(ncycles):
+            fat_info["FAT_NCYCLES"] = i + 1
+
+            # 1. One supersystem Fock build at the current densities
+            self.AB_LL.run_noscf(dm_in=densmat_A + densmat_B, close_calc=True)
+            new_energy = self.AB_LL.ev_corr_total_energy
+            fock_AB = self.AB_LL.hamiltonian_total
+            fat_info["DFTINDFT_ENERGIES"].append(new_energy)
+            fat_info["SUPSYS_POT_TIME"] += self.AB_LL.last_run_time
+
+            # 2. Embedded Fock matrices from the same pair of densities
+            time_s = time.time()
+            fock_A, ovlp_A = self.A_LL.build_embedded_fock(sc_huz_dm=densmat_B,
+                                                           sc_huz_ovlp=overlap,
+                                                           sc_huz_ham=fock_AB)
+            fock_B, ovlp_B = self.B_LL.build_embedded_fock(sc_huz_dm=densmat_A,
+                                                           sc_huz_ovlp=overlap,
+                                                           sc_huz_ham=fock_AB)
+
+            # 3. Convergence: commutators and energy change
+            err_A = commutator(fock_A, to_layer_basis(self.A_LL, densmat_A), ovlp_A)
+            err_B = commutator(fock_B, to_layer_basis(self.B_LL, densmat_B), ovlp_B)
+            err_max = max(max_abs(err_A), max_abs(err_B))
+            fat_info["COMMUTATOR_ERR"].append(err_max)
+
+            delta_energy = None if old_energy is None else new_energy - old_energy
+            fat_info["DFTINDFT_DELTAENERGIES"].append(delta_energy)
+            old_energy = new_energy
+            root_print(f"FAT ITERATION {i}: E(AB) = {new_energy} eV, "
+                       f"dE = {delta_energy} eV, max|[F,D]| = {err_max:.3e}")
+
+            if (err_max < comm_tol) and (delta_energy is not None) and \
+               (abs(delta_energy) < energy_tol):
+                converged = True
+                root_print(f"FAT CONVERGED in {i + 1} cycles")
+                break
+            if i == ncycles - 1:
+                break
+
+            # 4. Next Fock matrices: a damped step while far from convergence,
+            #    otherwise the DIIS extrapolation. The undamped matrices always
+            #    enter the DIIS history.
+            fock_A_diis, fock_B_diis = diis.update([fock_A, fock_B], [err_A, err_B])
+            damped = (damp > 0.0) and (err_max > damp_thresh) and (fock_A_in is not None)
+            if damped:
+                fock_A = fock_A * (1.0 - damp) + fock_A_in * damp
+                fock_B = fock_B * (1.0 - damp) + fock_B_in * damp
+            else:
+                fock_A, fock_B = fock_A_diis, fock_B_diis
+            fock_A_in, fock_B_in = fock_A, fock_B
+            fat_info["DAMPED_STEP"].append(damped)
+            if damped:
+                root_print(f"FAT ITERATION {i}: damped step (beta = {damp})")
+            fat_info["DIIS_TIME"] += time.time() - time_s
+
+            time_s = time.time()
+            self.A_LL.diag_embedded_fock(fock_A, ovlp_A)
+            fat_info["SUBSYS_A_DIAG_TIME"] += time.time() - time_s
+            time_s = time.time()
+            self.B_LL.diag_embedded_fock(fock_B, ovlp_B)
+            fat_info["SUBSYS_B_DIAG_TIME"] += time.time() - time_s
+
+            densmat_A = self.A_LL.density_matrices_out.copy()
+            densmat_B = self.B_LL.density_matrices_out.copy()
+
+        if not converged:
+            root_print(f"WARNING: freeze-and-thaw not converged after {ncycles} cycles "
+                       f"(max|[F,D]| = {err_max:.3e})")
+        fat_info["CONVERGED"] = converged
+
+        return densmat_A, densmat_B
 
     def construct_embedded_fock(self, dmab_in=None, dma_in=None, dmb_in=None, a_nspade_mos=None):
         """Returns construct_embedding_potential outputs with the full embedded
@@ -1295,7 +1461,7 @@ class ProjectionEmbedding(EmbeddingBase):
         #    components associated with subsystem B.
         if self.fat_on:
             start = time.time()
-            densmat_A_HL, densmat_A_LL, densmat_B_LL = self.freeze_and_thaw(densmat_A_LL, densmat_B_LL, overlap, ncycles=200, mixing_type="densmat")
+            densmat_A_HL, densmat_A_LL, densmat_B_LL = self.freeze_and_thaw(densmat_A_LL, densmat_B_LL, overlap, ncycles=200, mixing_type=self.fat_update)
             end = time.time()
             self.fat_total_time = end - start
             self.output_timing_dict["FAT_Total"] = self.fat_total_time

@@ -114,7 +114,10 @@ class DIIS():
             return output, None
         else:
             time_s = time.time()
-            self.add_history(update_matrix, residual)
+            # Pulay/Anderson mixing extrapolates the *input* matrices,
+            # sum_i c_i (in_i + alpha * R_i) with R_i = out_i - in_i.
+            # Storing the output here instead gave sum_i c_i (in_i + (1 + alpha) R_i).
+            self.add_history(self.prev_opt_in, residual)
             if self.debug: root_print(f"Time for history add: {time.time()-time_s}")
 
         time_s = time.time()            
@@ -147,3 +150,68 @@ class DIIS():
 
         return output, coeffs
 
+
+
+class CommutatorDIIS():
+    """Pulay commutator DIIS over several coupled Fock matrices
+
+    Extrapolates a set of Fock matrices (e.g. the embedded Fock matrices
+    of subsystems A and B in freeze-and-thaw) with one shared set of
+    coefficients. The error vector of each Fock matrix is its commutator
+    e = F D S - S D F, and the DIIS error is the concatenation of all
+    of them, which is zero only when every subsystem is converged
+    together. Each entry of a SpinKpointArray (spin, k-point) is a
+    separate block of the error vector.
+
+    Only dense (serial) np.ndarray blocks are supported.
+    """
+
+    def __init__(self, hist_len=8):
+        self.hist_len = hist_len
+        self.fock_hist = []
+        self.err_hist = []
+
+    @staticmethod
+    def _inner(errs_1, errs_2):
+        total = 0.0
+        for err_1, err_2 in zip(errs_1, errs_2):
+            for key in err_1.data.keys():
+                total += np.real(np.vdot(err_1.data[key], err_2.data[key]))
+        return total
+
+    def update(self, focks, errs):
+        """Adds focks/errs (lists of SpinKpointArray) to the history and
+        returns the extrapolated Fock matrices, in the same order"""
+        self.fock_hist.append([fock.copy() for fock in focks])
+        self.err_hist.append([err.copy() for err in errs])
+        if len(self.fock_hist) > self.hist_len:
+            self.fock_hist.pop(0)
+            self.err_hist.pop(0)
+
+        n_hist = len(self.fock_hist)
+        if n_hist == 1:
+            return [fock.copy() for fock in focks]
+
+        b_mat = np.zeros((n_hist + 1, n_hist + 1))
+        for i in range(n_hist):
+            for j in range(i + 1):
+                b_mat[i, j] = b_mat[j, i] = self._inner(self.err_hist[i], self.err_hist[j])
+        # Scale for conditioning: the coefficients are scale invariant
+        b_mat[:n_hist, :n_hist] /= np.max(np.abs(np.diag(b_mat)[:n_hist]))
+        b_mat[n_hist, :n_hist] = b_mat[:n_hist, n_hist] = -1.0
+        rhs = np.zeros(n_hist + 1)
+        rhs[n_hist] = -1.0
+
+        try:
+            coeffs = np.linalg.solve(b_mat, rhs)[:n_hist]
+        except np.linalg.LinAlgError:
+            coeffs = np.linalg.lstsq(b_mat, rhs, rcond=None)[0][:n_hist]
+
+        extrapolated = []
+        for i_fock in range(len(focks)):
+            fock = self.fock_hist[0][i_fock] * float(coeffs[0])
+            for i_hist in range(1, n_hist):
+                fock = fock + self.fock_hist[i_hist][i_fock] * float(coeffs[i_hist])
+            extrapolated.append(fock)
+
+        return extrapolated

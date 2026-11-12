@@ -611,12 +611,34 @@ class AtomsEmbed():
 
     def run_embasi_diag_emb_pot(self, dm_in=None, emb_pot=None, proj_pot=None, sc_huz_dm=None,
                                 sc_huz_ovlp=None, sc_huz_ham=None, no_calc=False):
-        """A wrapper function for executing an SCF calculation with an embedding potential
+        """One diagonalisation of the embedded Fock matrix of this subsystem
+
+        Builds the embedded Fock matrix (build_embedded_fock) and
+        diagonalises it once (diag_embedded_fock), setting the output
+        density matrix. No SCF cycle is run in the QM code.
         """
-        from copy import copy, deepcopy
-        import time
-        from embasi.roothan_hall_eigensolver_scalapack import hamiltonian_eigensolv_parallel
-        from embasi.roothan_hall_eigensolver import hamiltonian_eigensolv
+        emb_ham, ovlp = self.build_embedded_fock(sc_huz_dm=sc_huz_dm,
+                                                 sc_huz_ovlp=sc_huz_ovlp,
+                                                 sc_huz_ham=sc_huz_ham,
+                                                 proj_pot=proj_pot)
+        self.diag_embedded_fock(emb_ham, ovlp)
+
+        # Unset all for clarity
+        self.fock_embedding_matrix = None
+        self.density_matrix_in = None
+
+    def build_embedded_fock(self, sc_huz_dm, sc_huz_ovlp, sc_huz_ham, proj_pot=None):
+        """Embedded Fock and overlap matrices of this subsystem, in its own basis
+
+        F~ = F^{AB}[gamma^A + gamma^B] + P[gamma^other], where F^{AB} is the
+        supersystem Fock matrix (sc_huz_ham) and P the Huzinaga projector
+        against the other subsystem's density (sc_huz_dm). With truncation,
+        both are returned in the truncated basis of the layer.
+
+        Returns
+        -------
+        emb_ham, ovlp : SpinKpointArray
+        """
         from embasi.embedding_projectors import huzinaga_projector_abs_trunc
 
         self.huzinaga_dm_in = sc_huz_dm
@@ -634,6 +656,23 @@ class AtomsEmbed():
         else:
             emb_ham = sc_huz_ham + projector
             ovlp = sc_huz_ovlp
+
+        self.huzinaga_dm_in = None
+        self.huzinaga_ovlp_in = None
+        self.embedding_ham_in = None
+
+        return emb_ham, ovlp
+
+    def diag_embedded_fock(self, emb_ham, ovlp):
+        """Diagonalises an embedded Fock matrix and sets the output density
+
+        Fills the lowest states with input_fragment_nelectrons (per spin
+        channel from _occupation_spin), and stores the density matrix,
+        expanded to the full basis if the layer is truncated, as
+        density_matrices_out.
+        """
+        from embasi.roothan_hall_eigensolver_scalapack import hamiltonian_eigensolv_parallel
+        from embasi.roothan_hall_eigensolver import hamiltonian_eigensolv
 
         nelecs = self.input_fragment_nelectrons
         if self.parallel:
@@ -669,13 +708,6 @@ class AtomsEmbed():
             self._dm = self.truncated_mat_to_full(SpinKpointArray(dm_out, self.n_spins, self.n_kpoints))
         else:
             self._dm = SpinKpointArray(dm_out, self.n_spins, self.n_kpoints)
-
-        # Unset all for clarity
-        self.huzinaga_dm_in = None
-        self.huzinaga_ovlp_in = None
-        self.fock_embedding_matrix = None
-        self.embedding_ham_in = None
-        self.density_matrix_in = None
 
     def run(self, ev_corr_scf=False, ev_corr_scf_final_density=False, emb_pot_scf=False, close_calc=True):
         """Invokes the ASI_run() call and extracts matrix quantities
