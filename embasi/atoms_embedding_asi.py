@@ -263,8 +263,11 @@ class AtomsEmbed():
 
         return SpinKpointArray(new_spinks_mat, spinks_mat.n_spins, spinks_mat.n_kpoints)
 
-    @full_mat_to_truncated.register
-    def _(self, full_mat: Union[np.ndarray | NPScal]):
+    # Register each type explicitly: Union annotations are only
+    # understood by singledispatchmethod.register from Python 3.11
+    @full_mat_to_truncated.register(np.ndarray)
+    @full_mat_to_truncated.register(NPScal)
+    def _(self, full_mat: Union[np.ndarray, NPScal]):
         """Converts a matrix quantity from a full to a truncated basis
 
         Deletes matrix elements which are not part of the active region,
@@ -401,8 +404,11 @@ class AtomsEmbed():
 
         return SpinKpointArray(new_spinks_mat, spinks_mat.n_spins, spinks_mat.n_kpoints)
 
-    @truncated_mat_to_full.register
-    def _(self, trunc_mat: Union[np.ndarray | NPScal]):
+    # Register each type explicitly: Union annotations are only
+    # understood by singledispatchmethod.register from Python 3.11
+    @truncated_mat_to_full.register(np.ndarray)
+    @truncated_mat_to_full.register(NPScal)
+    def _(self, trunc_mat: Union[np.ndarray, NPScal]):
         """Converts a matrix quantity from a truncated to a full basis
 
         Maps matrix elements of give basis functions to their corresponding

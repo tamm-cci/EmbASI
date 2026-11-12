@@ -914,6 +914,9 @@ class ProjectionEmbedding(EmbeddingBase):
         # environment
         self.A_LL.input_fragment_nelectrons = self.A_pop
         self.A_LL.run_noscf(dm_in=densmat_A_LL)
+        # The absolute-truncation energy pairs E_LL with the first-order
+        # correction below, so it is taken at the FAT density of A
+        self.subsys_A_lowlvl_totalen = self.A_LL.ev_corr_total_energy
 
         emb_ham_a = self.AB_LL.hamiltonian_total - self.A_LL.hamiltonian_total
 
@@ -930,7 +933,7 @@ class ProjectionEmbedding(EmbeddingBase):
 
         self.order_1_embedding_corr = ((densmat_A_HL - densmat_A_LL) @ self.vemb).trace() * 27.211384500
 
-        return densmat_A_LL, densmat_B_LL
+        return densmat_A_HL, densmat_A_LL, densmat_B_LL
 
     def construct_embedded_fock(self, dmab_in=None, dma_in=None, dmb_in=None, a_nspade_mos=None):
         """Returns construct_embedding_potential outputs with the full embedded
@@ -1292,7 +1295,7 @@ class ProjectionEmbedding(EmbeddingBase):
         #    components associated with subsystem B.
         if self.fat_on:
             start = time.time()
-            densmat_A_HL, densmat_B_LL = self.freeze_and_thaw(densmat_A_LL, densmat_B_LL, overlap, ncycles=200, mixing_type="densmat")
+            densmat_A_HL, densmat_A_LL, densmat_B_LL = self.freeze_and_thaw(densmat_A_LL, densmat_B_LL, overlap, ncycles=200, mixing_type="densmat")
             end = time.time()
             self.fat_total_time = end - start
             self.output_timing_dict["FAT_Total"] = self.fat_total_time
@@ -1339,13 +1342,15 @@ class ProjectionEmbedding(EmbeddingBase):
             densmat_A_HL = self.A_HL.density_matrices_out.copy()
 
         if self.total_energy_corr == "nonscf":
-            # Calculate A low-level reference energy
-            self.A_LL.input_fragment_nelectrons = self.A_pop
-            self.A_LL.run_noscf(dm_in=densmat_A_HL)
-            self.subsys_A_lowlvl_totalen = self.A_LL.ev_corr_total_energy
-            self.time_a_lowlevel_pp = self.A_LL.last_run_time
-            self.output_timing_dict["A_LL_NONSCF_POSTPROC"] = self.time_a_lowlevel_pp
-            self.output_data_dict["TOTALENERGY"]["A_LL_PP"] = self.subsys_A_lowlvl_totalen
+            # Calculate A low-level reference energy (with absolute
+            # truncation, freeze_and_thaw has already set it)
+            if not self.abs_truncate:
+                self.A_LL.input_fragment_nelectrons = self.A_pop
+                self.A_LL.run_noscf(dm_in=densmat_A_HL)
+                self.subsys_A_lowlvl_totalen = self.A_LL.ev_corr_total_energy
+                self.time_a_lowlevel_pp = self.A_LL.last_run_time
+                self.output_timing_dict["A_LL_NONSCF_POSTPROC"] = self.time_a_lowlevel_pp
+                self.output_data_dict["TOTALENERGY"]["A_LL_PP"] = self.subsys_A_lowlvl_totalen
 
             # Calculate AB low-level reference energy
             dm_tot = densmat_A_HL + densmat_B_LL
