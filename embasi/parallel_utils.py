@@ -69,12 +69,17 @@ def mpi_bcast_matrix_storage(data_dict, nrows, ncols):
 
     for data_key in data_dict_keys:
 
-        if MPI.COMM_WORLD.Get_rank() == 0:
-            data_buf = data_dict[tuple(data_key)]
-        else:
-            data_buf = np.zeros((nrows, ncols), dtype=np.float64)
+        # Complex (k-point) matrices are sent as complex; real ones as before
+        is_complex = mpi_bcast_integer(
+            int(np.iscomplexobj(data_dict[tuple(data_key)])) if MPI.COMM_WORLD.Get_rank() == 0 else 0)
+        dtype, mpi_type = (np.complex128, MPI.C_DOUBLE_COMPLEX) if is_complex else (np.float64, MPI.DOUBLE)
 
-        MPI.COMM_WORLD.Bcast([data_buf, MPI.DOUBLE], root=0)
+        if MPI.COMM_WORLD.Get_rank() == 0:
+            data_buf = np.ascontiguousarray(data_dict[tuple(data_key)], dtype=dtype)
+        else:
+            data_buf = np.zeros((nrows, ncols), dtype=dtype)
+
+        MPI.COMM_WORLD.Bcast([data_buf, mpi_type], root=0)
 
         if MPI.COMM_WORLD.Get_rank() != 0:
             data_dict[tuple(data_key)] = data_buf.copy()
@@ -114,12 +119,16 @@ def mpi_bcast_matrix(array):
     # Broadcast the size of the data
     MPI.COMM_WORLD.Bcast([data_shape, MPI.INT16_T], root=0)
     
-    if MPI.COMM_WORLD.Get_rank() == 0:
-        data_buf = array
-    else:
-        data_buf = np.zeros(data_shape, dtype=np.float64)
+    # Complex (k-point) matrices are sent as complex; real ones as before
+    is_complex = mpi_bcast_integer(int(np.iscomplexobj(array)) if MPI.COMM_WORLD.Get_rank() == 0 else 0)
+    dtype, mpi_type = (np.complex128, MPI.C_DOUBLE_COMPLEX) if is_complex else (np.float64, MPI.DOUBLE)
 
-    MPI.COMM_WORLD.Bcast([data_buf, MPI.DOUBLE], root=0)
+    if MPI.COMM_WORLD.Get_rank() == 0:
+        data_buf = np.ascontiguousarray(array, dtype=dtype)
+    else:
+        data_buf = np.zeros(data_shape, dtype=dtype)
+
+    MPI.COMM_WORLD.Bcast([data_buf, mpi_type], root=0)
 
     return data_buf
 

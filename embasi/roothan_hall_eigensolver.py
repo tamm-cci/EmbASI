@@ -1,17 +1,19 @@
 import numpy as np
+from embasi.ks_array import dagger
+
 
 def invsqr_overlap_calc(overlap):
 
     sigma, U = np.linalg.eigh(overlap)
     sigma_sqrt = np.diag(sigma**(-0.5))
 
-    return U @ sigma_sqrt @ U.T
+    return U @ sigma_sqrt @ dagger(U)
 
 def xform_hamiltonian(hamiltonian, xform_mat):
 
     from embasi.parallel_utils import root_print
 
-    return xform_mat.T @ hamiltonian @ xform_mat
+    return dagger(xform_mat) @ hamiltonian @ xform_mat
 
 def back_xform_evecs(eigenvectors, xform_mat):
 
@@ -40,7 +42,7 @@ def calculate_densmat(eigenvectors, occ_mat):
     for idx in range(np.size(occ_mat)):
         occ_evecs[:,idx] = occ_evecs[:,idx] * np.sqrt(occ_mat[idx])
 
-    return occ_evecs @ occ_evecs.T
+    return occ_evecs @ dagger(occ_evecs)
 
 def overlap_illcondition_check(overlap, thresh, inv=True, return_mask=False):
 
@@ -74,7 +76,7 @@ def overlap_illcondition_check(overlap, thresh, inv=True, return_mask=False):
         else:
             sigma_sqrt = np.diag(ovlp_evals**(0.5))
 
-        ovlp_filtered = ovlp_evecs @ sigma_sqrt @ ovlp_evecs.T
+        ovlp_filtered = ovlp_evecs @ sigma_sqrt @ dagger(ovlp_evecs)
 
     if return_mask:
         return ovlp_filtered, n_bad, good_val_mask
@@ -99,9 +101,10 @@ def hamiltonian_eigensolv(hamiltonian, overlap, nelec, nspins=1, nkpts=1, basis_
             xform_mat, n_bad = overlap_illcondition_check(overlap[ispin,ikpt], thresh)
             n_good = n_basis - n_bad
 
-            evals[(ispin,ikpt)], evecs[(ispin,ikpt)] = np.linalg.eig(xform_hamiltonian(hamiltonian[ispin,ikpt], xform_mat))
-            evals[(ispin,ikpt)] = np.real(evals[(ispin,ikpt)])
-            evecs[(ispin,ikpt)] = np.real(evecs[(ispin,ikpt)])
+            # X^dagger H X is Hermitian: eigh gives real eigenvalues and
+            # orthonormal (complex, at k != Gamma) eigenvectors, including
+            # within degenerate levels, which eig does not guarantee
+            evals[(ispin,ikpt)], evecs[(ispin,ikpt)] = np.linalg.eigh(xform_hamiltonian(hamiltonian[ispin,ikpt], xform_mat))
 
             if (not return_orthog):
                 evecs[(ispin,ikpt)] = back_xform_evecs(evecs[(ispin,ikpt)], xform_mat)
@@ -116,12 +119,7 @@ def hamiltonian_eigensolv(hamiltonian, overlap, nelec, nspins=1, nkpts=1, basis_
                 evecs[(ispin,ikpt)] = evecs[(ispin,ikpt)][:,idx]
                 evecs_orthog[(ispin,ikpt)] = evecs_orthog[(ispin,ikpt)][:,idx]
 
-    # Just assume we're dealing with simple insulators for now
-    # - fill from the bottom up
-
-    # Only deal with spins for now - kpoints will need some way
-    # to communicate k-indexed evals between nodes and also intelligently
-    # compare eigenvalues
+    # Insulators only: the same number of states is filled at every k-point
     occ_mat = fill_occupations(evals, nelec, nspins, spin)
 
     evecs = SpinKpointArray(evecs, nspins, nkpts)
@@ -148,13 +146,20 @@ def fill_occupations(evals, nelec, nspins, spin=None):
     above empty levels in the other - e.g. any excited-configuration triplet
     of a closed-shell molecule, where it silently returns the singlet's
     Nalpha == Nbeta filling. Pass ``spin`` whenever the caller knows it.
+
+    With several k-points, N is the number of electrons per cell and the same
+    number of states is filled in each channel at every k-point: an insulator,
+    where every band is either full or empty across the Brillouin zone. The
+    cross-channel aufbau is done on the first k-point. A warning is printed if
+    a filled level at one k-point lies above an empty level at another (a
+    metal, which fixed per-k filling cannot describe).
     """
-    occ_mat = {}
+    from embasi.parallel_utils import root_print
+
+    kpts = sorted({ikpt for (_, ikpt) in evals.keys()})
     n_states = np.size(evals[(0,0)])
     if nspins > 1:
         n_total = int(round(nelec))
-        occ_mat[(0,0)] = np.zeros(n_states)
-        occ_mat[(1,0)] = np.zeros(n_states)
         if spin is not None:
             s = int(round(spin))
             if abs(s) > n_total or (n_total - s) % 2 != 0:
@@ -162,19 +167,33 @@ def fill_occupations(evals, nelec, nspins, spin=None):
             n_alpha, n_beta = (n_total + s) // 2, (n_total - s) // 2
             if max(n_alpha, n_beta) > n_states:
                 raise ValueError(f"({n_alpha}, {n_beta}) electrons do not fit {n_states} states")
-            occ_mat[(0,0)][:n_alpha] = 1.0
-            occ_mat[(1,0)][:n_beta] = 1.0
         else:
-            alpha_nelecs = 0
-            beta_nelecs = 0
+            n_alpha = 0
+            n_beta = 0
             for _ in range(n_total):
-                if evals[(0,0)][alpha_nelecs] < evals[(1,0)][beta_nelecs]:
-                    occ_mat[(0,0)][alpha_nelecs] = 1.0
-                    alpha_nelecs += 1
+                if evals[(0,0)][n_alpha] < evals[(1,0)][n_beta]:
+                    n_alpha += 1
                 else:
-                    occ_mat[(1,0)][beta_nelecs] = 1.0
-                    beta_nelecs += 1
+                    n_beta += 1
+        n_filled = {0: n_alpha, 1: n_beta}
+        occ_value = 1.0
     else:
-        occ_mat[(0,0)] = np.zeros(n_states)
-        occ_mat[(0,0)][:round(nelec/2)] = 2.0
+        n_filled = {0: round(nelec/2)}
+        occ_value = 2.0
+
+    occ_mat = {}
+    for ispin, n_occ in n_filled.items():
+        for ikpt in kpts:
+            occ_mat[(ispin, ikpt)] = np.zeros(n_states)
+            occ_mat[(ispin, ikpt)][:n_occ] = occ_value
+
+    if len(kpts) > 1:
+        homo = max(evals[(ispin, ikpt)][n_occ - 1] for ispin, n_occ in n_filled.items()
+                   if n_occ > 0 for ikpt in kpts)
+        lumo = min(evals[(ispin, ikpt)][n_occ] for ispin, n_occ in n_filled.items()
+                   if n_occ < n_states for ikpt in kpts)
+        if homo >= lumo:
+            root_print(f"WARNING: highest filled level ({homo:.6f}) is not below the lowest "
+                       f"empty level ({lumo:.6f}) across the k-points: no band gap, so "
+                       "filling the same number of states at every k-point is not valid")
     return occ_mat

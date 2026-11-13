@@ -183,13 +183,16 @@ class CommutatorDIIS():
     @staticmethod
     def _inner(errs_1, errs_2):
         """Re <errs_1|errs_2>, summed over subsystems and (spin, k-point)
-        blocks. Written as sum(conj(a) * b) rather than np.vdot, which
+        blocks, each k-point weighted. Written as sum(conj(a) * b) rather than np.vdot, which
         NPScal does not implement; np.sum of an NPScal is reduced over the
         whole grid, so the result is the same global value on every rank."""
         total = 0.0
         for err_1, err_2 in zip(errs_1, errs_2):
-            for key in err_1.data.keys():
-                total += float(np.real(np.sum(np.conj(err_1.data[key]) * err_2.data[key])))
+            for (ispin, ikpt) in err_1.data.keys():
+                # k-points count by their Brillouin-zone weight (1 at Gamma)
+                total += err_1.kpt_weights[ikpt] * \
+                    float(np.real(np.sum(np.conj(err_1.data[(ispin, ikpt)]) *
+                                         err_2.data[(ispin, ikpt)])))
         return total
 
     def update(self, focks, errs):

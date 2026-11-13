@@ -3,6 +3,19 @@ import scalapack4py.npscal.math_utils.operations as op
 from scalapack4py.npscal import rechunk as _rechunk, gather_to_global as _gather_to_global
 import numpy as np
 
+
+def is_complex_block(mat):
+    """Whether a matrix block (np.ndarray or NPScal) holds complex data,
+    checked on the local data so an NPScal is never gathered"""
+    return np.iscomplexobj(mat.loc_array if hasattr(mat, "loc_array") else mat)
+
+
+def dagger(mat):
+    """Conjugate transpose of a matrix block (np.ndarray or NPScal); the plain
+    transpose for real data, so the Gamma-point (real) path is unchanged"""
+    return mat.conj().T if is_complex_block(mat) else mat.T
+
+
 class SpinKpointArray:
     """
     A wrapper around a 2D NumPy array that provides additional indexing
@@ -41,16 +54,29 @@ class SpinKpointArray:
         base_array_dict,
         n_spin: int = 1,
         n_kpoints: int = 1,
+        kpt_weights=None,
     ):
-        """Initialize the SpinKpointArray wrapper."""        
+        """Initialize the SpinKpointArray wrapper.
+
+        kpt_weights : sequence of float, optional
+            Brillouin-zone weight of each k-point, summing to 1. Defaults to
+            uniform weights 1/n_kpoints (an unreduced Monkhorst-Pack grid);
+            1 for a single (Gamma) k-point.
+        """
         if n_spin < 1:
             raise ValueError(f"n_spin must be >= 1, got {n_spin}")
-        
+
         if n_kpoints < 1:
             raise ValueError(f"n_kpoints must be >= 1, got {n_kpoints}")
-        
+
         self.n_spins = n_spin
         self.n_kpoints = n_kpoints
+        if kpt_weights is None:
+            kpt_weights = np.full(n_kpoints, 1.0 / n_kpoints)
+        kpt_weights = np.asarray(kpt_weights, dtype=float)
+        if kpt_weights.shape != (n_kpoints,) or not np.isclose(kpt_weights.sum(), 1.0):
+            raise ValueError(f"kpt_weights must be {n_kpoints} values summing to 1, got {kpt_weights}")
+        self.kpt_weights = kpt_weights
         self.base_shape = base_array_dict[(0,0)].shape
 
         # Create the XD Dictionary with array: (n_spin, n_kpoints, dim0, dim1, ...)
@@ -259,6 +285,7 @@ class SpinKpointArray:
         new_instance = SpinKpointArray.__new__(SpinKpointArray)
         new_instance.n_spins = self.n_spins
         new_instance.n_kpoints = self.n_kpoints
+        new_instance.kpt_weights = self.kpt_weights.copy()
         new_instance.base_shape = self.base_shape
         new_instance.ndim = self.ndim
         new_instance.transpose = self.transpose.copy()
@@ -383,13 +410,35 @@ class SpinKpointArray:
         self.transpose = [False]
         return self
 
+    @property
+    def H(self):
+        """Conjugate transpose of every (spin, k-point) block, as a new array
+
+        Unlike .T, which only sets a flag read by __matmul__, this returns
+        the transposed data: for complex k-point blocks the conjugate is
+        needed as well (e.g. a density matrix C C^dagger), which the flag
+        does not express. For real blocks it equals the transpose.
+        """
+        new_data = self.copy()
+        for spin in range(self.n_spins):
+            for kpt in range(self.n_kpoints):
+                new_data[spin, kpt] = dagger(self[spin, kpt])
+        return new_data
+
     def trace(self):
+        """Brillouin-zone average of the trace, summed over spins
+
+        sum_s sum_k w_k Tr(A[s, k]). Every caller takes the trace of a
+        product of Hermitian matrices (a population or an energy), which is
+        real, so the real part is returned. With one k-point (w = 1) this is
+        the plain sum over spins.
+        """
         trace_sum = 0
         for spin in range(self.n_spins):
             for kpt in range(self.n_kpoints):
-                trace_sum += op.trace(self[spin,kpt])
+                trace_sum += self.kpt_weights[kpt] * op.trace(self[spin,kpt])
 
-        return trace_sum
+        return np.real(trace_sum)
 
     def diag(self):
         diags = np.array(list(map(op.diag, self)))
@@ -402,11 +451,12 @@ class SpinKpointArray:
         return diag_sum
 
     def spin_kpt_sum(self):
-        for array in self:
-            try:
-                sum_array += array
-            except NameError:
-                sum_array = array.copy()
+        """sum_s sum_k w_k A[s, k]: summed over spins, k-point weighted"""
+        sum_array = None
+        for spin in range(self.n_spins):
+            for kpt in range(self.n_kpoints):
+                term = self[spin, kpt] * float(self.kpt_weights[kpt])
+                sum_array = term if sum_array is None else sum_array + term
 
         return sum_array
 

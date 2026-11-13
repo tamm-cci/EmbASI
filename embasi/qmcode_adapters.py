@@ -551,6 +551,24 @@ class QMCodeASIAdapter(QMCodeAdapter):
         n_kpoints = asi.n_kpts
         n_spins = asi.n_spin
 
+        if n_kpoints > 1:
+            # Every (spin, k-point) block has to be on every process: the
+            # callbacks store only the blocks of the calling process, and a
+            # SpinKpointArray needs all of them.
+            if asi.n_local_ks != n_spins * n_kpoints:
+                raise NotImplementedError(
+                    f"{asi.n_local_ks} of the {n_spins * n_kpoints} (spin, k-point) "
+                    "blocks are on this process: k-points distributed over MPI "
+                    "processes are not supported yet")
+            # SpinKpointArray uses uniform k-point weights, which is only right
+            # for the full (unreduced) grid; ASI exposes no weights.
+            k_grid = getattr(atomsembed.initial_calc, "parameters", {}).get("k_grid")
+            if k_grid is not None and n_kpoints != int(np.prod(k_grid)):
+                raise NotImplementedError(
+                    f"{n_kpoints} k-points for k_grid {tuple(k_grid)}: a symmetry-reduced "
+                    "grid, whose k-point weights are not available through ASI. Use the "
+                    "full grid (no symmetry reduction).")
+
         # BROADCAST QUANTITIES ONLY CALCULATED FOR THE HEAD NODE TO ALL
         # OTHER NODES - ONLY DO THIS IN SERIAL MODE AS THE NPSCAL ARRAYS
         # ARE ALREADY DISTRIBUTED TO EACH TASK

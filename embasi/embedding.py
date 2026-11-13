@@ -1028,7 +1028,7 @@ class ProjectionEmbedding(EmbeddingBase):
             for key in fock.data.keys():
                 f, d, s = fock.data[key], dm.data[key], ovlp.data[key]
                 err[key] = f @ d @ s - s @ d @ f
-            return SpinKpointArray(err, fock.n_spins, fock.n_kpoints)
+            return SpinKpointArray(err, fock.n_spins, fock.n_kpoints, fock.kpt_weights)
 
         def max_abs(err):
             return max(float(np.max(np.abs(block))) for block in err.data.values())

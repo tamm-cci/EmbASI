@@ -1,4 +1,5 @@
 import numpy as np
+from embasi.ks_array import dagger
 from embasi.parallel_utils import root_print, mpi_bcast_matrix
 from embasi.roothan_hall_eigensolver import hamiltonian_eigensolv
 from embasi.roothan_hall_eigensolver_scalapack import hamiltonian_eigensolv_parallel
@@ -99,44 +100,63 @@ def spade_localisation(atomsembed, hamiltonian, overlap, parallel=False,
     rot_evecs_occ_a = evecs.copy()
     rot_evecs_occ_b = evecs.copy()
 
-    # TODO: Clean this up and add automatic detection based on eigenvalues.
-    # This should be done in one routine - this is very FORTRAN-like.
-    if spade_ncores > 0:
-        root_print("Performing separate core-valence SPADE localisation.")
+    kpt_weights = overlap.kpt_weights
+
+    def spade_svds(state_min, state_max):
+        """SVD of the subsystem-A rows of the orthogonalised occupied MOs
+        state_min..state_max (per spin channel; the upper limit may be None
+        for each channel's own occupied count), at every (spin, k-point)"""
+        out = {}
         for ispin in range(atomsembed.n_spins):
             for ikpt in range(atomsembed.n_kpoints):
-                max_occ_state = np.count_nonzero(occ_mat[ispin,ikpt])
-
-                evecs_occ_orthog = evecs_orthog[ispin, ikpt, :, :spade_ncores]
-                evecs_occ_a_orthog = evecs_occ_orthog[mask_val, :]
-
+                top = np.count_nonzero(occ_mat[ispin, ikpt]) if state_max is None else state_max
+                evecs_occ_a_orthog = evecs_orthog[ispin, ikpt, :, state_min:top][mask_val, :]
                 if parallel:
-                    u, svals, v = svd(evecs_occ_a_orthog)
+                    u, svals, vh = svd(evecs_occ_a_orthog)
                 else:
-                    u, svals, v = np.linalg.svd(evecs_occ_a_orthog, full_matrices=True)
+                    u, svals, vh = np.linalg.svd(evecs_occ_a_orthog, full_matrices=True)
+                out[(ispin, ikpt)] = (np.asarray(svals), vh, top)
+        return out
 
-                svals_diff = np.ediff1d(svals**2.0)
-                max_sval_change_idx = np.argmax(np.abs(svals_diff)) + 1
+    def common_cut(svds, ispin, manual_state):
+        """One SPADE cut for every k-point of a spin channel, at the largest
+        gap of the k-point-weighted mean of the squared singular values: the
+        same number of subsystem-A orbitals at every k-point, so A has an
+        integer number of electrons per cell. With one k-point this is the
+        usual largest-gap cut."""
+        sv2 = sum(kpt_weights[ikpt] * svds[(ispin, ikpt)][0]**2.0
+                  for ikpt in range(atomsembed.n_kpoints))
+        return int(np.argmax(np.abs(np.ediff1d(sv2)))) + manual_state + 1
 
-                root_print(f'MAX OCC CORE STATE {spade_ncores} for Spin Channel {ispin}')
-                root_print(f'SPADE CORE STATE FOR: Spin Channel {ispin}, K-point {ikpt}')
-                root_print(f'Maximum SPADE core state for subsystem A: {max_sval_change_idx}')
+    def rotate(svds, ispin, cut, state_min):
+        for ikpt in range(atomsembed.n_kpoints):
+            _, vh, top = svds[(ispin, ikpt)]
+            evecs_occ = evecs[ispin, ikpt, :, state_min:top]
+            # vh holds the right singular vectors as conjugated rows
+            rot_evecs_occ_a[ispin, ikpt] = evecs_occ @ dagger(vh[:cut, :])
+            rot_evecs_occ_b[ispin, ikpt] = evecs_occ @ dagger(vh[cut:, :])
+            evecs_occ_ab[ispin, ikpt] = evecs_occ.copy()
 
-                evecs_occ = evecs[ispin, ikpt, :, :spade_ncores]
+    def densmats(scale):
+        return (scale * (evecs_occ_ab @ evecs_occ_ab.H),
+                scale * (rot_evecs_occ_a @ rot_evecs_occ_a.H),
+                scale * (rot_evecs_occ_b @ rot_evecs_occ_b.H))
 
-                rot_evecs_occ_a[ispin, ikpt] = evecs_occ @ v[:max_sval_change_idx, :].T
-                rot_evecs_occ_b[ispin, ikpt] = evecs_occ @ v[max_sval_change_idx:, :].T
-                evecs_occ_ab[ispin, ikpt] = evecs_occ.copy()
+    occ_scale = 2.0 if atomsembed.n_spins == 1 else 1.0
 
-        # @TODOSPIN: Need to redefine occupancies - this obviously won't work for k-points
-        if atomsembed.n_spins == 1:
-            density_matrix_supersystem = 2.0 * (evecs_occ_ab @ evecs_occ_ab.copy().T)
-            density_matrix_subsys_a = 2.0 * (rot_evecs_occ_a @ rot_evecs_occ_a.copy().T)
-            density_matrix_subsys_b = 2.0 * (rot_evecs_occ_b @ rot_evecs_occ_b.copy().T)
-        else:
-            density_matrix_supersystem = (evecs_occ_ab @ evecs_occ_ab.copy().T)
-            density_matrix_subsys_a = (rot_evecs_occ_a @ rot_evecs_occ_a.copy().T)
-            density_matrix_subsys_b = (rot_evecs_occ_b @ rot_evecs_occ_b.copy().T)
+    # TODO: Clean this up and add automatic detection based on eigenvalues.
+    if spade_ncores > 0:
+        root_print("Performing separate core-valence SPADE localisation.")
+        core_svds = spade_svds(0, spade_ncores)
+        for ispin in range(atomsembed.n_spins):
+            cut = common_cut(core_svds, ispin, 0)
+            root_print(f'MAX OCC CORE STATE {spade_ncores} for Spin Channel {ispin}')
+            root_print(f'Maximum SPADE core state for subsystem A, Spin Channel {ispin}, '
+                       f'all {atomsembed.n_kpoints} k-point(s): {cut}')
+            rotate(core_svds, ispin, cut, 0)
+
+        density_matrix_supersystem, density_matrix_subsys_a, density_matrix_subsys_b = \
+            densmats(occ_scale)
 
         root_print(f'SPADE CORE localised subsystem A charge: {(overlap @ density_matrix_subsys_a).trace()}')
         root_print(f'SPADE CORE localised subsystem B charge: {(overlap @ density_matrix_subsys_b).trace()}')
@@ -162,78 +182,50 @@ def spade_localisation(atomsembed, hamiltonian, overlap, parallel=False,
                    f'by subsystem A: {supersystem_spin} '
                    f'(Nalpha={n_occ_alpha_total}, Nbeta={n_occ_beta_total})')
 
-    max_sval_change_idx_alpha_by_kpt = {}
-
+    valence_svds = spade_svds(spade_ncores, None)
+    alpha_cut = None
     for ispin in range(atomsembed.n_spins):
-        for ikpt in range(atomsembed.n_kpoints):
-            max_occ_state = np.count_nonzero(occ_mat[ispin,ikpt])
+        max_occ_state = np.count_nonzero(occ_mat[ispin, 0])
+        beta_channel = (ispin == 1) and (atomsembed.n_spins == 2)
 
-            evecs_occ_orthog = evecs_orthog[ispin, ikpt, :, spade_ncores:max_occ_state]
-            evecs_occ_a_orthog = evecs_occ_orthog[mask_val, :]
+        if beta_channel:
+            # Do not independently gap-search the beta channel: two
+            # unrelated SVD gap searches (one per channel) have no
+            # reason to agree on a partition that nets subsystem B
+            # to zero spin. Instead force the cutoff so subsystem A
+            # carries the whole supersystem spin exactly, and
+            # subsystem B nets to zero by construction.
+            cut = alpha_cut - supersystem_spin
+            n_occ_beta_channel = max_occ_state - spade_ncores
 
-            if parallel:
-                u, svals, v = svd(evecs_occ_a_orthog)
-            else:
-                u, svals, v = np.linalg.svd(evecs_occ_a_orthog, full_matrices=True)
+            if not (0 <= cut <= n_occ_beta_channel):
+                raise Exception(
+                    f"SPADE beta-channel cutoff ({cut}), forced from "
+                    f"the alpha-channel partition ({alpha_cut}) "
+                    f"and the supersystem spin ({supersystem_spin}), falls outside the "
+                    f"valid range [0, {n_occ_beta_channel}]. Subsystem A cannot be "
+                    f"assigned this much spin from the beta-occupied MOs available."
+                )
+        elif a_nspade_mos is not None:
+            cut = a_nspade_mos - spade_ncores
+        else:
+            cut = common_cut(valence_svds, ispin, spade_manual_state)
 
-            beta_channel = (ispin == 1) and (atomsembed.n_spins == 2)
+        if ispin == 0:
+            alpha_cut = cut
 
-            if beta_channel:
-                # Do not independently gap-search the beta channel: two
-                # unrelated SVD gap searches (one per channel) have no
-                # reason to agree on a partition that nets subsystem B
-                # to zero spin. Instead force the cutoff so subsystem A
-                # carries the whole supersystem spin exactly, and
-                # subsystem B nets to zero by construction.
-                max_sval_change_idx = max_sval_change_idx_alpha_by_kpt[ikpt] - supersystem_spin
-                n_occ_beta_channel = max_occ_state - spade_ncores
+        root_print(f'MAX OCC STATE {max_occ_state} for Spin Channel {ispin}')
+        root_print(f'Maximum SPADE state for subsystem A, Spin Channel {ispin}, '
+                   f'all {atomsembed.n_kpoints} k-point(s): {cut}')
+        rotate(valence_svds, ispin, cut, spade_ncores)
 
-                if not (0 <= max_sval_change_idx <= n_occ_beta_channel):
-                    raise Exception(
-                        f"SPADE beta-channel cutoff ({max_sval_change_idx}), forced from "
-                        f"the alpha-channel partition ({max_sval_change_idx_alpha_by_kpt[ikpt]}) "
-                        f"and the supersystem spin ({supersystem_spin}), falls outside the "
-                        f"valid range [0, {n_occ_beta_channel}]. Subsystem A cannot be "
-                        f"assigned this much spin from the beta-occupied MOs available."
-                    )
-            elif a_nspade_mos is not None:
-                max_sval_change_idx = a_nspade_mos - spade_ncores
-            else:
-                svals_diff = np.ediff1d(svals**2.0)
-                max_sval_change_idx = np.argmax(np.abs(svals_diff)) + spade_manual_state + 1
-
-            if ispin == 0:
-                max_sval_change_idx_alpha_by_kpt[ikpt] = max_sval_change_idx
-
-            root_print(f'MAX OCC STATE {max_occ_state} for Spin Channel {ispin}')
-            root_print(f'SPADE STATE FOR: Spin Channel {ispin}, K-point {ikpt}')
-            root_print(f'Maximum SPADE state for subsystem A: {max_sval_change_idx}')
-
-            evecs_occ = evecs[ispin, ikpt, :, spade_ncores:max_occ_state]
-
-            rot_evecs_occ_a[ispin, ikpt] = evecs_occ @ v[:max_sval_change_idx, :].T
-            rot_evecs_occ_b[ispin, ikpt] = evecs_occ @ v[max_sval_change_idx:, :].T
-            evecs_occ_ab[ispin, ikpt] = evecs_occ.copy()
-
-    # @TODOSPIN: Need to redefine occupancies - this obviously won't work for k-points
+    valence = densmats(occ_scale)
     if spade_ncores > 0:
-        if atomsembed.n_spins == 1:
-            density_matrix_supersystem = density_matrix_supersystem + 2.0 * (evecs_occ_ab @ evecs_occ_ab.copy().T)
-            density_matrix_subsys_a = density_matrix_subsys_a + 2.0 * (rot_evecs_occ_a @ rot_evecs_occ_a.copy().T)
-            density_matrix_subsys_b = density_matrix_subsys_b + 2.0 * (rot_evecs_occ_b @ rot_evecs_occ_b.copy().T)
-        else:
-            density_matrix_supersystem = density_matrix_supersystem + (evecs_occ_ab @ evecs_occ_ab.copy().T)
-            density_matrix_subsys_a = density_matrix_subsys_a + (rot_evecs_occ_a @ rot_evecs_occ_a.copy().T)
-            density_matrix_subsys_b = density_matrix_subsys_b + (rot_evecs_occ_b @ rot_evecs_occ_b.copy().T)
+        density_matrix_supersystem = density_matrix_supersystem + valence[0]
+        density_matrix_subsys_a = density_matrix_subsys_a + valence[1]
+        density_matrix_subsys_b = density_matrix_subsys_b + valence[2]
     else:
-        if atomsembed.n_spins == 1:
-            density_matrix_supersystem = 2.0 * (evecs_occ_ab @ evecs_occ_ab.copy().T)
-            density_matrix_subsys_a = 2.0 * (rot_evecs_occ_a @ rot_evecs_occ_a.copy().T)
-            density_matrix_subsys_b =  2.0 * (rot_evecs_occ_b @ rot_evecs_occ_b.copy().T)
-        else:
-            density_matrix_supersystem = (evecs_occ_ab @ evecs_occ_ab.copy().T)
-            density_matrix_subsys_a = (rot_evecs_occ_a @ rot_evecs_occ_a.copy().T)
-            density_matrix_subsys_b = (rot_evecs_occ_b @ rot_evecs_occ_b.copy().T)
+        density_matrix_supersystem, density_matrix_subsys_a, density_matrix_subsys_b = valence
 
     # I don't think this is needed anymore - density matrices should be synched before this
     # point.

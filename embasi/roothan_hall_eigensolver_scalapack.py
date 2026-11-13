@@ -3,13 +3,14 @@ from ctypes import RTLD_GLOBAL, CDLL, POINTER, byref, c_int, c_int64, c_int32, c
 from embasi.parallel_utils import root_print, mpi_bcast_matrix
 from scalapack4py.npscal import rechunk
 import scalapack4py.npscal.math_utils.operations as op
+from embasi.ks_array import dagger
 import os
 
 def xform_hamiltonian(hamiltonian, xform_mat):
 
     from embasi.parallel_utils import root_print
 
-    return xform_mat.T @ hamiltonian @ xform_mat
+    return dagger(xform_mat) @ hamiltonian @ xform_mat
 
 def back_xform_evecs(eigenvectors, xform_mat):
 
@@ -35,7 +36,7 @@ def calculate_densmat(eigenvectors, occ_mat):
     # which also leaves the caller's eigenvectors untouched.
     occ_evecs = eigenvectors * np.sqrt(np.asarray(occ_mat))[np.newaxis, :]
 
-    return occ_evecs @ occ_evecs.T
+    return occ_evecs @ dagger(occ_evecs)
 
 def _diag_like(values, like):
     """Distributed diagonal matrix of the replicated 1-D values, on like's
@@ -73,13 +74,13 @@ def overlap_illcondition_check_parallel(overlap, thresh, inv=True, return_mask=F
             ovlp_filtered = ovlp_filtered.copy() @ evals_diag
         else:
             evals_diag = _diag_like(evals_filtered**(0.5), overlap)
-            ovlp_filtered = evals_diag @ ovlp_filtered.copy().T
+            ovlp_filtered = evals_diag @ dagger(ovlp_filtered.copy())
 
     else:
         if inv:
-            ovlp_filtered = ovlp_evecs @ _diag_like(ovlp_evals**(-0.5), overlap) @ ovlp_evecs.T
+            ovlp_filtered = ovlp_evecs @ _diag_like(ovlp_evals**(-0.5), overlap) @ dagger(ovlp_evecs)
         else:
-            ovlp_filtered = ovlp_evecs @ _diag_like(ovlp_evals**(0.5), overlap) @ ovlp_evecs.T
+            ovlp_filtered = ovlp_evecs @ _diag_like(ovlp_evals**(0.5), overlap) @ dagger(ovlp_evecs)
 
     # matmul() always inherits its LEFT operand's block size (ovlp_filtered's,
     # or ovlp_evecs's own slice-recomputed one in the n_bad==0 branch), never
@@ -128,12 +129,7 @@ def hamiltonian_eigensolv_parallel(hamiltonian, overlap, nelec, nspins=1, nkpts=
                 evecs[(ispin,ikpt)] = back_xform_evecs(evecs[(ispin,ikpt)], xform_mat)[:,idx]
                 evecs_orthog[(ispin,ikpt)] = evecs_orthog[(ispin,ikpt)][:,idx]
 
-    # Just assume we're dealing with simple insulators for now
-    # - fill from the bottom up
-
-    # Only deal with spins for now - kpoints will need some way
-    # to communicate k-indexed evals between nodes and also intelligently
-    # compare eigenvalues
+    # Insulators only: the same number of states is filled at every k-point
     occ_mat = fill_occupations(evals, nelec, nspins, spin)
 
     evecs = SpinKpointArray(evecs, nspins, nkpts)

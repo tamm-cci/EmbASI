@@ -5,7 +5,7 @@ import time
 from mpi4py import MPI
 
 from embasi.parallel_utils import root_print
-from embasi.ks_array import SpinKpointArray
+from embasi.ks_array import SpinKpointArray, dagger
 from embasi.qmcode_adapters import qm_code_adapter
 
 from scalapack4py.npscal import NPScal
@@ -700,9 +700,9 @@ class AtomsEmbed():
                 evecs_occ = evecs[ispin, ikpt, :, :max_occ_state]
 
                 if self.n_spins > 1:
-                    dm_out[(ispin, ikpt)] = evecs_occ.copy() @ evecs_occ.copy().T
+                    dm_out[(ispin, ikpt)] = evecs_occ.copy() @ dagger(evecs_occ.copy())
                 else:
-                    dm_out[(ispin, ikpt)] = 2.0 * (evecs_occ.copy() @ evecs_occ.copy().T)
+                    dm_out[(ispin, ikpt)] = 2.0 * (evecs_occ.copy() @ dagger(evecs_occ.copy()))
 
         if self.truncate:
             self._dm = self.truncated_mat_to_full(SpinKpointArray(dm_out, self.n_spins, self.n_kpoints))
@@ -882,15 +882,15 @@ class AtomsEmbed():
 
         if ((self.fock_embedding_matrix is not None) and (emb_pot_scf)):
             if hasattr(self.atoms.calc.asi, "huzinaga_eq"):
-                for spin in range(self.n_kpoints):
+                for spin in range(self.n_spins):
                     for kpt in range(self.n_kpoints):
                         post_calc_ham[spin, kpt] = post_calc_ham[spin, kpt] + \
                             self.atoms.calc.asi.huzinaga_eq[(spin, kpt)]
             else:
                 if self.truncate:
-                    post_calc_ham[spin, kpt] = post_calc_ham + self.fock_embedding_matrix_trunc
+                    post_calc_ham = post_calc_ham + self.fock_embedding_matrix_trunc
                 else:
-                    post_calc_ham[spin, kpt] = post_calc_ham + self.fock_embedding_matrix
+                    post_calc_ham = post_calc_ham + self.fock_embedding_matrix
 
         nelecs = self.input_fragment_nelectrons
         if self.parallel:
@@ -911,11 +911,13 @@ class AtomsEmbed():
                                                           basis_illcond_thresh=1e-5, \
                                                           spin=self._occupation_spin())
 
+        # Band energy per cell: k-point weighted (weight 1 for a single k-point)
         ev_sum = 0.
         for spin in range(evals.n_spins):
             for kpt in range(evals.n_kpoints):
                 occ_mask = occ_mat[spin, kpt] > 0.
-                ev_sum += np.sum(evals[spin, kpt][occ_mask] * \
+                ev_sum += ovlp.kpt_weights[kpt] * \
+                          np.sum(evals[spin, kpt][occ_mask] * \
                                  occ_mat[spin, kpt][occ_mask]) * \
                                  27.211384500
 

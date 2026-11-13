@@ -13,7 +13,12 @@ absolute truncation workflow.
 
 """
 import numpy as np
-from embasi.ks_array import SpinKpointArray
+from embasi.ks_array import SpinKpointArray, dagger
+
+
+def _dagger(mat):
+    """Conjugate transpose of a SpinKpointArray or of a bare matrix block"""
+    return mat.H if isinstance(mat, SpinKpointArray) else dagger(mat)
 
 def levelshift_projector(densmat, overlap, mu_val):
     """Calculates level-shift projection operator
@@ -62,7 +67,7 @@ def huzinaga_fock_operator(hamiltonian_hl, vemb, overlap, densmat, n_spins):
     """
 
     if n_spins is None:
-        n_spins = hamiltonian.n_spins
+        n_spins = hamiltonian_hl.n_spins
 
     f_emb = hamiltonian_hl + vemb
 
@@ -102,9 +107,14 @@ def huzinaga_projector(hamiltonian, overlap, densmat, n_spins=None):
         n_spins = hamiltonian.n_spins
 
     if n_spins > 1:
-        return -1.0 * ((hamiltonian @ densmat @ overlap.T) + (overlap @ densmat @ hamiltonian.T))
+        prefactor = -1.0
     else:
-        return -0.5 * ((hamiltonian @ densmat @ overlap.T) + (overlap @ densmat @ hamiltonian.T))
+        prefactor = -0.5
+    # F D S^dagger + S D F^dagger: with absolute truncation these are the
+    # off-diagonal blocks F_AB, S_AB, so S^dagger is S_BA, which for complex
+    # (k-point) matrices is the conjugate transpose, not the transpose
+    return prefactor * ((hamiltonian @ densmat @ _dagger(overlap)) +
+                        (overlap @ densmat @ _dagger(hamiltonian)))
 
 
 def get_abs_trunc_indices(atomsembed):
