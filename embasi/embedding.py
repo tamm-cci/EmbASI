@@ -519,7 +519,7 @@ class ProjectionEmbedding(EmbeddingBase):
                  parallel=False, gc=True, run_dir="./EmbASI_calc",
                  basis_illcond_thresh=1e-5, scalapack_block_size=16, fat_mixing=0.2,
                  fat_update="fock_diis", fat_damp=0.0, fat_damp_thresh=0.1,
-                 ignore_npscal_warnings=True):
+                 fat_reuse_calc=False, ignore_npscal_warnings=True):
 
         from copy import copy, deepcopy
         from mpi4py import MPI
@@ -738,6 +738,11 @@ class ProjectionEmbedding(EmbeddingBase):
         self.fat_damp = fat_damp
         self.fat_damp_thresh = fat_damp_thresh
 
+        # Keep the supersystem (AB_LL) calculator open across freeze-and-thaw
+        # cycles instead of initialising the QM code for every Fock build.
+        # Only affects QM codes driven through ASI callbacks (e.g. FHI-aims).
+        self.fat_reuse_calc = fat_reuse_calc
+
         # A temporary solution to storing data output data
         self.output_data_dict = {}
         self.output_data_dict["TOTALENERGY"] = {}
@@ -823,10 +828,7 @@ class ProjectionEmbedding(EmbeddingBase):
             self.output_data_dict["FATCONVINFO"]["FAT_NCYCLES"] = i
 
             # Calculate AB low-level reference energy
-            #if i==0:
-            self.AB_LL.run_noscf(dm_in=update_densmat, close_calc=True)
-            #else:
-            #    self.AB_LL.run_noscf(dm_in=update_densmat, close_calc=False)
+            self._fat_supersystem_run(i, update_densmat)
             new_energy = self.AB_LL.ev_corr_total_energy
             self.output_data_dict["FATCONVINFO"]["DFTINDFT_ENERGIES"].append(new_energy)
             self.output_data_dict["FATCONVINFO"]["SUPSYS_POT_TIME"] += self.AB_LL.last_run_time
@@ -959,6 +961,22 @@ class ProjectionEmbedding(EmbeddingBase):
 
         return densmat_A_HL, densmat_A_LL, densmat_B_LL
 
+    def _fat_supersystem_run(self, i_cycle, dm_in):
+        """Non-SCF supersystem (AB_LL) run of freeze-and-thaw cycle i_cycle
+
+        With fat_reuse_calc, the first cycle closes any calculator left open
+        and starts a new one, since the non-SCF settings (no SCF cycles,
+        total-energy-only embedding) only take effect when a calculator is
+        initialised; later cycles reuse that calculator. freeze_and_thaw
+        closes it after the last cycle.
+        """
+        if self.fat_reuse_calc:
+            if i_cycle == 0:
+                self.AB_LL.close_calculator()
+            self.AB_LL.run_noscf(dm_in=dm_in, close_calc=False)
+        else:
+            self.AB_LL.run_noscf(dm_in=dm_in, close_calc=True)
+
     def _fat_cycles_fock_diis(self, densmat_A, densmat_B, overlap, ncycles,
                               hist_len=8, comm_tol=1e-5, energy_tol=1e-6,
                               damp=0.0, damp_thresh=0.1):
@@ -1031,7 +1049,7 @@ class ProjectionEmbedding(EmbeddingBase):
             fat_info["FAT_NCYCLES"] = i + 1
 
             # 1. One supersystem Fock build at the current densities
-            self.AB_LL.run_noscf(dm_in=densmat_A + densmat_B, close_calc=True)
+            self._fat_supersystem_run(i, densmat_A + densmat_B)
             new_energy = self.AB_LL.ev_corr_total_energy
             fock_AB = self.AB_LL.hamiltonian_total
             fat_info["DFTINDFT_ENERGIES"].append(new_energy)

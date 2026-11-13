@@ -737,10 +737,14 @@ class AtomsEmbed():
         if self.truncate and len(self.atoms) != self.basis_info.trunc_natoms:
             self.atoms = self.atoms[self.basis_info.active_atoms]
 
+        # True when the QM code is still initialised from a previous run of
+        # this layer (run with close_calc=False), and is run again as it is
+        self.calc_reused = False
         if self.qm_adapter.uses_asi_callbacks:
             if hasattr(self.atoms.calc, "asi"):
                 if hasattr(self.atoms.calc.asi, "lib") and (not close_calc):
                     root_print("USING OLD CALCULATOR")
+                    self.calc_reused = True
                 else:
                     self.atoms.calc = ASI_ASE_calculator(os.environ['ASI_LIB_PATH'],
                                                          self.calc_initializer,
@@ -793,8 +797,15 @@ class AtomsEmbed():
         end_time = time.time()
         self.last_run_time = end_time - start_time
 
+        # A reused calculator keeps appending to the same log, so the values
+        # parsed from it must come from a new entry written by this run
+        n_ev_sum_entries_before = getattr(self, "n_log_ev_sum_entries", 0)
         self.qm_adapter.get_decomposed_energy_from_file(self)
-        self.close_calculator()
+        if self.calc_reused and \
+           getattr(self, "n_log_ev_sum_entries", 0) <= n_ev_sum_entries_before:
+            raise RuntimeError(f"Reused calculator in {self.outdir}: no new "
+                               "'Sum of eigenvalues' in asi.log, so the energies "
+                               "parsed from it would be from a previous run")
 
         # Within the embedding workflow, we often want to calculate the total
         # energy for a given density matrix without performing any SCF steps.

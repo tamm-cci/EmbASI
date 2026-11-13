@@ -426,14 +426,23 @@ class QMCodeASIAdapter(QMCodeAdapter):
         asi.register_set_hamiltonian_callback(0, 0)
         asi.register_modify_hamiltonian_callback(0, 0)
 
-        # Register the relevant callbacks
-        asi.overlap_storage = {}
-        asi.register_overlap_callback(ovlp_saving_callback,
-                                      (asi,
-                                       asi.overlap_storage,
-                                       atoms_embed.blacs_ctxt_tag,
-                                       atoms_embed.blacs_descr_tag,
-                                       'Ovlp calc'))
+        # Register the relevant callbacks. A reused calculator runs the same
+        # geometry again, so the overlap is unchanged and is kept from the run
+        # that initialised it: on these runs FHI-aims passes the overlap
+        # callback a NULL BLACS descriptor. Untruncated layers only, since
+        # extract_matrices converts a truncated layer's overlap in place.
+        if getattr(atoms_embed, "calc_reused", False) and getattr(asi, "overlap_storage", None):
+            if atoms_embed.truncate:
+                raise NotImplementedError("Reusing the calculator of a truncated "
+                                          "layer is not supported")
+        else:
+            asi.overlap_storage = {}
+            asi.register_overlap_callback(ovlp_saving_callback,
+                                          (asi,
+                                           asi.overlap_storage,
+                                           atoms_embed.blacs_ctxt_tag,
+                                           atoms_embed.blacs_descr_tag,
+                                           'Ovlp calc'))
 
         asi.dm_storage = {}
         asi.dm_calc_cnt = {}
@@ -505,6 +514,11 @@ class QMCodeASIAdapter(QMCodeAdapter):
 
         with open(atomsembed.outdir+'/asi.log', 'r') as output:
             lines = output.readlines()
+
+            # Counted so that a reused calculator, whose log holds every run,
+            # can check that this run wrote a new entry (AtomsEmbed.run)
+            atomsembed.n_log_ev_sum_entries = \
+                sum('  | Sum of eigenvalues            :' in line for line in lines)
 
             for line in lines:
                 outline = line.split()
@@ -616,7 +630,12 @@ class QMCodeASIAdapter(QMCodeAdapter):
         }
 
     def run_scf(self, atomsembed):
-        atomsembed.atoms.get_potential_energy()
+        if getattr(atomsembed, "calc_reused", False):
+            # ASE only calls ASI_run() when it detects a change in the system,
+            # and the geometry is unchanged between runs of a reused calculator
+            atomsembed.atoms.calc.asi.run()
+        else:
+            atomsembed.atoms.get_potential_energy()
 
 @register_calculator("Aims")
 class AimsAdapter(QMCodeASIAdapter):
@@ -689,6 +708,12 @@ class AimsAdapter(QMCodeASIAdapter):
         return calc
 
     def get_energy(self, atomsembed):
+        if getattr(atomsembed, "calc_reused", False):
+            # Read from the QM code, as the ASE calculator still holds the
+            # results of the run that initialised it. asi4py's own Hartree
+            # constant, as used by its ASE calculator for the other runs
+            from asi4py.asecalc import hartree
+            return atomsembed.atoms.calc.asi.total_energy * hartree
         return atomsembed.atoms.calc.get_potential_energy()
 
     def get_forces(self, atomsembed):
