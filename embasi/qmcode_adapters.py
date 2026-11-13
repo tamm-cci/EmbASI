@@ -34,6 +34,27 @@ def register_calculator(ase_calc_classname):
     return decorator
 
 
+def scale_kpoint_blocks(spinks, inverse=False):
+    """Copy of a SpinKpointArray with each k-point block multiplied by its
+    k-point weight (divided by it with inverse=True)
+
+    FHI-aims' DM-init callback takes k-point density matrices that include
+    the k-point weight (Tr(S(k) D(k)) = w_k N), whereas EmbASI's have
+    Tr(S(k) D(k)) = N at every k-point, so densities sent to FHI-aims are
+    scaled by w_k. The density matrices FHI-aims exports are already in
+    EmbASI's convention (found empirically, k_grid 3 1 1), as are the
+    Hamiltonian and overlap. A no-op (returns the input) for a single k-point.
+    """
+    if spinks.n_kpoints == 1:
+        return spinks
+    scaled = spinks.copy()
+    for ispin in range(spinks.n_spins):
+        for ikpt in range(spinks.n_kpoints):
+            w = float(spinks.kpt_weights[ikpt])
+            scaled[ispin, ikpt] = spinks[ispin, ikpt] * (1.0 / w if inverse else w)
+    return scaled
+
+
 class QMCodeAdapter(ABC):
     """Uniform interface to a QM code's input parameter conventions and
     output matrix extraction mechanism.
@@ -479,9 +500,11 @@ class QMCodeASIAdapter(QMCodeAdapter):
                                                'Ham calc'))
 
         if atoms_embed.density_matrix_in is not None:
+            # Held on asi so it outlives this call, as the callback reads it later
+            asi.dm_init_aims = scale_kpoint_blocks(atoms_embed.density_matrix_in)
             asi.register_DM_init(matrix_loading_callback,
                                  (asi,
-                                 atoms_embed.density_matrix_in,
+                                 asi.dm_init_aims,
                                  False,
                                  atoms_embed.blacs_ctxt_tag,
                                  atoms_embed.blacs_descr_tag,
