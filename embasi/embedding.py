@@ -323,12 +323,21 @@ class EmbeddingBase(ABC):
             channel (summed over k-points).
         """
 
+        from embasi.kpoint_parallel import gather_by_key
+        # Tr(S D) without forming S @ D: O(n^2) instead of O(n^3); k-point
+        # weighted (the electrons per cell), including the blocks of other
+        # process groups with k-point parallelism
+        local = {(ispin, ikpt): density_matrix.kpt_weights[ikpt] *
+                 np.einsum("ij,ji->", overlap_matrix[ispin, ikpt], density_matrix[ispin, ikpt])
+                 for (ispin, ikpt) in density_matrix.keys()}
+        if density_matrix.n_kpoints > 1:
+            local = gather_by_key(local)
+
         populations = []
         for ispin in range(density_matrix.n_spins):
             pop = 0.0
-            for ikpt in range(density_matrix.n_kpoints):
-                # Tr(S D) without forming S @ D: O(n^2) instead of O(n^3).
-                pop += np.einsum("ij,ji->", overlap_matrix[ispin, ikpt], density_matrix[ispin, ikpt])
+            for key in sorted(k for k in local if k[0] == ispin):
+                pop += local[key]
             populations.append(pop)
 
         return populations
@@ -909,9 +918,8 @@ class ProjectionEmbedding(EmbeddingBase):
                         diis_dens_ab = DIIS(tot_densmat_ab, hist_len, mixing_step_size, debug=True)
 
                         diis_spin_k = {}
-                        for ispin in range(update_densmat.n_spins):
-                            for ikpt in range(update_densmat.n_kpoints):
-                                diis_spin_k[(ispin,ikpt)] = DIIS(update_densmat[ispin,ikpt], hist_len, mixing_step_size, debug=False)
+                        for ispin, ikpt in update_densmat.keys():
+                            diis_spin_k[(ispin,ikpt)] = DIIS(update_densmat[ispin,ikpt], hist_len, mixing_step_size, debug=False)
 
                 else:
                     densmat_A_LL = self.A_LL.density_matrices_out.copy()
@@ -922,11 +930,10 @@ class ProjectionEmbedding(EmbeddingBase):
                     tot_densmat_ab = update_densmat.spin_kpt_sum()
                     tot_densmat_ab, coeffs = diis_dens_ab.diis_step(tot_densmat_ab)
 
-                    for ispin in range(update_densmat.n_spins):
-                        for ikpt in range(update_densmat.n_kpoints):
-                            update_densmat[ispin,ikpt], _ = \
-                                diis_spin_k[(ispin,ikpt)].diis_step(update_densmat[ispin,ikpt], \
-                                                                    coeff_mat=coeffs)
+                    for ispin, ikpt in update_densmat.keys():
+                        update_densmat[ispin,ikpt], _ = \
+                            diis_spin_k[(ispin,ikpt)].diis_step(update_densmat[ispin,ikpt], \
+                                                                coeff_mat=coeffs)
 
                     root_print(f"TIME FOR DIIS {time.time()-time_s}")
                     self.output_data_dict["FATCONVINFO"]["DIIS_TIME"] += time.time()-time_s

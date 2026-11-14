@@ -71,18 +71,18 @@ def mpi_bcast_matrix_storage(data_dict, nrows, ncols):
 
         # Complex (k-point) matrices are sent as complex; real ones as before
         is_complex = mpi_bcast_integer(
-            int(np.iscomplexobj(data_dict[tuple(data_key)])) if MPI.COMM_WORLD.Get_rank() == 0 else 0)
+            int(np.iscomplexobj(data_dict[tuple(int(k) for k in data_key)])) if MPI.COMM_WORLD.Get_rank() == 0 else 0)
         dtype, mpi_type = (np.complex128, MPI.C_DOUBLE_COMPLEX) if is_complex else (np.float64, MPI.DOUBLE)
 
         if MPI.COMM_WORLD.Get_rank() == 0:
-            data_buf = np.ascontiguousarray(data_dict[tuple(data_key)], dtype=dtype)
+            data_buf = np.ascontiguousarray(data_dict[tuple(int(k) for k in data_key)], dtype=dtype)
         else:
             data_buf = np.zeros((nrows, ncols), dtype=dtype)
 
         MPI.COMM_WORLD.Bcast([data_buf, mpi_type], root=0)
 
         if MPI.COMM_WORLD.Get_rank() != 0:
-            data_dict[tuple(data_key)] = data_buf.copy()
+            data_dict[tuple(int(k) for k in data_key)] = data_buf.copy()
 
     return data_dict
 

@@ -5,11 +5,134 @@ from asi4py.pyasi import triang2herm_inplace, triang_packed2full_hermit, matrix_
 from embasi.parallel_utils import root_print
 from mpi4py import MPI
 from scalapack4py.npscal import NPScal
+from scalapack4py.npscal.npscal import _GEMR2D_NAMES
+from embasi.kpoint_parallel import check_kpoint_grid
 from scalapack4py.npscal.blacs_ctxt_management import BLACSGrid, descriptor_registry
 from scalapack4py.array_types import nullable_ndpointer, ctypes2ndarray
 import traceback, sys
 import tracemalloc
 import numpy as np
+
+
+def _kpoint_tag(asi, tag, PiK):
+    """Grid / descriptor tag of the matrices of k-point PiK
+
+    With several k-points, FHI-aims may put each k-point on its own BLACS
+    grid (a subset of the processes), so grids and descriptors are tagged
+    per k-point. Unchanged for a single k-point.
+    """
+    return tag if (tag is None or asi.n_kpts == 1) else f"{tag}_k{PiK}"
+
+
+def _debug_callback(asi, label, iK, iS, descr, data_ptr=None, descr_ptr=None):
+    """EMBASI_DEBUG_CALLBACKS=1: print which (k, spin) blocks each rank receives"""
+    import os
+    if os.environ.get("EMBASI_DEBUG_CALLBACKS") not in ("1", "2"):
+        return
+    info = "descr=NULL"
+    if not descr and os.environ.get("EMBASI_DEBUG_CHECKSUM") and data_ptr is not None:
+        m = matrix_asi_to_numpy(asi, descr, data_ptr, descr_ptr)
+        m = np.asarray(m)
+        info += f" sum={np.sum(m).real:.10e} |m|={np.linalg.norm(m):.10e} m00={complex(m.flat[0]).real:.6e}"
+    if descr:
+        d = asi.scalapack.wrap_blacs_desc(descr)
+        nprow, npcol, myrow, mycol = asi.scalapack.blacs_gridinfo(d.ctxt)[:4]
+        info = f"ctxt={d.ctxt} grid={nprow}x{npcol} me=({myrow},{mycol}) m={d.m} mb={d.mb}"
+    print(f"[rank {MPI.COMM_WORLD.Get_rank()}] {label} iK={iK} iS={iS} n_local_ks={asi.n_local_ks} "
+          f"local_ks={list(asi.local_ks) if hasattr(asi, 'local_ks') else '?'} {info}", flush=True)
+
+
+class RawKBlock:
+    """A local block FHI-aims passed before EmbASI's k-point group grid
+    existed (the first run with per-k-point grids): the copied local array
+    and its layout, wrapped as NPScal once the grid is made (kpoint_parallel)"""
+    def __init__(self, loc, descr, layout, PiK, tag):
+        self.loc, self.descr, self.layout, self.PiK, self.tag = loc, descr, layout, PiK, tag
+
+
+def _local_block(asi, data, descr_cast):
+    """This process's local block of a BLACS-distributed matrix from the QM
+    code, as a Fortran-ordered ndarray (a copy: the buffer is the QM code's).
+
+    For complex (k-point) matrices the buffer holds (Re, Im) pairs of doubles,
+    so twice locrow * loccol doubles are read and viewed as complex128. For
+    real (Gamma) matrices this is the copy NPScal made from the pointer.
+    """
+    n_loc = descr_cast.locrow * descr_cast.loccol
+    if asi.is_hamiltonian_real:
+        flat = np.ctypeslib.as_array(data, shape=(n_loc,)).copy()
+    else:
+        flat = np.ctypeslib.as_array(data, shape=(2 * n_loc,)).copy().view(np.complex128)
+    return flat.reshape((descr_cast.locrow, descr_cast.loccol), order="F")
+
+
+def _wrap_block(asi, data, descr_cast, ctxt_tag, descr_tag, PiK, label):
+    """NPScal (or, see RawKBlock, a deferred block) for a BLACS-distributed matrix"""
+    MP, NP, myrow, mycol = asi.scalapack.blacs_gridinfo(descr_cast.ctxt)[:4]
+    m, n, mb, nb = descr_cast.m, descr_cast.n, descr_cast.mb, descr_cast.nb
+    rsrc, csrc = descr_cast.rsrc, descr_cast.csrc
+    tag = _kpoint_tag(asi, descr_tag, PiK)
+    loc = _local_block(asi, data, descr_cast)
+    if asi.n_kpts > 1 and asi.n_local_ks != asi.n_spin * asi.n_kpts:
+        # One BLACS grid per k-point on a subset of the processes
+        kname = f"{ctxt_tag}_kgrid"
+        if not BLACSGrid.is_registered(kname):
+            # EmbASI's grid is made after this run, collectively (BLACS needs
+            # every process; callbacks run only on a k-point's own processes)
+            return RawKBlock(loc, (m, n, mb, nb, rsrc, csrc), (MP, NP, myrow, mycol), PiK, tag)
+        grid = check_kpoint_grid(BLACSGrid.get(kname), asi, descr_cast, label)
+    else:
+        grid = BLACSGrid.get_or_create(_kpoint_tag(asi, ctxt_tag, PiK), asi.scalapack, nprow=MP, npcol=NP)
+
+    # Stash the first ASI-native descriptor seen for this context as a
+    # reference on the grid (see rechunk(x, like=grid))
+    if grid.default_mb is None:
+        grid.set_default_block_size(mb, nb)
+    descriptor_registry.get_or_create(tag, m, n, mb, nb, rsrc, csrc)
+    # From the ndarray, whose dtype (float64 or complex128) NPScal keeps;
+    # from the pointer it would read the data as c_double
+    arr = NPScal(loc_array=loc, grid=grid, descriptor=tag, lib=asi.scalapack)
+    return _on_grid_blocks(_full_hermitian(arr), grid)
+
+
+def _full_hermitian(arr):
+    """The full Hermitian matrix from one passed as a single triangle
+
+    On per-k-point ScaLAPACK grids FHI-aims passes the complex overlap with
+    only its upper triangle filled (the strictly lower one is zero), as
+    ScaLAPACK's Hermitian solvers read one triangle. A Hermitian matrix
+    cannot have one strict triangle zero and the other not, so that is taken
+    as the sign; full matrices (e.g. the Hamiltonian) are returned as they are.
+    Collective over the matrix's grid.
+    """
+    from embasi.ks_array import dagger
+    lower = float(np.linalg.norm(np.tril(arr, -1)))
+    upper = float(np.linalg.norm(np.triu(arr, 1)))
+    if lower == 0.0 and upper > 0.0:
+        return np.triu(arr) + dagger(np.triu(arr, 1))
+    if upper == 0.0 and lower > 0.0:
+        return np.tril(arr) + dagger(np.tril(arr, -1))
+    return arr
+
+
+def _on_grid_blocks(arr, grid):
+    """arr on the grid's default block size: the QM code may pass matrices
+    of one grid with different block sizes (FHI-aims on 2 x 1 per-k-point
+    grids: 16 x 16 and 8 x 16), which NPScal cannot combine element-wise.
+    A no-op when they already match, as at Gamma."""
+    from scalapack4py.npscal import rechunk
+    if (arr.descr.mb, arr.descr.nb) != (grid.default_mb, grid.default_nb):
+        arr = rechunk(arr, mb=grid.default_mb, nb=grid.default_nb)
+    return arr
+
+
+def _block_received(asi, counter, expected):
+    """Count a received (spin, k-point) block; True once this process has
+    received the `expected` blocks of the current step"""
+    received = getattr(asi, counter + "_blocks", 0) + 1
+    complete = received == expected
+    setattr(asi, counter + "_blocks", 0 if complete else received)
+    return complete
 import time
 
 def timing_val(func):
@@ -74,6 +197,9 @@ def dm_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
     """
     try:
         asi, storage_dict, cnt_dict, ctxt_tag, descr_tag, label = cast(aux, py_object).value
+        _debug_callback(asi, label, iK, iS, descr, data, matrix_descr_ptr)
+        if __import__('os').environ.get('EMBASI_DEBUG_CALLBACKS') == '2':
+            return   # log-only: see every callback without processing it
         # Python-indexed spin and kpts:
         PiS = iS - 1
         PiK = iK - 1        
@@ -86,28 +212,13 @@ def dm_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
         if (matrix_descr_ptr.contents.storage_type not in {1,2}):
             if ((ctxt_tag is None) and (descr_tag is None)):
                 data = matrix_asi_to_numpy(asi, descr, data, matrix_descr_ptr)
-                if MPI.COMM_WORLD.Get_rank() == 0:
+                # Several k-points: FHI-aims may hold different k-points on
+                # different ranks, so every rank keeps what it is passed
+                if MPI.COMM_WORLD.Get_rank() == 0 or asi.n_kpts > 1:
                     data = data.copy()
             else:
                 descr_cast = asi.scalapack.wrap_blacs_desc(descr)
-                MP, NP = asi.scalapack.blacs_gridinfo(descr_cast.ctxt)[:2]
-                grid = BLACSGrid.get_or_create(ctxt_tag, asi.scalapack, nprow=MP, npcol=NP)
-
-                m, n, mb, nb = descr_cast.m, descr_cast.n, descr_cast.mb, descr_cast.nb
-                rsrc, csrc = descr_cast.rsrc, descr_cast.csrc
-
-                # Stash the first ASI-native descriptor seen for this context
-                # as a reference on the grid, for explicit rechunk(x, like=grid)
-                # calls elsewhere -- nothing consults this automatically (no
-                # implicit mechanism reconciles arrays built on this grid to
-                # it); callers that need a specific array's own block size
-                # matched should prefer rechunk(x, like=<that array>) instead.
-                if grid.default_mb is None:
-                    grid.set_default_block_size(mb, nb)
-
-                descriptor_registry.get_or_create(descr_tag, m, n, mb, nb, rsrc, csrc)
-
-                data = NPScal(loc_array=data, grid=grid, descriptor=descr_tag, lib=asi.scalapack)
+                data = _wrap_block(asi, data, descr_cast, ctxt_tag, descr_tag, PiK, label)
 
         elif (matrix_descr_ptr.contents.storage_type in {1,2}):
             assert not descr, """default_saving_callback supports only dense full 
@@ -127,7 +238,7 @@ def dm_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
                 storage_dict[asi.dm_count] = {}
             #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
             storage_dict[asi.dm_count][(PiS, PiK)] = data
-            if (iS*iK) == (asi.n_local_ks):
+            if _block_received(asi, "dm", asi.n_local_ks):
                 asi.dm_count = asi.dm_count + 1
     except Exception as eee:
         print(f"""Something happened in ASI dm_saving_callback
@@ -164,6 +275,9 @@ def ovlp_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
     """
     try:
         asi, storage_dict, ctxt_tag, descr_tag, label = cast(aux, py_object).value
+        _debug_callback(asi, label, iK, iS, descr, data, matrix_descr_ptr)
+        if __import__('os').environ.get('EMBASI_DEBUG_CALLBACKS') == '2':
+            return   # log-only: see every callback without processing it
 
         # Python-indexed spin and kpts:
         PiS = iS - 1
@@ -177,28 +291,13 @@ def ovlp_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
         if (matrix_descr_ptr.contents.storage_type not in {1,2}):
             if ((ctxt_tag is None) and (descr_tag is None)):
                 data = matrix_asi_to_numpy(asi, descr, data, matrix_descr_ptr)
-                if MPI.COMM_WORLD.Get_rank() == 0:
+                # Several k-points: FHI-aims may hold different k-points on
+                # different ranks, so every rank keeps what it is passed
+                if MPI.COMM_WORLD.Get_rank() == 0 or asi.n_kpts > 1:
                     data = data.copy()
             else:
                 descr_cast = asi.scalapack.wrap_blacs_desc(descr)
-                MP, NP = asi.scalapack.blacs_gridinfo(descr_cast.ctxt)[:2]
-                grid = BLACSGrid.get_or_create(ctxt_tag, asi.scalapack, nprow=MP, npcol=NP)
-
-                m, n, mb, nb = descr_cast.m, descr_cast.n, descr_cast.mb, descr_cast.nb
-                rsrc, csrc = descr_cast.rsrc, descr_cast.csrc
-
-                # Stash the first ASI-native descriptor seen for this context
-                # as a reference on the grid, for explicit rechunk(x, like=grid)
-                # calls elsewhere -- nothing consults this automatically (no
-                # implicit mechanism reconciles arrays built on this grid to
-                # it); callers that need a specific array's own block size
-                # matched should prefer rechunk(x, like=<that array>) instead.
-                if grid.default_mb is None:
-                    grid.set_default_block_size(mb, nb)
-
-                descriptor_registry.get_or_create(descr_tag, m, n, mb, nb, rsrc, csrc)
-
-                data = NPScal(loc_array=data, grid=grid, descriptor=descr_tag, lib=asi.scalapack)
+                data = _wrap_block(asi, data, descr_cast, ctxt_tag, descr_tag, PiK, label)
 
         elif (matrix_descr_ptr.contents.storage_type in {1,2}):
             assert not descr, """default_saving_callback supports only dense full 
@@ -249,6 +348,9 @@ def ham_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
     """
     try:
         asi, storage_dict, cnt_dict, ctxt_tag, descr_tag, label = cast(aux, py_object).value
+        _debug_callback(asi, label, iK, iS, descr, data, matrix_descr_ptr)
+        if __import__('os').environ.get('EMBASI_DEBUG_CALLBACKS') == '2':
+            return   # log-only: see every callback without processing it
 
         if asi.is_hamiltonian_real:
             data_shape = (asi.n_basis,asi.n_basis) 
@@ -263,28 +365,13 @@ def ham_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
         if (matrix_descr_ptr.contents.storage_type not in {1,2}):
             if ((ctxt_tag is None) and (descr_tag is None)):
                 data = matrix_asi_to_numpy(asi, descr, data, matrix_descr_ptr)
-                if MPI.COMM_WORLD.Get_rank() == 0:
+                # Several k-points: FHI-aims may hold different k-points on
+                # different ranks, so every rank keeps what it is passed
+                if MPI.COMM_WORLD.Get_rank() == 0 or asi.n_kpts > 1:
                     data = data.copy()
             else:
                 descr_cast = asi.scalapack.wrap_blacs_desc(descr)
-                MP, NP = asi.scalapack.blacs_gridinfo(descr_cast.ctxt)[:2]
-                grid = BLACSGrid.get_or_create(ctxt_tag, asi.scalapack, nprow=MP, npcol=NP)
-
-                m, n, mb, nb = descr_cast.m, descr_cast.n, descr_cast.mb, descr_cast.nb
-                rsrc, csrc = descr_cast.rsrc, descr_cast.csrc
-
-                # Stash the first ASI-native descriptor seen for this context
-                # as a reference on the grid, for explicit rechunk(x, like=grid)
-                # calls elsewhere -- nothing consults this automatically (no
-                # implicit mechanism reconciles arrays built on this grid to
-                # it); callers that need a specific array's own block size
-                # matched should prefer rechunk(x, like=<that array>) instead.
-                if grid.default_mb is None:
-                    grid.set_default_block_size(mb, nb)
-
-                descriptor_registry.get_or_create(descr_tag, m, n, mb, nb, rsrc, csrc)
-
-                data = NPScal(loc_array=data, grid=grid, descriptor=descr_tag, lib=asi.scalapack)
+                data = _wrap_block(asi, data, descr_cast, ctxt_tag, descr_tag, PiK, label)
 
         elif (matrix_descr_ptr.contents.storage_type in {1,2}): #
             assert not descr, """default_saving_callback supports only dense 
@@ -303,7 +390,7 @@ def ham_saving_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
             if asi.ham_count <= 2:
                 storage_dict[asi.ham_count][(PiS, PiK)] = data
 
-                if (iS*iK) == (asi.n_local_ks):
+                if _block_received(asi, "ham", asi.n_local_ks if descr else asi.n_spin * asi.n_kpts):
                     asi.ham_count = asi.ham_count + 1
                 #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
             else:
@@ -371,28 +458,13 @@ def ham_saving_and_huzinaga_callback(aux, iK, iS, descr, data, matrix_descr_ptr)
         if (matrix_descr_ptr.contents.storage_type not in {1,2}):
             if ((ctxt_tag is None) and (descr_tag is None)):
                 data = matrix_asi_to_numpy(asi, descr, data, matrix_descr_ptr)
-                if MPI.COMM_WORLD.Get_rank() == 0:
+                # Several k-points: FHI-aims may hold different k-points on
+                # different ranks, so every rank keeps what it is passed
+                if MPI.COMM_WORLD.Get_rank() == 0 or asi.n_kpts > 1:
                     data = data.copy()
             else:
                 descr_cast = asi.scalapack.wrap_blacs_desc(descr)
-                MP, NP = asi.scalapack.blacs_gridinfo(descr_cast.ctxt)[:2]
-                grid = BLACSGrid.get_or_create(ctxt_tag, asi.scalapack, nprow=MP, npcol=NP)
-
-                m, n, mb, nb = descr_cast.m, descr_cast.n, descr_cast.mb, descr_cast.nb
-                rsrc, csrc = descr_cast.rsrc, descr_cast.csrc
-
-                # Stash the first ASI-native descriptor seen for this context
-                # as a reference on the grid, for explicit rechunk(x, like=grid)
-                # calls elsewhere -- nothing consults this automatically (no
-                # implicit mechanism reconciles arrays built on this grid to
-                # it); callers that need a specific array's own block size
-                # matched should prefer rechunk(x, like=<that array>) instead.
-                if grid.default_mb is None:
-                    grid.set_default_block_size(mb, nb)
-
-                descriptor_registry.get_or_create(descr_tag, m, n, mb, nb, rsrc, csrc)
-
-                data = NPScal(loc_array=data, grid=grid, descriptor=descr_tag, lib=asi.scalapack)
+                data = _wrap_block(asi, data, descr_cast, ctxt_tag, descr_tag, PiK, label)
 
         elif (matrix_descr_ptr.contents.storage_type in {1,2}): #
             assert not descr, """default_saving_callback supports only dense 
@@ -410,7 +482,7 @@ def ham_saving_and_huzinaga_callback(aux, iK, iS, descr, data, matrix_descr_ptr)
             if asi.ham_count <= 3:
                 storage_dict[asi.ham_count][(PiS, PiK)] = data
 
-                if (iS*iK) == (asi.n_local_ks):
+                if _block_received(asi, "ham", asi.n_local_ks if descr else asi.n_spin * asi.n_kpts):
                     asi.ham_count = asi.ham_count + 1
                 #root_print(tracemalloc.get_traced_memory()[1]/(1024*1024))
             else:
@@ -521,9 +593,15 @@ def matrix_loading_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
                 src_descr = m.descr
                 dest_descr = asi.scalapack.wrap_blacs_desc(descr)
 
-                data = ctypes2ndarray(data, shape=(dest_descr.locrow, dest_descr.loccol)).T
+                # A trailing axis of 2 (Re, Im) gives a complex view for k-point matrices
+                loc_shape = (dest_descr.locrow, dest_descr.loccol) if asi.is_hamiltonian_real \
+                    else (dest_descr.locrow, dest_descr.loccol, 2)
+                data = ctypes2ndarray(data, shape=loc_shape).T
 
-                asi.scalapack.pdgemr2d(asi.n_basis, asi.n_basis,
+                # p?gemr2d for the matrix's dtype: pzgemr2d for complex
+                # (k-point) matrices, pdgemr2d for real (Gamma) ones
+                gemr2d = getattr(asi.scalapack, _GEMR2D_NAMES[np.dtype(m.loc_array.dtype)])
+                gemr2d(asi.n_basis, asi.n_basis,
                                        m.loc_array, 1, 1, src_descr,
                                        data, 1, 1, dest_descr,
                                        dest_descr.ctxt)

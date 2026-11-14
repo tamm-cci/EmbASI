@@ -257,9 +257,8 @@ class AtomsEmbed():
     def _(self, spinks_mat: SpinKpointArray):
         """A wrapper for full_mat_to_truncated with spinks_mat"""
         new_spinks_mat = {}
-        for ispin in range(spinks_mat.n_spins):
-            for ikpoint in range(spinks_mat.n_kpoints):
-                new_spinks_mat[(ispin,ikpoint)] = self.full_mat_to_truncated(spinks_mat[ispin,ikpoint])
+        for ispin, ikpoint in spinks_mat.keys():
+            new_spinks_mat[(ispin,ikpoint)] = self.full_mat_to_truncated(spinks_mat[ispin,ikpoint])
 
         return SpinKpointArray(new_spinks_mat, spinks_mat.n_spins, spinks_mat.n_kpoints)
 
@@ -398,9 +397,8 @@ class AtomsEmbed():
     def _(self, spinks_mat: SpinKpointArray):
         """A wrapper for truncated_mat_to_full with spinks_mat"""
         new_spinks_mat = {}
-        for ispin in range(spinks_mat.n_spins):
-            for ikpoint in range(spinks_mat.n_kpoints):
-                new_spinks_mat[(ispin,ikpoint)] = self.truncated_mat_to_full(spinks_mat[ispin,ikpoint])
+        for ispin, ikpoint in spinks_mat.keys():
+            new_spinks_mat[(ispin,ikpoint)] = self.truncated_mat_to_full(spinks_mat[ispin,ikpoint])
 
         return SpinKpointArray(new_spinks_mat, spinks_mat.n_spins, spinks_mat.n_kpoints)
 
@@ -694,15 +692,14 @@ class AtomsEmbed():
                                                           spin=self._occupation_spin())
 
         dm_out = {}
-        for ispin in range(self.n_spins):
-            for ikpt in range(self.n_kpoints):
-                max_occ_state = np.count_nonzero(occ_mat[ispin,ikpt])
-                evecs_occ = evecs[ispin, ikpt, :, :max_occ_state]
+        for ispin, ikpt in occ_mat.keys():
+            max_occ_state = np.count_nonzero(occ_mat[ispin,ikpt])
+            evecs_occ = evecs[ispin, ikpt, :, :max_occ_state]
 
-                if self.n_spins > 1:
-                    dm_out[(ispin, ikpt)] = evecs_occ.copy() @ dagger(evecs_occ.copy())
-                else:
-                    dm_out[(ispin, ikpt)] = 2.0 * (evecs_occ.copy() @ dagger(evecs_occ.copy()))
+            if self.n_spins > 1:
+                dm_out[(ispin, ikpt)] = evecs_occ.copy() @ dagger(evecs_occ.copy())
+            else:
+                dm_out[(ispin, ikpt)] = 2.0 * (evecs_occ.copy() @ dagger(evecs_occ.copy()))
 
         if self.truncate:
             self._dm = self.truncated_mat_to_full(SpinKpointArray(dm_out, self.n_spins, self.n_kpoints))
@@ -882,10 +879,9 @@ class AtomsEmbed():
 
         if ((self.fock_embedding_matrix is not None) and (emb_pot_scf)):
             if hasattr(self.atoms.calc.asi, "huzinaga_eq"):
-                for spin in range(self.n_spins):
-                    for kpt in range(self.n_kpoints):
-                        post_calc_ham[spin, kpt] = post_calc_ham[spin, kpt] + \
-                            self.atoms.calc.asi.huzinaga_eq[(spin, kpt)]
+                for spin, kpt in post_calc_ham.keys():
+                    post_calc_ham[spin, kpt] = post_calc_ham[spin, kpt] + \
+                        self.atoms.calc.asi.huzinaga_eq[(spin, kpt)]
             else:
                 if self.truncate:
                     post_calc_ham = post_calc_ham + self.fock_embedding_matrix_trunc
@@ -912,14 +908,19 @@ class AtomsEmbed():
                                                           spin=self._occupation_spin())
 
         # Band energy per cell: k-point weighted (weight 1 for a single k-point)
+        from embasi.kpoint_parallel import gather_by_key
+        local = {}
+        for spin, kpt in evals.keys():
+            occ_mask = occ_mat[spin, kpt] > 0.
+            local[(spin, kpt)] = ovlp.kpt_weights[kpt] * \
+                      np.sum(evals[spin, kpt][occ_mask] * \
+                             occ_mat[spin, kpt][occ_mask]) * \
+                             27.211384500
+        if evals.n_kpoints > 1:
+            local = gather_by_key(local)   # blocks of other process groups
         ev_sum = 0.
-        for spin in range(evals.n_spins):
-            for kpt in range(evals.n_kpoints):
-                occ_mask = occ_mat[spin, kpt] > 0.
-                ev_sum += ovlp.kpt_weights[kpt] * \
-                          np.sum(evals[spin, kpt][occ_mask] * \
-                                 occ_mat[spin, kpt][occ_mask]) * \
-                                 27.211384500
+        for key in sorted(local):
+            ev_sum += local[key]
 
         return ev_sum
 

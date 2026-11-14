@@ -1,5 +1,6 @@
 import numpy as np
 from embasi.ks_array import dagger
+from embasi.kpoint_parallel import gather_by_key
 from embasi.parallel_utils import root_print, mpi_bcast_matrix
 from embasi.roothan_hall_eigensolver import hamiltonian_eigensolv
 from embasi.roothan_hall_eigensolver_scalapack import hamiltonian_eigensolv_parallel
@@ -107,15 +108,14 @@ def spade_localisation(atomsembed, hamiltonian, overlap, parallel=False,
         state_min..state_max (per spin channel; the upper limit may be None
         for each channel's own occupied count), at every (spin, k-point)"""
         out = {}
-        for ispin in range(atomsembed.n_spins):
-            for ikpt in range(atomsembed.n_kpoints):
-                top = np.count_nonzero(occ_mat[ispin, ikpt]) if state_max is None else state_max
-                evecs_occ_a_orthog = evecs_orthog[ispin, ikpt, :, state_min:top][mask_val, :]
-                if parallel:
-                    u, svals, vh = svd(evecs_occ_a_orthog)
-                else:
-                    u, svals, vh = np.linalg.svd(evecs_occ_a_orthog, full_matrices=True)
-                out[(ispin, ikpt)] = (np.asarray(svals), vh, top)
+        for ispin, ikpt in occ_mat.keys():
+            top = np.count_nonzero(occ_mat[ispin, ikpt]) if state_max is None else state_max
+            evecs_occ_a_orthog = evecs_orthog[ispin, ikpt, :, state_min:top][mask_val, :]
+            if parallel:
+                u, svals, vh = svd(evecs_occ_a_orthog)
+            else:
+                u, svals, vh = np.linalg.svd(evecs_occ_a_orthog, full_matrices=True)
+            out[(ispin, ikpt)] = (np.asarray(svals), vh, top)
         return out
 
     def common_cut(svds, ispin, manual_state):
@@ -124,12 +124,24 @@ def spade_localisation(atomsembed, hamiltonian, overlap, parallel=False,
         same number of subsystem-A orbitals at every k-point, so A has an
         integer number of electrons per cell. With one k-point this is the
         usual largest-gap cut."""
-        sv2 = sum(kpt_weights[ikpt] * svds[(ispin, ikpt)][0]**2.0
-                  for ikpt in range(atomsembed.n_kpoints))
+        local = {(s, k): kpt_weights[k] * svds[(s, k)][0]**2.0 for (s, k) in svds if s == ispin}
+        if atomsembed.n_kpoints > 1:
+            # k-points of other process groups too (collective: every process
+            # calls this for every spin channel)
+            local = gather_by_key(local)
+        sv2 = sum(local[key] for key in sorted(local))
         return int(np.argmax(np.abs(np.ediff1d(sv2)))) + manual_state + 1
 
+    def n_occupied(ispin):
+        """Occupied states of a spin channel: the same at every k-point
+        (fill_occupations), so read from any k-point, wherever it is held"""
+        local = {(s, k): int(np.count_nonzero(occ_mat[s, k])) for (s, k) in occ_mat.keys() if s == ispin}
+        if atomsembed.n_kpoints > 1:
+            local = gather_by_key(local)
+        return next(iter(local.values()))
+
     def rotate(svds, ispin, cut, state_min):
-        for ikpt in range(atomsembed.n_kpoints):
+        for ikpt in sorted(k for (s, k) in svds if s == ispin):
             _, vh, top = svds[(ispin, ikpt)]
             evecs_occ = evecs[ispin, ikpt, :, state_min:top]
             # vh holds the right singular vectors as conjugated rows
@@ -163,8 +175,8 @@ def spade_localisation(atomsembed, hamiltonian, overlap, parallel=False,
 
     supersystem_spin = None
     if atomsembed.n_spins == 2:
-        n_occ_alpha_total = np.count_nonzero(occ_mat[0,0])
-        n_occ_beta_total = np.count_nonzero(occ_mat[1,0])
+        n_occ_alpha_total = n_occupied(0)
+        n_occ_beta_total = n_occupied(1)
         supersystem_spin = n_occ_alpha_total - n_occ_beta_total
         if target_spin is None:
             # The QM adapter does not expose the spin it ran at (e.g. FHI-aims,
@@ -185,7 +197,7 @@ def spade_localisation(atomsembed, hamiltonian, overlap, parallel=False,
     valence_svds = spade_svds(spade_ncores, None)
     alpha_cut = None
     for ispin in range(atomsembed.n_spins):
-        max_occ_state = np.count_nonzero(occ_mat[ispin, 0])
+        max_occ_state = n_occupied(ispin)
         beta_channel = (ispin == 1) and (atomsembed.n_spins == 2)
 
         if beta_channel:
@@ -230,11 +242,10 @@ def spade_localisation(atomsembed, hamiltonian, overlap, parallel=False,
     # I don't think this is needed anymore - density matrices should be synched before this
     # point.
     if not parallel:
-        for ispin in range(atomsembed.n_spins):
-            for ikpt in range(atomsembed.n_kpoints):
-                density_matrix_supersystem[ispin,ikpt] = mpi_bcast_matrix(density_matrix_supersystem[ispin,ikpt])
-                density_matrix_subsys_a[ispin,ikpt] = mpi_bcast_matrix(density_matrix_subsys_a[ispin,ikpt])
-                density_matrix_subsys_b[ispin,ikpt] = mpi_bcast_matrix(density_matrix_subsys_b[ispin,ikpt])
+        for ispin, ikpt in density_matrix_supersystem.keys():
+            density_matrix_supersystem[ispin,ikpt] = mpi_bcast_matrix(density_matrix_supersystem[ispin,ikpt])
+            density_matrix_subsys_a[ispin,ikpt] = mpi_bcast_matrix(density_matrix_subsys_a[ispin,ikpt])
+            density_matrix_subsys_b[ispin,ikpt] = mpi_bcast_matrix(density_matrix_subsys_b[ispin,ikpt])
 
     # density_matrix_subsys_a/b were each built via rot_evecs_occ_a/b @ .T --
     # matmul chains starting from ovlp_evecs slices of DIFFERENT column

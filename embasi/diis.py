@@ -186,13 +186,21 @@ class CommutatorDIIS():
         blocks, each k-point weighted. Written as sum(conj(a) * b) rather than np.vdot, which
         NPScal does not implement; np.sum of an NPScal is reduced over the
         whole grid, so the result is the same global value on every rank."""
-        total = 0.0
-        for err_1, err_2 in zip(errs_1, errs_2):
-            for (ispin, ikpt) in err_1.data.keys():
+        from embasi.kpoint_parallel import gather_by_key
+        local = {}
+        for i_sub, (err_1, err_2) in enumerate(zip(errs_1, errs_2)):
+            for (ispin, ikpt) in err_1.keys():
                 # k-points count by their Brillouin-zone weight (1 at Gamma)
-                total += err_1.kpt_weights[ikpt] * \
+                local[(i_sub, ispin, ikpt)] = err_1.kpt_weights[ikpt] * \
                     float(np.real(np.sum(np.conj(err_1.data[(ispin, ikpt)]) *
                                          err_2.data[(ispin, ikpt)])))
+        if errs_1[0].n_kpoints > 1:
+            # Blocks of other process groups too (collective; decided on the
+            # global k-point count)
+            local = gather_by_key(local)
+        total = 0.0
+        for key in sorted(local):
+            total += local[key]
         return total
 
     def update(self, focks, errs):

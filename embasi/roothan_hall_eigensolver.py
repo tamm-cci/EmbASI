@@ -89,38 +89,37 @@ def hamiltonian_eigensolv(hamiltonian, overlap, nelec, nspins=1, nkpts=1, basis_
     from .ks_array import SpinKpointArray
 
     thresh = basis_illcond_thresh
-    n_basis = np.shape(overlap[0,0])[0]
+    n_basis = np.shape(overlap[overlap.keys()[0]])[0]
 
     evals = {}
     evecs = {}
     if return_orthog:
         evecs_orthog = {}
 
-    for ispin in range(nspins):
-        for ikpt in range(nkpts):
-            xform_mat, n_bad = overlap_illcondition_check(overlap[ispin,ikpt], thresh)
-            n_good = n_basis - n_bad
+    for ispin, ikpt in overlap.keys():
+        xform_mat, n_bad = overlap_illcondition_check(overlap[ispin,ikpt], thresh)
+        n_good = n_basis - n_bad
 
-            # X^dagger H X is Hermitian: eigh gives real eigenvalues and
-            # orthonormal (complex, at k != Gamma) eigenvectors, including
-            # within degenerate levels, which eig does not guarantee
-            evals[(ispin,ikpt)], evecs[(ispin,ikpt)] = np.linalg.eigh(xform_hamiltonian(hamiltonian[ispin,ikpt], xform_mat))
+        # X^dagger H X is Hermitian: eigh gives real eigenvalues and
+        # orthonormal (complex, at k != Gamma) eigenvectors, including
+        # within degenerate levels, which eig does not guarantee
+        evals[(ispin,ikpt)], evecs[(ispin,ikpt)] = np.linalg.eigh(xform_hamiltonian(hamiltonian[ispin,ikpt], xform_mat))
 
-            if (not return_orthog):
-                evecs[(ispin,ikpt)] = back_xform_evecs(evecs[(ispin,ikpt)], xform_mat)
-                idx = np.argsort(evals[(ispin,ikpt)])
-                evals[(ispin,ikpt)] = evals[(ispin,ikpt)][idx]
-                evecs[(ispin,ikpt)] = evecs[(ispin,ikpt)][:,idx]
-            else:
-                evecs_orthog[(ispin,ikpt)] = evecs[(ispin,ikpt)]
-                evecs[(ispin,ikpt)] = back_xform_evecs(evecs[(ispin,ikpt)], xform_mat)
-                idx = np.argsort(evals[(ispin,ikpt)])
-                evals[(ispin,ikpt)] = evals[(ispin,ikpt)][idx]
-                evecs[(ispin,ikpt)] = evecs[(ispin,ikpt)][:,idx]
-                evecs_orthog[(ispin,ikpt)] = evecs_orthog[(ispin,ikpt)][:,idx]
+        if (not return_orthog):
+            evecs[(ispin,ikpt)] = back_xform_evecs(evecs[(ispin,ikpt)], xform_mat)
+            idx = np.argsort(evals[(ispin,ikpt)])
+            evals[(ispin,ikpt)] = evals[(ispin,ikpt)][idx]
+            evecs[(ispin,ikpt)] = evecs[(ispin,ikpt)][:,idx]
+        else:
+            evecs_orthog[(ispin,ikpt)] = evecs[(ispin,ikpt)]
+            evecs[(ispin,ikpt)] = back_xform_evecs(evecs[(ispin,ikpt)], xform_mat)
+            idx = np.argsort(evals[(ispin,ikpt)])
+            evals[(ispin,ikpt)] = evals[(ispin,ikpt)][idx]
+            evecs[(ispin,ikpt)] = evecs[(ispin,ikpt)][:,idx]
+            evecs_orthog[(ispin,ikpt)] = evecs_orthog[(ispin,ikpt)][:,idx]
 
     # Insulators only: the same number of states is filled at every k-point
-    occ_mat = fill_occupations(evals, nelec, nspins, spin)
+    occ_mat = fill_occupations(evals, nelec, nspins, spin, nkpts=nkpts)
 
     evecs = SpinKpointArray(evecs, nspins, nkpts)
     evals = SpinKpointArray(evals, nspins, nkpts)
@@ -133,7 +132,7 @@ def hamiltonian_eigensolv(hamiltonian, overlap, nelec, nspins=1, nkpts=1, basis_
         return evals, evecs, occ_mat
 
 
-def fill_occupations(evals, nelec, nspins, spin=None):
+def fill_occupations(evals, nelec, nspins, spin=None, nkpts=1):
     """Occupation matrix for the (sorted) eigenvalues of a re-diagonalised Fock.
 
     With ``spin`` (Nalpha - Nbeta) known, each channel is filled on its own:
@@ -155,9 +154,13 @@ def fill_occupations(evals, nelec, nspins, spin=None):
     metal, which fixed per-k filling cannot describe).
     """
     from embasi.parallel_utils import root_print
+    from embasi.kpoint_parallel import gather_by_key
 
-    kpts = sorted({ikpt for (_, ikpt) in evals.keys()})
-    n_states = np.size(evals[(0,0)])
+    # evals holds this process's (spin, k-point) blocks; with k-point
+    # parallelism not all of them. nkpts (the total) is the same on every
+    # process, so the collective gathers below are decided on it.
+    local_keys = sorted(evals.keys())
+    n_states = np.size(evals[local_keys[0]])
     if nspins > 1:
         n_total = int(round(nelec))
         if spin is not None:
@@ -168,10 +171,14 @@ def fill_occupations(evals, nelec, nspins, spin=None):
             if max(n_alpha, n_beta) > n_states:
                 raise ValueError(f"({n_alpha}, {n_beta}) electrons do not fit {n_states} states")
         else:
+            # Cross-channel aufbau on k-point 0, whose blocks may be elsewhere
+            evals_k0 = {key: np.asarray(evals[key]) for key in local_keys if key[1] == 0}
+            if nkpts > 1:
+                evals_k0 = gather_by_key(evals_k0)
             n_alpha = 0
             n_beta = 0
             for _ in range(n_total):
-                if evals[(0,0)][n_alpha] < evals[(1,0)][n_beta]:
+                if evals_k0[(0,0)][n_alpha] < evals_k0[(1,0)][n_beta]:
                     n_alpha += 1
                 else:
                     n_beta += 1
@@ -182,16 +189,20 @@ def fill_occupations(evals, nelec, nspins, spin=None):
         occ_value = 2.0
 
     occ_mat = {}
-    for ispin, n_occ in n_filled.items():
-        for ikpt in kpts:
-            occ_mat[(ispin, ikpt)] = np.zeros(n_states)
-            occ_mat[(ispin, ikpt)][:n_occ] = occ_value
+    for (ispin, ikpt) in local_keys:
+        occ_mat[(ispin, ikpt)] = np.zeros(n_states)
+        occ_mat[(ispin, ikpt)][:n_filled[ispin]] = occ_value
 
-    if len(kpts) > 1:
-        homo = max(evals[(ispin, ikpt)][n_occ - 1] for ispin, n_occ in n_filled.items()
-                   if n_occ > 0 for ikpt in kpts)
-        lumo = min(evals[(ispin, ikpt)][n_occ] for ispin, n_occ in n_filled.items()
-                   if n_occ < n_states for ikpt in kpts)
+    if nkpts > 1:
+        # Band edges over every k-point, including those of other process groups
+        edges = {}
+        for (ispin, ikpt) in local_keys:
+            n_occ = n_filled[ispin]
+            edges[(ispin, ikpt)] = (evals[(ispin, ikpt)][n_occ - 1] if n_occ > 0 else -np.inf,
+                                    evals[(ispin, ikpt)][n_occ] if n_occ < n_states else np.inf)
+        edges = gather_by_key(edges)
+        homo = max(e[0] for e in edges.values())
+        lumo = min(e[1] for e in edges.values())
         if homo >= lumo:
             root_print(f"WARNING: highest filled level ({homo:.6f}) is not below the lowest "
                        f"empty level ({lumo:.6f}) across the k-points: no band gap, so "

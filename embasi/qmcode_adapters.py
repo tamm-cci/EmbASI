@@ -48,10 +48,9 @@ def scale_kpoint_blocks(spinks, inverse=False):
     if spinks.n_kpoints == 1:
         return spinks
     scaled = spinks.copy()
-    for ispin in range(spinks.n_spins):
-        for ikpt in range(spinks.n_kpoints):
-            w = float(spinks.kpt_weights[ikpt])
-            scaled[ispin, ikpt] = spinks[ispin, ikpt] * (1.0 / w if inverse else w)
+    for ispin, ikpt in spinks.keys():
+        w = float(spinks.kpt_weights[ikpt])
+        scaled[ispin, ikpt] = spinks[ispin, ikpt] * (1.0 / w if inverse else w)
     return scaled
 
 
@@ -437,6 +436,7 @@ class QMCodeASIAdapter(QMCodeAdapter):
     def register_import_export_hooks(self, atoms_calc, atoms_embed, emb_pot_scf=False):
         asi = atoms_calc.asi
 
+
         # Explicitly set function pointers to NULL to avoid
         # previously set function pointers from passing into
         # the present calculation.
@@ -468,6 +468,7 @@ class QMCodeASIAdapter(QMCodeAdapter):
         asi.dm_storage = {}
         asi.dm_calc_cnt = {}
         asi.dm_count = 0
+        asi.dm_blocks = 0
         asi.register_dm_callback(dm_saving_callback,
                                  (asi,
                                   asi.dm_storage,
@@ -479,6 +480,7 @@ class QMCodeASIAdapter(QMCodeAdapter):
         asi.ham_storage = {}
         asi.ham_calc_cnt = {}
         asi.ham_count = 0
+        asi.ham_blocks = 0
 
         if atoms_embed.flag_huz and emb_pot_scf:
             asi.huzinaga_eq = {}
@@ -575,14 +577,22 @@ class QMCodeASIAdapter(QMCodeAdapter):
         n_spins = asi.n_spin
 
         if n_kpoints > 1:
-            # Every (spin, k-point) block has to be on every process: the
-            # callbacks store only the blocks of the calling process, and a
-            # SpinKpointArray needs all of them.
-            if asi.n_local_ks != n_spins * n_kpoints:
-                raise NotImplementedError(
-                    f"{asi.n_local_ks} of the {n_spins * n_kpoints} (spin, k-point) "
-                    "blocks are on this process: k-points distributed over MPI "
-                    "processes are not supported yet")
+            # With k-point parallelism each process holds only its own
+            # (spin, k-point) blocks, as SpinKpointArrays of local blocks
+            # (kpoint_parallel). Not yet supported on top of that: the serial
+            # (gather-to-root) path, basis truncation, whose truncated
+            # descriptors are per layer rather than per k-point, and the
+            # density-matrix mixing loop, which adds blocks of different
+            # k-points.
+            # Two layouts (FHI-aims): with no more k-points than processes, one
+            # ScaLAPACK grid per k-point on a subset of the processes (needs
+            # parallel=True); with more k-points than processes, full matrices
+            # with no descriptor, the Hamiltonian and overlap of every k-point on
+            # every process and the density matrices only on the processes that
+            # own them (parallel=False: gathered below, after which every
+            # process holds every block).
+            if asi.n_local_ks != n_spins * n_kpoints and atoms_embed.parallel and atoms_embed.truncate:
+                raise NotImplementedError("Basis truncation with k-points distributed over MPI processes")
             # SpinKpointArray uses uniform k-point weights, which is only right
             # for the full (unreduced) grid; ASI exposes no weights.
             k_grid = getattr(atomsembed.initial_calc, "parameters", {}).get("k_grid")
@@ -591,6 +601,14 @@ class QMCodeASIAdapter(QMCodeAdapter):
                     f"{n_kpoints} k-points for k_grid {tuple(k_grid)}: a symmetry-reduced "
                     "grid, whose k-point weights are not available through ASI. Use the "
                     "full grid (no symmetry reduction).")
+
+        # Per-k-point ScaLAPACK grids: after the first such run, make EmbASI's
+        # k-point group grids (every process takes part) and wrap the blocks
+        # the callbacks could only keep raw
+        if atoms_embed.parallel and n_kpoints > 1 and asi.n_local_ks != n_spins * n_kpoints:
+            from embasi.kpoint_parallel import adopt_raw_kblocks
+            adopt_raw_kblocks(asi, atoms_embed.blacs_ctxt_tag,
+                              [asi.overlap_storage] + list(asi.ham_storage.values()) + list(asi.dm_storage.values()))
 
         # BROADCAST QUANTITIES ONLY CALCULATED FOR THE HEAD NODE TO ALL
         # OTHER NODES - ONLY DO THIS IN SERIAL MODE AS THE NPSCAL ARRAYS
@@ -603,6 +621,9 @@ class QMCodeASIAdapter(QMCodeAdapter):
                 for iham in range(asi.ham_count):
                     asi.ham_storage[iham] = {}
 
+            # Each rank's own density-matrix blocks, gathered below when there
+            # are several k-points (dm_count is rank 0's, broadcast above)
+            asi.dm_storage_local = {idm: dict(asi.dm_storage.get(idm, {})) for idm in range(asi.dm_count)}
             if MPI.COMM_WORLD.Get_rank() != 0:
                 for idm in range(asi.dm_count):
                     asi.dm_storage[idm] = {}
@@ -614,10 +635,31 @@ class QMCodeASIAdapter(QMCodeAdapter):
                                              asi.n_basis)
 
             for idm in range(asi.dm_count):
-                asi.dm_storage[idm] = \
-                    mpi_bcast_matrix_storage(asi.dm_storage[idm],
-                                         asi.n_basis,
-                                         asi.n_basis)
+                if n_kpoints > 1:
+                    # Density matrices are only on the processes that own their
+                    # k-points: combine every process's blocks (MPI collective)
+                    from embasi.kpoint_parallel import gather_by_key
+                    asi.dm_storage[idm] = gather_by_key(asi.dm_storage_local[idm])
+                else:
+                    asi.dm_storage[idm] = \
+                        mpi_bcast_matrix_storage(asi.dm_storage[idm],
+                                             asi.n_basis,
+                                             asi.n_basis)
+
+            if n_kpoints > 1:
+                expected = {(s, k) for s in range(n_spins) for k in range(n_kpoints)}
+                stores = [("Hamiltonian", asi.ham_storage[i]) for i in range(asi.ham_count)] + \
+                         [("density matrix", asi.dm_storage[i]) for i in range(asi.dm_count)] + \
+                         [("overlap", asi.overlap_storage)]
+                for what, store in stores:
+                    missing = expected - {key for key in store if key[0] == 0 or n_spins > 1}
+                    if what == "overlap":
+                        missing = {key for key in missing if key[0] == 0}
+                    if missing:
+                        raise NotImplementedError(
+                            f"parallel=False: {what} blocks {sorted(missing)} are not on rank 0 after "
+                            "gathering. With no more k-points than processes, FHI-aims puts each "
+                            "k-point on its own ScaLAPACK grid: use parallel=True.")
 
             asi.overlap_storage = \
                 mpi_bcast_matrix_storage(asi.overlap_storage,
@@ -643,8 +685,11 @@ class QMCodeASIAdapter(QMCodeAdapter):
         ovlp = SpinKpointArray(asi.overlap_storage, n_spins, n_kpoints)
 
         if n_spins > 1:
-            ovlp[0, 0] = ovlp[0, 0]
-            ovlp[1, 0] = ovlp[0, 0]
+            # The overlap is spin independent and arrives for spin 0: copy it
+            # to spin 1 at each local k-point
+            for (ispin, ikpt) in list(ovlp.keys()):
+                if ispin == 0:
+                    ovlp[1, ikpt] = ovlp[0, ikpt]
 
         # With QM code localisation (qm_embedding_mo_localise), FHI-aims
         # exports the localised density matrices of subsystems A and B

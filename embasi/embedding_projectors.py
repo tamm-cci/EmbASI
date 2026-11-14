@@ -165,29 +165,27 @@ def huzinaga_projector_abs_trunc(atomsembed):
     projector = {}
 
     if atomsembed.truncate:
-        for PiS in range(atomsembed.n_spins):
-            for PiK in range(atomsembed.n_kpoints):
-                ovlp_supermol = atomsembed.huzinaga_ovlp_in[PiS, PiK]
-                dm_supermol = atomsembed.huzinaga_dm_in[PiS, PiK]
-                fock_supermol = atomsembed.embedding_ham_in[PiS, PiK]
+        for PiS, PiK in atomsembed.huzinaga_ovlp_in.keys():
+            ovlp_supermol = atomsembed.huzinaga_ovlp_in[PiS, PiK]
+            dm_supermol = atomsembed.huzinaga_dm_in[PiS, PiK]
+            fock_supermol = atomsembed.embedding_ham_in[PiS, PiK]
 
-                A_block_min, A_block_max, B_block_min, B_block_max = get_abs_trunc_indices(atomsembed)
+            A_block_min, A_block_max, B_block_min, B_block_max = get_abs_trunc_indices(atomsembed)
 
-                fmat_supermol = fock_supermol[A_block_min:A_block_max,B_block_min:B_block_max]
-                dm_supermol = dm_supermol[B_block_min:B_block_max,B_block_min:B_block_max]
-                ovlp_supermol = ovlp_supermol[A_block_min:A_block_max,B_block_min:B_block_max]
+            fmat_supermol = fock_supermol[A_block_min:A_block_max,B_block_min:B_block_max]
+            dm_supermol = dm_supermol[B_block_min:B_block_max,B_block_min:B_block_max]
+            ovlp_supermol = ovlp_supermol[A_block_min:A_block_max,B_block_min:B_block_max]
 
-                projector[(PiS,PiK)] = huzinaga_projector(fmat_supermol, ovlp_supermol, dm_supermol,
-                                                          n_spins=atomsembed.huzinaga_dm_in.n_spins)
+            projector[(PiS,PiK)] = huzinaga_projector(fmat_supermol, ovlp_supermol, dm_supermol,
+                                                      n_spins=atomsembed.huzinaga_dm_in.n_spins)
 
     else:
-        for PiS in range(atomsembed.n_spins):
-            for PiK in range(atomsembed.n_kpoints):
-                fock_supermol = atomsembed.embedding_ham_in[PiS, PiK]
-                ovlp = atomsembed.huzinaga_ovlp_in[PiS, PiK]
-                dm = atomsembed.huzinaga_dm_in[PiS, PiK]
+        for PiS, PiK in atomsembed.embedding_ham_in.keys():
+            fock_supermol = atomsembed.embedding_ham_in[PiS, PiK]
+            ovlp = atomsembed.huzinaga_ovlp_in[PiS, PiK]
+            dm = atomsembed.huzinaga_dm_in[PiS, PiK]
 
-                projector[(PiS,PiK)] = huzinaga_projector(fock_supermol, ovlp, dm,
-                                                          n_spins=atomsembed.embedding_ham_in.n_spins)
+            projector[(PiS,PiK)] = huzinaga_projector(fock_supermol, ovlp, dm,
+                                                      n_spins=atomsembed.embedding_ham_in.n_spins)
 
     return SpinKpointArray(projector, atomsembed.n_spins, atomsembed.n_kpoints)

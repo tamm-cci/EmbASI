@@ -104,33 +104,32 @@ def hamiltonian_eigensolv_parallel(hamiltonian, overlap, nelec, nspins=1, nkpts=
     from .ks_array import SpinKpointArray
     from .roothan_hall_eigensolver import fill_occupations
 
-    n_basis = overlap[0,0].gl_m
+    n_basis = overlap[overlap.keys()[0]].gl_m
 
     evals = {}
     evecs = {}
     if return_orthog:
         evecs_orthog = {}
 
-    for ispin in range(nspins):
-        for ikpt in range(nkpts):
-            xform_mat, n_bad = overlap_illcondition_check_parallel(overlap[ispin,ikpt], basis_illcond_thresh)
-            n_good = n_basis - n_bad
+    for ispin, ikpt in overlap.keys():
+        xform_mat, n_bad = overlap_illcondition_check_parallel(overlap[ispin,ikpt], basis_illcond_thresh)
+        n_good = n_basis - n_bad
 
-            evals[(ispin,ikpt)], evecs[(ispin,ikpt)] = eigh(xform_hamiltonian(hamiltonian[ispin,ikpt], xform_mat))
+        evals[(ispin,ikpt)], evecs[(ispin,ikpt)] = eigh(xform_hamiltonian(hamiltonian[ispin,ikpt], xform_mat))
 
-            if (not return_orthog):
-                idx = np.argsort(evals[(ispin,ikpt)])
-                evals[(ispin,ikpt)] = evals[(ispin,ikpt)][idx]
-                evecs[(ispin,ikpt)] = back_xform_evecs(evecs[(ispin,ikpt)], xform_mat)[:,idx]
-            else:
-                evecs_orthog[(ispin,ikpt)] = evecs[(ispin,ikpt)].copy()
-                idx = np.argsort(evals[(ispin,ikpt)])
-                evals[(ispin,ikpt)] = evals[(ispin,ikpt)][idx]
-                evecs[(ispin,ikpt)] = back_xform_evecs(evecs[(ispin,ikpt)], xform_mat)[:,idx]
-                evecs_orthog[(ispin,ikpt)] = evecs_orthog[(ispin,ikpt)][:,idx]
+        if (not return_orthog):
+            idx = np.argsort(evals[(ispin,ikpt)])
+            evals[(ispin,ikpt)] = evals[(ispin,ikpt)][idx]
+            evecs[(ispin,ikpt)] = back_xform_evecs(evecs[(ispin,ikpt)], xform_mat)[:,idx]
+        else:
+            evecs_orthog[(ispin,ikpt)] = evecs[(ispin,ikpt)].copy()
+            idx = np.argsort(evals[(ispin,ikpt)])
+            evals[(ispin,ikpt)] = evals[(ispin,ikpt)][idx]
+            evecs[(ispin,ikpt)] = back_xform_evecs(evecs[(ispin,ikpt)], xform_mat)[:,idx]
+            evecs_orthog[(ispin,ikpt)] = evecs_orthog[(ispin,ikpt)][:,idx]
 
     # Insulators only: the same number of states is filled at every k-point
-    occ_mat = fill_occupations(evals, nelec, nspins, spin)
+    occ_mat = fill_occupations(evals, nelec, nspins, spin, nkpts=nkpts)
 
     evecs = SpinKpointArray(evecs, nspins, nkpts)
     evals = SpinKpointArray(evals, nspins, nkpts)

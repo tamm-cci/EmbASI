@@ -77,13 +77,16 @@ class SpinKpointArray:
         if kpt_weights.shape != (n_kpoints,) or not np.isclose(kpt_weights.sum(), 1.0):
             raise ValueError(f"kpt_weights must be {n_kpoints} values summing to 1, got {kpt_weights}")
         self.kpt_weights = kpt_weights
-        self.base_shape = base_array_dict[(0,0)].shape
+        # Blocks may be a subset of all (spin, k-point) pairs: with k-point
+        # parallelism each process holds only its own (see kpoint_parallel)
+        first_key = next(iter(base_array_dict))
+        self.base_shape = base_array_dict[first_key].shape
 
         # Create the XD Dictionary with array: (n_spin, n_kpoints, dim0, dim1, ...)
         #dtype = dtype or base_array.dtype
         self.data = base_array_dict
 
-        self.ndim = base_array_dict[(0,0)].ndim + 2
+        self.ndim = base_array_dict[first_key].ndim + 2
 
         # We don't actually do any transpose operations here - the transpose tag is
         # passed to the relevant scalapack function
@@ -138,12 +141,12 @@ class SpinKpointArray:
         if len(key) < self.ndim:
             key = key + (slice(None),) * (self.ndim - len(key))
 
-        if isinstance(key[0], int):
+        if isinstance(key[0], (int, np.integer)):
             spin_slice_min = key[0]
             spin_slice_max = key[0] + 1
         else:
             raise Exception("Slice indexing for spins currently not supported")
-        if isinstance(key[1], int):
+        if isinstance(key[1], (int, np.integer)):
             kpt_slice_min = key[1]
             kpt_slice_max = key[1] + 1
         else:
@@ -216,10 +219,10 @@ class SpinKpointArray:
         if len(key) < self.ndim:
             key = key + (slice(None),) * (self.ndim - len(key))
 
-        if isinstance(key[0], int):
+        if isinstance(key[0], (int, np.integer)):
             spin_slice_min = key[0]
             spin_slice_max = key[0] + 1
-        if isinstance(key[1], int):
+        if isinstance(key[1], (int, np.integer)):
             kpt_slice_min = key[1]
             kpt_slice_max = key[1] + 1
 
@@ -309,10 +312,9 @@ class SpinKpointArray:
         there is no implicit mechanism doing this for you.
         """
         new_data = self.copy()
-        for spin in range(self.n_spins):
-            for kpt in range(self.n_kpoints):
-                entry_like = like[spin, kpt] if isinstance(like, SpinKpointArray) else like
-                new_data[spin, kpt] = _rechunk(self[spin, kpt], mb=mb, nb=nb, like=entry_like)
+        for spin, kpt in self.keys():
+            entry_like = like[spin, kpt] if isinstance(like, SpinKpointArray) else like
+            new_data[spin, kpt] = _rechunk(self[spin, kpt], mb=mb, nb=nb, like=entry_like)
         return new_data
 
     def gather_to_global(self) -> 'SpinKpointArray':
@@ -325,9 +327,8 @@ class SpinKpointArray:
         this implicitly.
         """
         new_data = self.copy()
-        for spin in range(self.n_spins):
-            for kpt in range(self.n_kpoints):
-                new_data[spin, kpt] = _gather_to_global(self[spin, kpt])
+        for spin, kpt in self.keys():
+            new_data[spin, kpt] = _gather_to_global(self[spin, kpt])
         return new_data
 
     # Add NumPy-like array protocol methods for better integration
@@ -341,36 +342,38 @@ class SpinKpointArray:
 
     def __iter__(self):
         """Iterate over spin dimension."""
-        for spin in range(self.n_spins):
-            for kpt in range(self.n_kpoints):
-                yield self[spin, kpt]
+        for spin, kpt in self.keys():
+            yield self[spin, kpt]
 
     def __add__(self, val):
         new_data = self.copy()
-        for spin in range(self.n_spins):
-            for kpt in range(self.n_kpoints):
-                new_data[spin, kpt] = self[spin, kpt] + val[spin, kpt]
+        for spin, kpt in self.keys():
+            # Align the right operand's block-cyclic layout with the left's: on
+            # small grids blocks can differ (e.g. 16 x 16 and 8 x 16). A no-op
+            # for matching layouts and for np.ndarray blocks.
+            new_data[spin, kpt] = self[spin, kpt] + _rechunk(val[spin, kpt], like=self[spin, kpt])
         return new_data
 
     def __sub__(self, val):
         new_data = self.copy()
-        for spin in range(self.n_spins):
-            for kpt in range(self.n_kpoints):
-                new_data[spin, kpt] = self[spin, kpt] - val[spin, kpt]
+        for spin, kpt in self.keys():
+            # Align the right operand's block-cyclic layout with the left's: on
+            # small grids blocks can differ (e.g. 16 x 16 and 8 x 16). A no-op
+            # for matching layouts and for np.ndarray blocks.
+            new_data[spin, kpt] = self[spin, kpt] - _rechunk(val[spin, kpt], like=self[spin, kpt])
         return new_data
 
     def __matmul__(self, val):
         new_data = self.copy()
-        for spin in range(self.n_spins):
-            for kpt in range(self.n_kpoints):
-                if (self.transpose[0]) and (not val.transpose[0]):
-                    new_data[spin, kpt] = self[spin, kpt].T @ val[spin, kpt]
-                if (not self.transpose[0]) and (val.transpose[0]):
-                    new_data[spin, kpt] = self[spin, kpt] @ val[spin, kpt].T
-                if (self.transpose[0]) and (val.transpose[0]):
-                    new_data[spin, kpt] = self[spin, kpt].T @ val[spin, kpt].T
-                if (not self.transpose[0]) and (not val.transpose[0]):
-                    new_data[spin, kpt] = self[spin, kpt] @ val[spin, kpt]
+        for spin, kpt in self.keys():
+            if (self.transpose[0]) and (not val.transpose[0]):
+                new_data[spin, kpt] = self[spin, kpt].T @ val[spin, kpt]
+            if (not self.transpose[0]) and (val.transpose[0]):
+                new_data[spin, kpt] = self[spin, kpt] @ val[spin, kpt].T
+            if (self.transpose[0]) and (val.transpose[0]):
+                new_data[spin, kpt] = self[spin, kpt].T @ val[spin, kpt].T
+            if (not self.transpose[0]) and (not val.transpose[0]):
+                new_data[spin, kpt] = self[spin, kpt] @ val[spin, kpt]
 
         new_data = new_data.N
         self = self.N
@@ -380,24 +383,21 @@ class SpinKpointArray:
 
     def __mul__(self, val):
         new_data = self.copy()
-        for spin in range(self.n_spins):
-            for kpt in range(self.n_kpoints):
-                new_data[spin, kpt] = self[spin, kpt] * val
+        for spin, kpt in self.keys():
+            new_data[spin, kpt] = self[spin, kpt] * val
         return new_data
 
     def __rmul__(self, val):
         new_data = self.copy()
-        for spin in range(self.n_spins):
-            for kpt in range(self.n_kpoints):
-                new_data[spin, kpt] = self[spin, kpt] * val
+        for spin, kpt in self.keys():
+            new_data[spin, kpt] = self[spin, kpt] * val
         return new_data
 
 
     def __div__(self, val):
         new_data = self.copy()
-        for spin in range(self.n_spins):
-            for kpt in range(self.n_kpoints):
-                new_data[spin, kpt] = self[spin, kpt] / val
+        for spin, kpt in self.keys():
+            new_data[spin, kpt] = self[spin, kpt] / val
         return new_data
 
     @property
@@ -410,6 +410,17 @@ class SpinKpointArray:
         self.transpose = [False]
         return self
 
+    def keys(self):
+        """(spin, k-point) pairs of the blocks held by this process, sorted.
+        All n_spins x n_kpoints pairs unless k-points are distributed over
+        MPI process groups."""
+        return sorted(self.data.keys())
+
+    @property
+    def is_complete(self):
+        """Whether this process holds every (spin, k-point) block"""
+        return len(self.data) == self.n_spins * self.n_kpoints
+
     @property
     def H(self):
         """Conjugate transpose of every (spin, k-point) block, as a new array
@@ -420,9 +431,8 @@ class SpinKpointArray:
         does not express. For real blocks it equals the transpose.
         """
         new_data = self.copy()
-        for spin in range(self.n_spins):
-            for kpt in range(self.n_kpoints):
-                new_data[spin, kpt] = dagger(self[spin, kpt])
+        for spin, kpt in self.keys():
+            new_data[spin, kpt] = dagger(self[spin, kpt])
         return new_data
 
     def trace(self):
@@ -431,12 +441,17 @@ class SpinKpointArray:
         sum_s sum_k w_k Tr(A[s, k]). Every caller takes the trace of a
         product of Hermitian matrices (a population or an energy), which is
         real, so the real part is returned. With one k-point (w = 1) this is
-        the plain sum over spins.
+        the plain sum over spins. Blocks held by other process groups are
+        included (collective over MPI.COMM_WORLD).
         """
+        from embasi.kpoint_parallel import gather_by_key
+        local = {(spin, kpt): op.trace(self[spin, kpt]) for spin, kpt in self.keys()}
+        # Collective, so decided on global information only (every process
+        # has the same n_kpoints); nothing is gathered at a single k-point
+        traces = gather_by_key(local) if self.n_kpoints > 1 else local
         trace_sum = 0
-        for spin in range(self.n_spins):
-            for kpt in range(self.n_kpoints):
-                trace_sum += self.kpt_weights[kpt] * op.trace(self[spin,kpt])
+        for (spin, kpt), value in sorted(traces.items()):
+            trace_sum += self.kpt_weights[kpt] * value
 
         return np.real(trace_sum)
 
@@ -452,11 +467,13 @@ class SpinKpointArray:
 
     def spin_kpt_sum(self):
         """sum_s sum_k w_k A[s, k]: summed over spins, k-point weighted"""
+        if not self.is_complete:
+            raise NotImplementedError("spin_kpt_sum adds blocks of different k-points, which are "
+                                      "on different process groups with k-point parallelism")
         sum_array = None
-        for spin in range(self.n_spins):
-            for kpt in range(self.n_kpoints):
-                term = self[spin, kpt] * float(self.kpt_weights[kpt])
-                sum_array = term if sum_array is None else sum_array + term
+        for spin, kpt in self.keys():
+            term = self[spin, kpt] * float(self.kpt_weights[kpt])
+            sum_array = term if sum_array is None else sum_array + term
 
         return sum_array
 
