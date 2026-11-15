@@ -456,14 +456,26 @@ class SpinKpointArray:
         return np.real(trace_sum)
 
     def diag(self):
-        diags = np.array(list(map(op.diag, self)))
+        """Brillouin-zone average of the diagonal, summed over spins
 
-        diag_sum = diags[0]
-        if len(diags) > 1:
-            for i in diags[1:]:
-                diag_sum += i
+        sum_s sum_k w_k diag(A[s, k]), as trace() does for the trace: with
+        one k-point (w = 1) the plain sum over spins. For a product of
+        Hermitian matrices (a Mulliken population D S) the k-point average
+        is real, so the real part is returned at several k-points. Blocks
+        held by other process groups are included (collective over
+        MPI.COMM_WORLD), so every process gets the same result.
+        """
+        from embasi.kpoint_parallel import gather_by_key
+        local = {(spin, kpt): np.asarray(op.diag(self[spin, kpt])) for spin, kpt in self.keys()}
+        # Collective, so decided on global information only (every process
+        # has the same n_kpoints); nothing is gathered at a single k-point
+        diags = gather_by_key(local) if self.n_kpoints > 1 else local
+        diag_sum = None
+        for (spin, kpt), value in sorted(diags.items()):
+            term = value * self.kpt_weights[kpt] if self.n_kpoints > 1 else value
+            diag_sum = term if diag_sum is None else diag_sum + term
 
-        return diag_sum
+        return np.real(diag_sum) if self.n_kpoints > 1 else diag_sum
 
     def spin_kpt_sum(self):
         """sum_s sum_k w_k A[s, k]: summed over spins, k-point weighted"""

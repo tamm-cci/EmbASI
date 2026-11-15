@@ -516,7 +516,13 @@ def ham_saving_and_huzinaga_callback(aux, iK, iS, descr, data, matrix_descr_ptr)
                 if not(atomsembed.abs_truncate):
                     projector = atomsembed.full_mat_to_truncated(projector)
 
-                asi.huzinaga_eq[(PiS, PiK)] = atomsembed.fock_embedding_matrix_trunc[PiS, PiK] + projector
+                # The projector (built from slices of supersystem matrices)
+                # and the truncated embedding matrix can be on different
+                # block sizes over a grid of more than one process (e.g.
+                # 16 x 16 and 8 x 16), which NPScal cannot add element-wise
+                from scalapack4py.npscal import rechunk
+                vemb_trunc = atomsembed.fock_embedding_matrix_trunc[PiS, PiK]
+                asi.huzinaga_eq[(PiS, PiK)] = vemb_trunc + rechunk(projector, like=vemb_trunc)
 
             else:
                 vemb = atomsembed.fock_embedding_matrix[PiS, PiK]

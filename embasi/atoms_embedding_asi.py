@@ -15,6 +15,13 @@ from functools import singledispatch, singledispatchmethod
 # Development purposes
 import re
 
+
+def _gemr2d(arr):
+    """p?gemr2d for arr's dtype: pzgemr2d for complex (k-point) matrices,
+    pdgemr2d for real (Gamma) ones"""
+    from scalapack4py.npscal.npscal import _GEMR2D_NAMES
+    return getattr(arr.sl, _GEMR2D_NAMES[np.dtype(arr.dtype)])
+
 class AtomsEmbed():
     """A wrapper around an ASE atoms objects for ASI library calls
 
@@ -324,14 +331,18 @@ class AtomsEmbed():
 
             row_tag = f"{self.blacs_descr_tag}_temp_rectangle_f2t"
             descriptor_registry.get_or_create(row_tag, trunc_nbasis, full_nbasis, mb, nb)
-            trunc_mat_row = NPScal(grid=grid, lib=lib, descriptor=row_tag)
+            # Same dtype as the input: complex at k-points other than Gamma.
+            # The grid is the input's, so with k-points distributed over
+            # processes (one grid per k-point group) this stays on that group
+            trunc_mat_row = NPScal(grid=grid, lib=lib, descriptor=row_tag, dtype=full_mat.dtype)
 
             descriptor_registry.get_or_create(self.blacs_descr_tag, trunc_nbasis, trunc_nbasis, mb, nb)
-            trunc_mat = NPScal(grid=grid, lib=lib, descriptor=self.blacs_descr_tag)
+            trunc_mat = NPScal(grid=grid, lib=lib, descriptor=self.blacs_descr_tag, dtype=full_mat.dtype)
+            gemr2d = _gemr2d(trunc_mat)
 
         else:
-            trunc_mat_row = np.zeros(shape=(trunc_nbasis, full_nbasis))
-            trunc_mat = np.zeros(shape=(trunc_nbasis, trunc_nbasis))
+            trunc_mat_row = np.zeros(shape=(trunc_nbasis, full_nbasis), dtype=full_mat.dtype)
+            trunc_mat = np.zeros(shape=(trunc_nbasis, trunc_nbasis), dtype=full_mat.dtype)
 
         continous_at_blocks = np.split(active_atoms, np.where(np.diff(active_atoms) != 1)[0]+1)
 
@@ -356,8 +367,8 @@ class AtomsEmbed():
             new_n = full_nbasis
 
             if self.parallel:
-                trunc_mat.sl.pdgemr2d(new_m, new_n, full_mat.loc_array, full_row_min, 1, full_mat.descr,
-                                      trunc_mat_row.loc_array, trunc_row_min, 1, trunc_mat_row.descr, trunc_mat.ctxt.ctxt)
+                gemr2d(new_m, new_n, full_mat.loc_array, full_row_min, 1, full_mat.descr,
+                       trunc_mat_row.loc_array, trunc_row_min, 1, trunc_mat_row.descr, trunc_mat.ctxt.ctxt)
             else:
                 trunc_mat_row[trunc_row_min-1:trunc_row_max,:] = full_mat[full_row_min-1:full_row_max,:]
 
@@ -382,8 +393,8 @@ class AtomsEmbed():
             new_n = trunc_col_max - trunc_col_min + 1
 
             if self.parallel:
-                trunc_mat.sl.pdgemr2d(new_m, new_n, trunc_mat_row.loc_array, 1, full_col_min, trunc_mat_row.descr,
-                                      trunc_mat.loc_array, 1, trunc_col_min, trunc_mat.descr, trunc_mat.ctxt.ctxt)
+                gemr2d(new_m, new_n, trunc_mat_row.loc_array, 1, full_col_min, trunc_mat_row.descr,
+                       trunc_mat.loc_array, 1, trunc_col_min, trunc_mat.descr, trunc_mat.ctxt.ctxt)
             else:
                 trunc_mat[:,trunc_col_min-1:trunc_col_max] = trunc_mat_row[:,full_col_min-1:full_col_max]
 
@@ -461,12 +472,17 @@ class AtomsEmbed():
 
             row_tag = f"{self.blacs_descr_tag}_temp_rectangle_t2f"
             descriptor_registry.get_or_create(row_tag, full_nbasis, trunc_nbasis, mb, nb)
-            full_mat_row = NPScal(grid=grid, lib=lib, descriptor=row_tag)
+            full_mat_row = NPScal(grid=grid, lib=lib, descriptor=row_tag, dtype=trunc_mat.dtype)
 
-            full_mat = NPScal(grid=grid, lib=lib, descriptor=new_descr_tag)
+            # At Gamma the supersystem's callbacks register this tag; with
+            # several k-points they register per-k-point tags instead
+            # (_kpoint_tag), so it may not exist yet
+            descriptor_registry.get_or_create(new_descr_tag, full_nbasis, full_nbasis, mb, nb)
+            full_mat = NPScal(grid=grid, lib=lib, descriptor=new_descr_tag, dtype=trunc_mat.dtype)
+            gemr2d = _gemr2d(full_mat)
         else:
-            full_mat_row = np.zeros(shape=(full_nbasis, trunc_nbasis))
-            full_mat = np.zeros(shape=(full_nbasis, full_nbasis))
+            full_mat_row = np.zeros(shape=(full_nbasis, trunc_nbasis), dtype=trunc_mat.dtype)
+            full_mat = np.zeros(shape=(full_nbasis, full_nbasis), dtype=trunc_mat.dtype)
 
         continous_at_blocks = np.split(active_atoms, np.where(np.diff(active_atoms) != 1)[0]+1)
 
@@ -491,8 +507,8 @@ class AtomsEmbed():
             new_n = trunc_nbasis
 
             if self.parallel:
-                trunc_mat.sl.pdgemr2d(new_m, new_n, trunc_mat.loc_array, trunc_row_min, 1, trunc_mat.descr,
-                                      full_mat_row.loc_array, full_row_min, 1, full_mat_row.descr, trunc_mat.ctxt.ctxt)
+                gemr2d(new_m, new_n, trunc_mat.loc_array, trunc_row_min, 1, trunc_mat.descr,
+                       full_mat_row.loc_array, full_row_min, 1, full_mat_row.descr, trunc_mat.ctxt.ctxt)
             else:
                 full_mat_row[full_row_min-1:full_row_max,:] = trunc_mat[trunc_row_min-1:trunc_row_max,:]
 
@@ -517,8 +533,8 @@ class AtomsEmbed():
             new_n = full_col_max - full_col_min + 1
 
             if self.parallel:
-                trunc_mat.sl.pdgemr2d(new_m, new_n, full_mat_row.loc_array, 1, trunc_col_min, full_mat_row.descr,
-                                      full_mat.loc_array, 1, full_col_min, full_mat.descr, trunc_mat.ctxt.ctxt)
+                gemr2d(new_m, new_n, full_mat_row.loc_array, 1, trunc_col_min, full_mat_row.descr,
+                       full_mat.loc_array, 1, full_col_min, full_mat.descr, trunc_mat.ctxt.ctxt)
             else:
                 full_mat[:,full_col_min-1:full_col_max] = full_mat_row[:,trunc_col_min-1:trunc_col_max]
 

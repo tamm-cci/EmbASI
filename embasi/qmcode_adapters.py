@@ -579,9 +579,9 @@ class QMCodeASIAdapter(QMCodeAdapter):
         if n_kpoints > 1:
             # With k-point parallelism each process holds only its own
             # (spin, k-point) blocks, as SpinKpointArrays of local blocks
-            # (kpoint_parallel). Not yet supported on top of that: the serial
-            # (gather-to-root) path, basis truncation, whose truncated
-            # descriptors are per layer rather than per k-point, and the
+            # (kpoint_parallel). Basis truncation works block by block on
+            # the block's own grid (truncated_mat_to_full). Not yet supported
+            # on top of that: the serial (gather-to-root) path and the
             # density-matrix mixing loop, which adds blocks of different
             # k-points.
             # Two layouts (FHI-aims): with no more k-points than processes, one
@@ -591,8 +591,6 @@ class QMCodeASIAdapter(QMCodeAdapter):
             # every process and the density matrices only on the processes that
             # own them (parallel=False: gathered below, after which every
             # process holds every block).
-            if asi.n_local_ks != n_spins * n_kpoints and atoms_embed.parallel and atoms_embed.truncate:
-                raise NotImplementedError("Basis truncation with k-points distributed over MPI processes")
             # SpinKpointArray uses uniform k-point weights, which is only right
             # for the full (unreduced) grid; ASI exposes no weights.
             k_grid = getattr(atomsembed.initial_calc, "parameters", {}).get("k_grid")
