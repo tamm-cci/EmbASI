@@ -1137,6 +1137,7 @@ class ProjectionEmbedding(EmbeddingBase):
         """
         from .diis import CommutatorDIIS
         from embasi.ks_array import SpinKpointArray
+        from mpi4py import MPI
 
         # Serial (np.ndarray) and parallel (NPScal) blocks take the same path:
         # @, -, np.abs and np.max (reduced over the grid) are all NPScal-aware.
@@ -1151,7 +1152,14 @@ class ProjectionEmbedding(EmbeddingBase):
             return SpinKpointArray(err, fock.n_spins, fock.n_kpoints, fock.kpt_weights)
 
         def max_abs(err):
-            return max(float(np.max(np.abs(block))) for block in err.data.values())
+            # np.max of an NPScal block is reduced over its process grid, but
+            # with k-points distributed over process groups each rank only
+            # holds its own group's blocks. Reduce over all ranks so every
+            # group takes the same convergence (and damping) decisions;
+            # otherwise groups can disagree near the tolerance and deadlock
+            # in the next collective QM call.
+            local = max((float(np.max(np.abs(block))) for block in err.data.values()), default=0.0)
+            return MPI.COMM_WORLD.allreduce(local, op=MPI.MAX)
 
         fat_info = self.output_data_dict["FATCONVINFO"]
         fat_info["UPDATE"] = "fock_diis"
