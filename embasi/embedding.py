@@ -528,7 +528,8 @@ class ProjectionEmbedding(EmbeddingBase):
                  parallel=False, gc=True, run_dir="./EmbASI_calc",
                  basis_illcond_thresh=1e-5, scalapack_block_size=16, fat_mixing=0.2,
                  fat_update="fock_diis", fat_damp=0.0, fat_damp_thresh=0.1,
-                 fat_reuse_calc=False, ignore_npscal_warnings=True):
+                 fat_reuse_calc=False, fat_comm_tol=1e-5, fat_energy_tol=1e-6,
+                 fat_diis_weighting="none", ignore_npscal_warnings=True):
 
         from copy import copy, deepcopy
         from mpi4py import MPI
@@ -747,6 +748,25 @@ class ProjectionEmbedding(EmbeddingBase):
         self.fat_damp = fat_damp
         self.fat_damp_thresh = fat_damp_thresh
 
+        # Convergence thresholds for fat_update="fock_diis": converged when
+        # max|[F,D]| < fat_comm_tol (a.u.) and |dE(AB)| < fat_energy_tol (eV).
+        # fat_energy_tol=None drops the energy criterion (commutator only).
+        if not (fat_comm_tol > 0.0):
+            raise Exception("fat_comm_tol must be > 0")
+        if (fat_energy_tol is not None) and not (fat_energy_tol > 0.0):
+            raise Exception("fat_energy_tol must be > 0 or None")
+        self.fat_comm_tol = fat_comm_tol
+        self.fat_energy_tol = fat_energy_tol
+
+        # Weighting of the subsystem commutators in the shared DIIS error
+        # norm for fat_update="fock_diis": "none" (plain sum, dominated by
+        # the larger subsystem basis), "size" (1/n_X**2) or "norm" (unit
+        # weight for each subsystem's newest error). See CommutatorDIIS.
+        from .diis import CommutatorDIIS
+        if fat_diis_weighting not in CommutatorDIIS.WEIGHTINGS:
+            raise Exception(f"Invalid entry for fat_diis_weighting: use one of {CommutatorDIIS.WEIGHTINGS}")
+        self.fat_diis_weighting = fat_diis_weighting
+
         # Keep the supersystem (AB_LL) calculator open across freeze-and-thaw
         # cycles instead of initialising the QM code for every Fock build.
         # Only affects QM codes driven through ASI callbacks (e.g. FHI-aims).
@@ -826,6 +846,9 @@ class ProjectionEmbedding(EmbeddingBase):
         if mixing_type == "fock_diis":
             densmat_A_LL, densmat_B_LL = self._fat_cycles_fock_diis(densmat_A_LL, densmat_B_LL,
                                                                     overlap, ncycles, hist_len=8,
+                                                                    comm_tol=self.fat_comm_tol,
+                                                                    energy_tol=self.fat_energy_tol,
+                                                                    weighting=self.fat_diis_weighting,
                                                                     damp=self.fat_damp,
                                                                     damp_thresh=self.fat_damp_thresh)
             # The legacy density-mixing loop below is skipped
@@ -986,7 +1009,7 @@ class ProjectionEmbedding(EmbeddingBase):
 
     def _fat_cycles_fock_diis(self, densmat_A, densmat_B, overlap, ncycles,
                               hist_len=8, comm_tol=1e-5, energy_tol=1e-6,
-                              damp=0.0, damp_thresh=0.1):
+                              weighting="none", damp=0.0, damp_thresh=0.1):
         """Freeze-and-thaw cycles with commutator DIIS on the embedded Fock matrices
 
         Each cycle:
@@ -1011,8 +1034,12 @@ class ProjectionEmbedding(EmbeddingBase):
         ----------
         comm_tol : float
             Convergence threshold on max |e_X| (a.u.)
-        energy_tol : float
-            Convergence threshold on the change in supersystem energy (eV)
+        energy_tol : float or None
+            Convergence threshold on the change in supersystem energy (eV).
+            None converges on the commutator alone.
+        weighting : str
+            Subsystem weighting of the DIIS error norm: "none", "size" or
+            "norm" (see CommutatorDIIS)
         damp : float
             Damping factor beta. While max|e_X| > damp_thresh, the Fock
             matrices diagonalised are (1 - beta) F~_X + beta F~_X(previous
@@ -1042,10 +1069,20 @@ class ProjectionEmbedding(EmbeddingBase):
 
         fat_info = self.output_data_dict["FATCONVINFO"]
         fat_info["UPDATE"] = "fock_diis"
+        fat_info["COMM_TOL"] = comm_tol
+        fat_info["ENERGY_TOL"] = energy_tol
+        fat_info["DIIS_WEIGHTING"] = weighting
         fat_info["COMMUTATOR_ERR"] = []
+        fat_info["COMMUTATOR_ERR_A"] = []
+        fat_info["COMMUTATOR_ERR_B"] = []
         fat_info["DAMPED_STEP"] = []
 
-        diis = CommutatorDIIS(hist_len)
+        diis = CommutatorDIIS(hist_len, weighting=weighting)
+
+        # Basis size of each subsystem (for weighting="size")
+        def layer_nbasis(layer):
+            return layer.basis_info.trunc_nbasis if layer.truncate else layer.basis_info.full_nbasis
+        sizes = [layer_nbasis(self.A_LL), layer_nbasis(self.B_LL)]
         old_energy = None
         converged = False
         # Fock matrices diagonalised in the previous cycle (damping reference)
@@ -1074,17 +1111,25 @@ class ProjectionEmbedding(EmbeddingBase):
             # 3. Convergence: commutators and energy change
             err_A = commutator(fock_A, to_layer_basis(self.A_LL, densmat_A), ovlp_A)
             err_B = commutator(fock_B, to_layer_basis(self.B_LL, densmat_B), ovlp_B)
-            err_max = max(max_abs(err_A), max_abs(err_B))
+            err_max_A = max_abs(err_A)
+            err_max_B = max_abs(err_B)
+            err_max = max(err_max_A, err_max_B)
             fat_info["COMMUTATOR_ERR"].append(err_max)
+            fat_info["COMMUTATOR_ERR_A"].append(err_max_A)
+            fat_info["COMMUTATOR_ERR_B"].append(err_max_B)
 
             delta_energy = None if old_energy is None else new_energy - old_energy
             fat_info["DFTINDFT_DELTAENERGIES"].append(delta_energy)
             old_energy = new_energy
             root_print(f"FAT ITERATION {i}: E(AB) = {new_energy} eV, "
-                       f"dE = {delta_energy} eV, max|[F,D]| = {err_max:.3e}")
+                       f"dE = {delta_energy} eV, max|[F,D]| = {err_max:.3e} "
+                       f"(A: {err_max_A:.3e}, B: {err_max_B:.3e})")
 
-            if (err_max < comm_tol) and (delta_energy is not None) and \
-               (abs(delta_energy) < energy_tol):
+            if energy_tol is None:
+                energy_ok = True
+            else:
+                energy_ok = (delta_energy is not None) and (abs(delta_energy) < energy_tol)
+            if (err_max < comm_tol) and energy_ok:
                 converged = True
                 root_print(f"FAT CONVERGED in {i + 1} cycles")
                 break
@@ -1094,7 +1139,7 @@ class ProjectionEmbedding(EmbeddingBase):
             # 4. Next Fock matrices: a damped step while far from convergence,
             #    otherwise the DIIS extrapolation. The undamped matrices always
             #    enter the DIIS history.
-            fock_A_diis, fock_B_diis = diis.update([fock_A, fock_B], [err_A, err_B])
+            fock_A_diis, fock_B_diis = diis.update([fock_A, fock_B], [err_A, err_B], sizes=sizes)
             damped = (damp > 0.0) and (err_max > damp_thresh) and (fock_A_in is not None)
             if damped:
                 fock_A = fock_A * (1.0 - damp) + fock_A_in * damp

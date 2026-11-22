@@ -170,19 +170,44 @@ class CommutatorDIIS():
 
     The error inner products <e_i|e_j> are stored between updates, so
     each update computes only the n_hist products of the newest error
-    vector, not the full n_hist (n_hist + 1) / 2.
+    vector, not the full n_hist (n_hist + 1) / 2. They are stored per
+    subsystem, so the subsystems can be weighted differently when the
+    coefficients are solved for, without recomputing any products.
+
+    Parameters
+    ----------
+    hist_len : int
+        Number of previous Fock matrices kept for the extrapolation
+    weighting : str
+        How each subsystem's error enters the DIIS error norm,
+        sum_X w_X <e_X,i|e_X,j>:
+          "none" - w_X = 1 (plain concatenation; a subsystem with a larger
+                   basis dominates the norm)
+          "size" - w_X = 1 / n_X**2, with n_X the subsystem basis size
+                   passed to update(), i.e. the mean squared element of
+                   each commutator
+          "norm" - w_X = 1 / <e_X|e_X> of the newest error, so every
+                   subsystem has unit weight in the latest cycle
     """
 
-    def __init__(self, hist_len=8):
+    WEIGHTINGS = ("none", "size", "norm")
+
+    def __init__(self, hist_len=8, weighting="none"):
+        if weighting not in self.WEIGHTINGS:
+            raise Exception(f"Invalid DIIS weighting '{weighting}': use one of {self.WEIGHTINGS}")
         self.hist_len = hist_len
+        self.weighting = weighting
         self.fock_hist = []
         self.err_hist = []
-        # Unscaled <e_i|e_j> for the errors in err_hist, in the same order
-        self.err_prod = np.zeros((0, 0))
+        # Unscaled <e_X,i|e_X,j> for the errors in err_hist, one
+        # (n_hist, n_hist) block per subsystem X
+        self.err_prod = None
+        # Weights w_X used by the last update (diagnostics)
+        self.last_weights = None
 
     @staticmethod
     def _inner(errs_1, errs_2):
-        """Re <errs_1|errs_2>, summed over subsystems and (spin, k-point)
+        """Re <e_X,1|e_X,2> for every subsystem X, summed over (spin, k-point)
         blocks, each k-point weighted. Written as sum(conj(a) * b) rather than np.vdot, which
         NPScal does not implement; np.sum of an NPScal is reduced over the
         whole grid, so the result is the same global value on every rank."""
@@ -198,38 +223,67 @@ class CommutatorDIIS():
             # Blocks of other process groups too (collective; decided on the
             # global k-point count)
             local = gather_by_key(local)
-        total = 0.0
+        per_sub = np.zeros(len(errs_1))
         for key in sorted(local):
-            total += local[key]
-        return total
+            per_sub[key[0]] += local[key]
+        return per_sub
 
-    def update(self, focks, errs):
+    def _weights(self, sizes):
+        """Weights w_X for the current update (identical on every rank)"""
+        n_sub = self.err_prod.shape[0]
+        if self.weighting == "none":
+            return np.ones(n_sub)
+        if self.weighting == "size":
+            if sizes is None or len(sizes) != n_sub:
+                raise Exception("DIIS weighting 'size' needs one basis size per subsystem")
+            return 1.0 / np.asarray(sizes, dtype=float)**2
+        # "norm": unit weight for each subsystem's newest error. A subsystem
+        # that is already exactly converged has no error to balance
+        newest = np.array([self.err_prod[i_sub, -1, -1] for i_sub in range(n_sub)])
+        tiny = np.finfo(float).tiny
+        return np.where(newest > tiny, 1.0 / np.maximum(newest, tiny), 0.0)
+
+    def update(self, focks, errs, sizes=None):
         """Adds focks/errs (lists of SpinKpointArray) to the history and
-        returns the extrapolated Fock matrices, in the same order"""
+        returns the extrapolated Fock matrices, in the same order
+
+        sizes: basis size of each subsystem (needed for weighting="size")
+        """
         self.fock_hist.append([fock.copy() for fock in focks])
         self.err_hist.append([err.copy() for err in errs])
 
         # Grow the stored products by the newest row/column only
-        n_old = self.err_prod.shape[0]
-        new_row = np.array([self._inner(self.err_hist[i], self.err_hist[-1])
-                            for i in range(n_old + 1)])
-        err_prod = np.zeros((n_old + 1, n_old + 1))
-        err_prod[:n_old, :n_old] = self.err_prod
-        err_prod[n_old, :] = err_prod[:, n_old] = new_row
+        n_sub = len(errs)
+        if self.err_prod is None:
+            self.err_prod = np.zeros((n_sub, 0, 0))
+        n_old = self.err_prod.shape[1]
+        new_rows = np.array([self._inner(self.err_hist[i], self.err_hist[-1])
+                             for i in range(n_old + 1)]).T  # (n_sub, n_old + 1)
+        err_prod = np.zeros((n_sub, n_old + 1, n_old + 1))
+        err_prod[:, :n_old, :n_old] = self.err_prod
+        err_prod[:, n_old, :] = new_rows
+        err_prod[:, :, n_old] = new_rows
         self.err_prod = err_prod
 
         if len(self.fock_hist) > self.hist_len:
             self.fock_hist.pop(0)
             self.err_hist.pop(0)
-            self.err_prod = self.err_prod[1:, 1:]
+            self.err_prod = self.err_prod[:, 1:, 1:]
+
+        weights = self._weights(sizes)
+        self.last_weights = weights
 
         n_hist = len(self.fock_hist)
         if n_hist == 1:
             return [fock.copy() for fock in focks]
 
+        weighted_prod = np.einsum("x,xij->ij", weights, self.err_prod)
+        if not np.max(np.abs(np.diag(weighted_prod))) > 0.0:
+            # Every error is exactly zero: nothing to extrapolate
+            return [fock.copy() for fock in focks]
         b_mat = np.zeros((n_hist + 1, n_hist + 1))
         # Scale for conditioning: the coefficients are scale invariant
-        b_mat[:n_hist, :n_hist] = self.err_prod / np.max(np.abs(np.diag(self.err_prod)))
+        b_mat[:n_hist, :n_hist] = weighted_prod / np.max(np.abs(np.diag(weighted_prod)))
         b_mat[n_hist, :n_hist] = b_mat[:n_hist, n_hist] = -1.0
         rhs = np.zeros(n_hist + 1)
         rhs[n_hist] = -1.0
