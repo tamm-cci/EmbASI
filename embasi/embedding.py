@@ -529,7 +529,10 @@ class ProjectionEmbedding(EmbeddingBase):
                  basis_illcond_thresh=1e-5, scalapack_block_size=16, fat_mixing=0.2,
                  fat_update="fock_diis", fat_damp=0.0, fat_damp_thresh=0.1,
                  fat_reuse_calc=False, fat_comm_tol=1e-5, fat_energy_tol=1e-6,
-                 fat_diis_weighting="none", ignore_npscal_warnings=True):
+                 fat_diis_weighting="none", fat_init="truncate",
+                 fat_diis_skip_first=False, fat_diis_reset_thresh=None,
+                 fat_safeguard_growth=None, fat_safeguard_damp=0.5,
+                 ignore_npscal_warnings=True):
 
         from copy import copy, deepcopy
         from mpi4py import MPI
@@ -741,12 +744,24 @@ class ProjectionEmbedding(EmbeddingBase):
         self.fat_update = fat_update
 
         # Fock damping for fat_update="fock_diis": while max|[F,D]| exceeds
-        # fat_damp_thresh, the next Fock matrix is (1 - fat_damp) * F + fat_damp * F_prev
-        # instead of the DIIS extrapolation. 0 disables damping.
+        # fat_damp_thresh, the next Fock matrix is
+        # (1 - fat_damp) * F_DIIS + fat_damp * F_prev, i.e. the DIIS
+        # extrapolation is damped, not replaced. 0 disables damping.
         if not (0.0 <= fat_damp < 1.0):
             raise Exception("fat_damp must satisfy 0 <= fat_damp < 1")
         self.fat_damp = fat_damp
         self.fat_damp_thresh = fat_damp_thresh
+
+        # Divergence safeguard for fat_update="fock_diis": if max|[F,D]| grows
+        # by more than fat_safeguard_growth (> 1) in one cycle, the DIIS
+        # history is cleared and a damped step with beta = fat_safeguard_damp
+        # is taken. None disables it.
+        if (fat_safeguard_growth is not None) and not (fat_safeguard_growth > 1.0):
+            raise Exception("fat_safeguard_growth must be > 1 or None")
+        if not (0.0 < fat_safeguard_damp < 1.0):
+            raise Exception("fat_safeguard_damp must satisfy 0 < fat_safeguard_damp < 1")
+        self.fat_safeguard_growth = fat_safeguard_growth
+        self.fat_safeguard_damp = fat_safeguard_damp
 
         # Convergence thresholds for fat_update="fock_diis": converged when
         # max|[F,D]| < fat_comm_tol (a.u.) and |dE(AB)| < fat_energy_tol (eV).
@@ -771,6 +786,31 @@ class ProjectionEmbedding(EmbeddingBase):
         # cycles instead of initialising the QM code for every Fock build.
         # Only affects QM codes driven through ASI callbacks (e.g. FHI-aims).
         self.fat_reuse_calc = fat_reuse_calc
+
+        # Initial subsystem densities for freeze-and-thaw with absolute basis
+        # truncation:
+        #   "truncate" - zero the SPADE density outside each truncated basis
+        #                and rescale it to the subsystem electron count (not
+        #                idempotent)
+        #   "project"  - idempotent projection: occupy the natural orbitals of
+        #                (S D S) restricted to the truncated basis, i.e. the
+        #                S_tt-orthonormalised least-squares fits
+        #                C' = S_tt^-1 S_tf C of the SPADE orbitals
+        if fat_init not in ("truncate", "project"):
+            raise Exception("Invalid entry for fat_init: use 'truncate' or 'project'")
+        self.fat_init = fat_init
+
+        # DIIS history control for fat_update="fock_diis":
+        #   fat_diis_skip_first   - keep cycle 0 (built from the initial guess)
+        #                           out of the DIIS history; cycle 0 then takes
+        #                           a plain (undamped, unextrapolated) step
+        #   fat_diis_reset_thresh - clear the DIIS history the first time
+        #                           max|[F,D]| drops below this value (a.u.);
+        #                           None never resets
+        if (fat_diis_reset_thresh is not None) and not (fat_diis_reset_thresh > 0.0):
+            raise Exception("fat_diis_reset_thresh must be > 0 or None")
+        self.fat_diis_skip_first = bool(fat_diis_skip_first)
+        self.fat_diis_reset_thresh = fat_diis_reset_thresh
 
         # A temporary solution to storing data output data
         self.output_data_dict = {}
@@ -806,22 +846,50 @@ class ProjectionEmbedding(EmbeddingBase):
             mat = atomemb.full_mat_to_truncated(mat)
             return  atomemb.truncated_mat_to_full(mat)
 
-        if self.abs_truncate:
-            densmat_A_LL = expand_and_truncate_mat(self.A_LL, densmat_A_LL)
-            densmat_B_LL = expand_and_truncate_mat(self.B_LL, densmat_B_LL)
-
-        densmat_A_LL = renorm_densmat(densmat_A_LL, overlap, self.A_pop)
-        densmat_B_LL = renorm_densmat(densmat_B_LL, overlap, self.B_pop)
-
-        update_densmat = densmat_A_LL + densmat_B_LL
+        def project_densmat(layer, densmat):
+            # Idempotent density in the layer's truncated basis closest to
+            # densmat: with S D S c = n S_tt c solved in the truncated basis,
+            # the eigenvectors of largest n are the S_tt-orthonormalised
+            # least-squares fits of the occupied orbitals of densmat. These
+            # are found as the lowest states of the pseudo-Fock -(S D S)_tt
+            # with the subsystem's own electron count (and spin), so every
+            # k-point, spin channel and the parallel path are handled as in
+            # an ordinary freeze-and-thaw diagonalisation.
+            # A layer that has not run yet takes its dimensions from densmat
+            # (its first run sets them from the QM code as usual)
+            if getattr(layer, "n_spins", None) is None:
+                layer.n_spins = densmat.n_spins
+            if getattr(layer, "n_kpoints", None) is None:
+                layer.n_kpoints = densmat.n_kpoints
+            pseudo_fock = layer.full_mat_to_truncated(overlap @ densmat @ overlap) * -1.0
+            ovlp_trunc = layer.full_mat_to_truncated(overlap)
+            layer.diag_embedded_fock(pseudo_fock, ovlp_trunc)
+            return layer.density_matrices_out.copy()
 
         self.A_LL.input_fragment_nelectrons = self.A_pop
         if self.A_spin is not None:
             self.A_LL.input_fragment_spin = self.A_spin
-        self.A_LL.run_noscf(dm_in=densmat_A_LL)
         self.B_LL.input_fragment_nelectrons = self.B_pop
         if self.B_spin is not None:
             self.B_LL.input_fragment_spin = self.B_spin
+
+        if self.abs_truncate and self.fat_init == "project":
+            root_print("Freeze-and-thaw initial densities: idempotent projection into the truncated bases")
+            densmat_A_LL = project_densmat(self.A_LL, densmat_A_LL)
+            densmat_B_LL = project_densmat(self.B_LL, densmat_B_LL)
+            root_print(f"Projected populations: A = {(overlap @ densmat_A_LL).trace()}, "
+                       f"B = {(overlap @ densmat_B_LL).trace()}")
+        else:
+            if self.abs_truncate:
+                densmat_A_LL = expand_and_truncate_mat(self.A_LL, densmat_A_LL)
+                densmat_B_LL = expand_and_truncate_mat(self.B_LL, densmat_B_LL)
+
+            densmat_A_LL = renorm_densmat(densmat_A_LL, overlap, self.A_pop)
+            densmat_B_LL = renorm_densmat(densmat_B_LL, overlap, self.B_pop)
+
+        update_densmat = densmat_A_LL + densmat_B_LL
+
+        self.A_LL.run_noscf(dm_in=densmat_A_LL)
         self.B_LL.run_noscf(dm_in=densmat_B_LL)
 
         # TODO: @SPIN AND K-POINT LOOP
@@ -850,7 +918,11 @@ class ProjectionEmbedding(EmbeddingBase):
                                                                     energy_tol=self.fat_energy_tol,
                                                                     weighting=self.fat_diis_weighting,
                                                                     damp=self.fat_damp,
-                                                                    damp_thresh=self.fat_damp_thresh)
+                                                                    damp_thresh=self.fat_damp_thresh,
+                                                                    diis_skip_first=self.fat_diis_skip_first,
+                                                                    diis_reset_thresh=self.fat_diis_reset_thresh,
+                                                                    safeguard_growth=self.fat_safeguard_growth,
+                                                                    safeguard_damp=self.fat_safeguard_damp)
             # The legacy density-mixing loop below is skipped
             ncycles = 0
 
@@ -1009,7 +1081,9 @@ class ProjectionEmbedding(EmbeddingBase):
 
     def _fat_cycles_fock_diis(self, densmat_A, densmat_B, overlap, ncycles,
                               hist_len=8, comm_tol=1e-5, energy_tol=1e-6,
-                              weighting="none", damp=0.0, damp_thresh=0.1):
+                              weighting="none", damp=0.0, damp_thresh=0.1,
+                              diis_skip_first=False, diis_reset_thresh=None,
+                              safeguard_growth=None, safeguard_damp=0.5):
         """Freeze-and-thaw cycles with commutator DIIS on the embedded Fock matrices
 
         Each cycle:
@@ -1042,12 +1116,24 @@ class ProjectionEmbedding(EmbeddingBase):
             "norm" (see CommutatorDIIS)
         damp : float
             Damping factor beta. While max|e_X| > damp_thresh, the Fock
-            matrices diagonalised are (1 - beta) F~_X + beta F~_X(previous
-            input) instead of the DIIS extrapolation. The DIIS history
-            always holds the undamped F~_X, so the extrapolation starts
-            from a full history once damping switches off. 0 disables it.
+            matrices diagonalised are (1 - beta) F~_X(DIIS) + beta F~_X(previous
+            input), i.e. the DIIS step is damped, not replaced. The DIIS
+            history always holds the undamped F~_X. 0 disables it.
         damp_thresh : float
             max|e_X| (a.u.) above which damped steps are taken
+        diis_skip_first : bool
+            Keep cycle 0 (the initial guess) out of the DIIS history; cycle 0
+            takes a plain step with its own embedded Fock matrices
+        diis_reset_thresh : float or None
+            Clear the DIIS history once, the first time max|e_X| drops below
+            this value, so early far-from-converged errors do not steer the
+            extrapolation near convergence
+        safeguard_growth : float or None
+            If max|e_X| grows by more than this factor (> 1) between cycles,
+            clear the DIIS history and take a damped step with
+            beta = safeguard_damp. None disables the safeguard
+        safeguard_damp : float
+            Damping factor of a safeguard step
         """
         from .diis import CommutatorDIIS
         from embasi.ks_array import SpinKpointArray
@@ -1076,6 +1162,14 @@ class ProjectionEmbedding(EmbeddingBase):
         fat_info["COMMUTATOR_ERR_A"] = []
         fat_info["COMMUTATOR_ERR_B"] = []
         fat_info["DAMPED_STEP"] = []
+        fat_info["FAT_INIT"] = self.fat_init
+        fat_info["DIIS_SKIP_FIRST"] = diis_skip_first
+        fat_info["DIIS_RESET_THRESH"] = diis_reset_thresh
+        fat_info["DIIS_RESET_CYCLE"] = None
+        fat_info["DAMP_BETA"] = []
+        fat_info["SAFEGUARD_GROWTH"] = safeguard_growth
+        fat_info["SAFEGUARD_DAMP"] = safeguard_damp
+        fat_info["SAFEGUARD_CYCLES"] = []
 
         diis = CommutatorDIIS(hist_len, weighting=weighting)
 
@@ -1088,6 +1182,8 @@ class ProjectionEmbedding(EmbeddingBase):
         # Fock matrices diagonalised in the previous cycle (damping reference)
         fock_A_in = None
         fock_B_in = None
+        # max|[F,D]| of the previous cycle (safeguard reference)
+        err_prev = None
 
         for i in range(ncycles):
             fat_info["FAT_NCYCLES"] = i + 1
@@ -1136,20 +1232,50 @@ class ProjectionEmbedding(EmbeddingBase):
             if i == ncycles - 1:
                 break
 
-            # 4. Next Fock matrices: a damped step while far from convergence,
-            #    otherwise the DIIS extrapolation. The undamped matrices always
-            #    enter the DIIS history.
-            fock_A_diis, fock_B_diis = diis.update([fock_A, fock_B], [err_A, err_B], sizes=sizes)
-            damped = (damp > 0.0) and (err_max > damp_thresh) and (fock_A_in is not None)
+            # 4. Next Fock matrices: the DIIS extrapolation, damped towards the
+            #    previously diagonalised Fock matrices while far from
+            #    convergence. The undamped matrices always enter the DIIS
+            #    history.
+            #    Safeguard: if the error grew by more than safeguard_growth
+            #    since the last cycle, the step that produced these densities
+            #    overshot. The history (which led to it) is cleared and a
+            #    strongly damped step from the previous Fock matrices is taken.
+            safeguard = (safeguard_growth is not None) and (err_prev is not None) \
+                and (fock_A_in is not None) and (err_max > safeguard_growth * err_prev)
+            if safeguard:
+                diis.reset()
+                fat_info["SAFEGUARD_CYCLES"].append(i)
+                root_print(f"FAT ITERATION {i}: max|[F,D]| grew by {err_max / err_prev:.2f}x"
+                           f" - DIIS history cleared, damped step (beta = {safeguard_damp})")
+            err_prev = err_max
+            if (diis_reset_thresh is not None) and (fat_info["DIIS_RESET_CYCLE"] is None) \
+                    and (err_max < diis_reset_thresh) and (len(diis.fock_hist) > 0):
+                diis.reset()
+                fat_info["DIIS_RESET_CYCLE"] = i
+                root_print(f"FAT ITERATION {i}: DIIS history cleared "
+                           f"(max|[F,D]| < {diis_reset_thresh:.1e})")
+            if diis_skip_first and i == 0:
+                # Initial-guess Fock matrices stay out of the history
+                fock_A_diis, fock_B_diis = fock_A, fock_B
+            else:
+                fock_A_diis, fock_B_diis = diis.update([fock_A, fock_B], [err_A, err_B], sizes=sizes)
+            if safeguard:
+                beta = safeguard_damp
+            elif (damp > 0.0) and (err_max > damp_thresh) and (fock_A_in is not None):
+                beta = damp
+            else:
+                beta = 0.0
+            damped = beta > 0.0
             if damped:
-                fock_A = fock_A * (1.0 - damp) + fock_A_in * damp
-                fock_B = fock_B * (1.0 - damp) + fock_B_in * damp
+                fock_A = fock_A_diis * (1.0 - beta) + fock_A_in * beta
+                fock_B = fock_B_diis * (1.0 - beta) + fock_B_in * beta
             else:
                 fock_A, fock_B = fock_A_diis, fock_B_diis
             fock_A_in, fock_B_in = fock_A, fock_B
             fat_info["DAMPED_STEP"].append(damped)
-            if damped:
-                root_print(f"FAT ITERATION {i}: damped step (beta = {damp})")
+            fat_info["DAMP_BETA"].append(beta)
+            if damped and not safeguard:
+                root_print(f"FAT ITERATION {i}: damped DIIS step (beta = {beta})")
             fat_info["DIIS_TIME"] += time.time() - time_s
 
             time_s = time.time()

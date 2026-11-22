@@ -243,6 +243,12 @@ class CommutatorDIIS():
         tiny = np.finfo(float).tiny
         return np.where(newest > tiny, 1.0 / np.maximum(newest, tiny), 0.0)
 
+    def reset(self):
+        """Clears the history; the next update takes a plain step"""
+        self.fock_hist = []
+        self.err_hist = []
+        self.err_prod = None
+
     def update(self, focks, errs, sizes=None):
         """Adds focks/errs (lists of SpinKpointArray) to the history and
         returns the extrapolated Fock matrices, in the same order
