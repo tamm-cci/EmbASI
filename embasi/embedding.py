@@ -529,7 +529,7 @@ class ProjectionEmbedding(EmbeddingBase):
                  basis_illcond_thresh=1e-5, scalapack_block_size=16, fat_mixing=0.2,
                  fat_update="fock_diis", fat_damp=0.0, fat_damp_thresh=0.1,
                  fat_reuse_calc=False, fat_comm_tol=1e-5, fat_energy_tol=1e-6,
-                 fat_diis_weighting="none", fat_init="truncate",
+                 fat_diis_weighting="none", fat_diis_hist_len=8, fat_init="truncate",
                  fat_diis_skip_first=False, fat_diis_reset_thresh=None,
                  fat_safeguard_growth=None, fat_safeguard_damp=0.5,
                  ignore_npscal_warnings=True):
@@ -782,6 +782,12 @@ class ProjectionEmbedding(EmbeddingBase):
             raise Exception(f"Invalid entry for fat_diis_weighting: use one of {CommutatorDIIS.WEIGHTINGS}")
         self.fat_diis_weighting = fat_diis_weighting
 
+        # Number of Fock/error pairs kept in the DIIS history for
+        # fat_update="fock_diis"
+        if not (isinstance(fat_diis_hist_len, (int, np.integer)) and fat_diis_hist_len >= 2):
+            raise Exception("fat_diis_hist_len must be an integer >= 2")
+        self.fat_diis_hist_len = int(fat_diis_hist_len)
+
         # Keep the supersystem (AB_LL) calculator open across freeze-and-thaw
         # cycles instead of initialising the QM code for every Fock build.
         # Only affects QM codes driven through ASI callbacks (e.g. FHI-aims).
@@ -913,7 +919,7 @@ class ProjectionEmbedding(EmbeddingBase):
 
         if mixing_type == "fock_diis":
             densmat_A_LL, densmat_B_LL = self._fat_cycles_fock_diis(densmat_A_LL, densmat_B_LL,
-                                                                    overlap, ncycles, hist_len=8,
+                                                                    overlap, ncycles, hist_len=self.fat_diis_hist_len,
                                                                     comm_tol=self.fat_comm_tol,
                                                                     energy_tol=self.fat_energy_tol,
                                                                     weighting=self.fat_diis_weighting,
@@ -1179,6 +1185,8 @@ class ProjectionEmbedding(EmbeddingBase):
         fat_info["SAFEGUARD_DAMP"] = safeguard_damp
         fat_info["SAFEGUARD_CYCLES"] = []
 
+        # HIST_LEN set by freeze_and_thaw refers to the legacy densmat loop
+        fat_info["HIST_LEN"] = hist_len
         diis = CommutatorDIIS(hist_len, weighting=weighting)
 
         # Basis size of each subsystem (for weighting="size")
