@@ -126,6 +126,16 @@ class AtomsEmbed():
         else:
             self.ghost_list = [False]*len(atoms)
 
+        # Per-atom ghost sites (basis functions, no nucleus or electrons),
+        # e.g., on a vacancy site, given as a mask in atoms.info["ghosts"]
+        # (already re-ordered with the atoms above). These are ghosts in
+        # every layer, on top of any layer-wide ghosts set through `ghosts`.
+        if "ghosts" in self.atoms.info:
+            user_ghosts = [bool(g) for g in self.atoms.info["ghosts"]]
+            assert len(user_ghosts) == len(self.atoms), \
+                "Length of atoms.info['ghosts'] does not match number of atoms"
+            self.ghost_list = [bool(a) or b for a, b in zip(self.ghost_list, user_ghosts)]
+
         self.ghost_list_calc = self.ghost_list
 
         self.flag_huz = huzinaga
@@ -142,13 +152,8 @@ class AtomsEmbed():
         else:
             self.ghost_list_calc = self.ghost_list
 
-        # Before passing into the main input writer, we may
-        # have extra ghosts needed for the CP correction to the
-        # BSSE
-        #if "ghosts" in self.atoms.info.keys():
-        #    for idx, ghost in enumerate(self.atoms.info["ghosts"]):
-        #        if ghost:
-        #            ghost_list[idx] = True
+        # Per-atom ghosts from atoms.info["ghosts"] are already part of
+        # self.ghost_list (see __init__)
         total_charge = self.fragment_total_charge
 
         # Set the calculator to accept the total charge for the given fragment
@@ -1181,10 +1186,13 @@ class AtomsEmbed():
         `self.atoms` by `self.atoms[active_atoms]` before the calculator's
         initializer asks for this, so once truncated every atom left is an
         active one.
+
+        Ghost sites carry no nucleus or electrons and are left out.
         """
+        real = ~np.asarray(self.ghost_list, dtype=bool)[self.basis_info.active_atoms]
         if self.truncate and len(self.atoms) == self.basis_info.trunc_natoms:
-            return np.sum(self.atoms.numbers)
-        return np.sum(self.atoms.numbers[self.basis_info.active_atoms])
+            return np.sum(self.atoms.numbers[real])
+        return np.sum(self.atoms.numbers[self.basis_info.active_atoms][real])
 
     @property
     def input_total_charge(self):

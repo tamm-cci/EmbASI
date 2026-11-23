@@ -751,6 +751,12 @@ class AimsAdapter(QMCodeASIAdapter):
 
     def set_ghost_atoms(self, atomsembed, calc, ghost_list):
         calc.parameters["ghosts"] = ghost_list
+        # ASE writes periodic geometries with atom_frac, but also gives the
+        # 'empty' (ghost) lines fractional coordinates, while FHI-aims reads
+        # 'empty' positions as Cartesian. Write Cartesian coordinates for all
+        # atoms whenever ghosts are present.
+        if any(ghost_list):
+            calc.parameters["scaled"] = False
         return calc
 
     def set_postscf_keyword(self, calc, postscf_method):
