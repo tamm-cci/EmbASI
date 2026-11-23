@@ -188,8 +188,21 @@ class AtomsEmbed():
 
         "Check if embedding mask is in the correct order (e.g., [1,1,1,2,2,2])"
         "Ensure the next value is always ge than the current"
-        idx_list = np.argsort(self.embed_mask)
-        sort_embed_mask = np.sort(self.embed_mask)
+        ghost_mask = np.zeros(len(self.embed_mask), dtype=bool)
+        if "ghosts" in self.atoms.info.keys():
+            ghost_mask = np.array([bool(g) for g in self.atoms.info["ghosts"]])
+        if ghost_mask.any():
+            # Ghost sites (atoms.info["ghosts"]) go to the END of the atom
+            # list (real atoms sorted by region before them, stable sort).
+            # FHI-aims moves 'empty' sites behind all real atoms internally,
+            # so its basis-function-to-atom map (basis_atoms) only matches
+            # the ASE atom order when the ghosts are already last. The
+            # region mask is then no longer monotonic (e.g. [1,..,2,..,1]);
+            # truncation works on explicit (non-contiguous) atom indices.
+            idx_list = np.lexsort((np.asarray(self.embed_mask), ghost_mask))
+        else:
+            idx_list = np.argsort(self.embed_mask)
+        sort_embed_mask = np.asarray(self.embed_mask)[idx_list]
 
         #print(f"AAH1: {self.initial_calc.mol._atom}")
         self.embed_mask = sort_embed_mask
@@ -222,10 +235,18 @@ class AtomsEmbed():
             lines = fil.readlines()
             mask = [any(s in str(line) for s in ('atom', 'empty')) for line in lines]
 
+        # Region of each atom in this (possibly truncated) calculation: after
+        # truncation self.atoms holds only the active atoms, while the stored
+        # mask still covers the full system (the active atoms are not always
+        # its first entries, e.g. with ghost sites placed last)
+        region = list(self.atoms.info['embedding_mask'])
+        if len(region) != len(self.atoms) and self.truncate:
+            region = [region[i] for i in self.basis_info.active_atoms]
+
         shift = 0
         for idx, maskval in enumerate(mask):
             if maskval:
-                embedding = self.atoms.info['embedding_mask'][shift]
+                embedding = region[shift]
                 shift += 1
                 lines.insert(idx + shift, f'qm_embedding_region {embedding}\n')
 
