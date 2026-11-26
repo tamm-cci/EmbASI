@@ -6,11 +6,13 @@ from embasi.parallel_utils import root_print, mpi_bcast_matrix_storage, \
 from embasi.ks_array import SpinKpointArray
 from embasi.asi_default_callbacks import dm_saving_callback, \
     ham_saving_callback, ham_saving_and_huzinaga_callback, \
-    ovlp_saving_callback, matrix_loading_callback
+    ovlp_saving_callback, matrix_loading_callback, eri_saving_callback
+# Before any ASI library is loaded: see the import note in embasi.eri
+import embasi.eri  # noqa: F401
 import numpy as np
 
 # Valid ASI Flavours
-ASI_flavour = {"None": -1, "Dummy": 0, "FHIaims": 1, "DFTB+": 2}
+ASI_flavour = {"None": -1, "Dummy": 0, "FHIaims": 1, "DFTB+": 2, "SIESTA": 3}
 
 # Registry of concrete QMCodeAdapter implementations, keyed by the
 # __name__ of the ASE calculator class they support. Populated by
@@ -72,6 +74,14 @@ class QMCodeAdapter(ABC):
     def needs_nonscf_ene_corr(self):
         """Indicates whether the true total energy is returned from run_scf
            for a non-self-consistent total energy evaluation
+        """
+        return False
+
+    @property
+    def supports_eri_export(self):
+        """True if the QM code can export 4-index AO electron repulsion
+           integrals, returned by extract_matrices as "eri" (an
+           embasi.eri.AOERIs) when AtomsEmbed.export_eri is set
         """
         return False
 
@@ -248,6 +258,24 @@ class QMCodeAdapter(ABC):
         """
         pass
 
+    def atom_nelectrons(self, atoms, calc):
+        """Electrons of each neutral free atom as treated by the QM code
+
+        The atomic numbers for all-electron codes. Codes using
+        pseudopotentials override this with the valence charges.
+
+        Parameters
+        ----------
+        atoms : ase.Atoms
+        calc : ASECalculator
+            Calculator for the layer (e.g., to locate pseudopotentials).
+
+        Returns
+        -------
+        np.ndarray of len(atoms)
+        """
+        return np.asarray(atoms.numbers)
+
     def get_qm_input_spin(self, calc):
         """Returns the spin (Nalpha - Nbeta) already configured on this
         calculator, if the underlying QM code exposes such a concept at
@@ -267,6 +295,27 @@ class QMCodeAdapter(ABC):
             mutation on it.
         """
         return None
+
+    def write_input(self, atomsembed, calc, atoms):
+        """Writes the QM code input files for `atoms` into the current directory
+
+        Called from AtomsEmbed.calc_initializer, inside the ASI working
+        directory, after all fragment (ghost/charge) settings have been
+        applied to `calc`. The default uses the ASE ``write_inputfiles``
+        convention (e.g., FHI-aims); codes whose ASE calculator writes input
+        differently override this.
+
+        Parameters
+        ----------
+        atomsembed : AtomsEmbed
+            The owning AtomsEmbed instance.
+        calc : ASECalculator
+            The fully configured ASE calculator.
+        atoms : ASE Atoms
+            The atoms to write (as seen by ASI, i.e., possibly truncated).
+        """
+        if hasattr(calc, "write_inputfiles"):
+            calc.write_inputfiles(atoms, properties=['energy'])
 
     def set_full_scf_calc(self, calc):
         calc = self.set_embasi_calculation_type(calc, "ks_fullscf")
@@ -425,6 +474,11 @@ class QMCodeASIAdapter(QMCodeAdapter):
         asi.register_hamiltonian_callback(0, 0)
         asi.register_set_hamiltonian_callback(0, 0)
         asi.register_modify_hamiltonian_callback(0, 0)
+        # Only libraries implementing ASI_register_eri_callback (and asi4py
+        # versions wrapping it) have an ERI callback to reset.
+        if hasattr(asi, "register_eri_callback") and \
+                hasattr(asi.lib, "ASI_register_eri_callback"):
+            asi.register_eri_callback(0, 0)
 
         # Register the relevant callbacks
         asi.overlap_storage = {}
@@ -693,6 +747,488 @@ class AimsAdapter(QMCodeASIAdapter):
 
     def get_forces(self, atomsembed):
         return atomsembed.atoms.calc.get_forces()
+
+def _fdf_label(key):
+    """Normalised FDF label: FDF ignores case and '.', '_', '-' in labels"""
+    return key.lower().replace('.', '').replace('_', '').replace('-', '')
+
+
+@register_calculator("Siesta")
+class SiestaAdapter(QMCodeASIAdapter):
+    """Adapter for SIESTA through its ASI interface (ASE ``Siesta`` calculator)
+
+    SIESTA settings are passed through the ASE calculator's ``fdf_arguments``.
+    Differences to FHI-aims that shape this adapter:
+
+    * SIESTA has no EmbASI control-flow keyword (cf. ``qm_embedding_calc``):
+      a full SCF is a normal run, and a total-energy-only evaluation is a
+      single SCF step from the imported density matrix.
+    * The Hamiltonian and density matrix are exported on every SCF step, not
+      once at the end; the last export of each is the converged pair.
+    * With ``ASI.ExportHamComps`` (always set by this adapter) SIESTA exports
+      the kinetic matrix T and the non-local Kleinman-Bylander matrix V_KB
+      just before H on every step. ham_saving_callback keeps the last three
+      exports, so after the run they are [T, V_KB, H]. ``ham_kin`` is T and
+      ``ham_estat_xc`` is H - T (V_KB + neutral-atom, Hartree and XC terms),
+      so that ham_kin + ham_estat_xc = ham_tot as for FHI-aims. V_KB is also
+      returned on its own as ``ham_vkb``.
+    * The modify-Hamiltonian callback (embedding potential + projector) is
+      added to H for the diagonalisation only; the exported H and SIESTA's
+      energies are those of the bare KS Hamiltonian.
+    * Matrices are exported dense on rank 0 (no BLACS distribution), for
+      Gamma-point, spin-unpolarised calculations only.
+    * Ghost atoms are SIESTA floating orbitals (negative atomic number),
+      written through ASE ghost ``Species``.
+
+    SIESTA's ASI interface also needs ``SolutionMethod diagon`` and reads its
+    input from ``siesta.fdf``; both are ensured when writing the input.
+    """
+
+    #: Smallest SCF step count for which SIESTA exports H and the DM
+    MIN_SCF_CYCLES = 1
+
+    def __init__(self):
+        super(SiestaAdapter, self).__init__()
+
+    @property
+    def asi_flavour(self):
+        return ASI_flavour["SIESTA"]
+
+    @property
+    def needs_nonscf_ene_corr(self):
+        """No eigenvalue-sum correction is needed: total-energy-only runs mix
+           the density matrix (see _apply_noscf), so SIESTA's E_KS of the single
+           SCF step is the Kohn-Sham functional of the input density matrix.
+
+           (With Hamiltonian mixing SIESTA recomputes H and its energy terms
+           from the output density matrix within the step, so neither E_KS
+           nor E_Harris can be corrected back to the input density.)
+        """
+        return False
+
+    #: File SIESTA's QComp module writes the ERIs to alongside the ASI export
+    ERI_DATA_FILE = "embasi_eri.nc"
+
+    @property
+    def supports_eri_export(self):
+        """SIESTA exports 4-index AO ERIs through its QComp module
+
+           Needs a library built with SIESTA_WITH_QCOMP (Gaussian fits of the
+           NAOs, libint integrals). The ERIs are computed once, at the first
+           SCF step, for Gamma-point molecular calculations.
+        """
+        return True
+
+    # ------------------------------------------------------------------
+    # FDF helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _set_fdf(calc, key, value, overwrite=True):
+        """Sets an FDF argument, replacing any spelling variant of `key`"""
+        args = dict(calc.parameters.get('fdf_arguments') or {})
+        variants = [k for k in args if _fdf_label(k) == _fdf_label(key)]
+        if variants and not overwrite:
+            return calc
+        for k in variants:
+            del args[k]
+        args[key] = value
+        calc.parameters['fdf_arguments'] = args
+        return calc
+
+    @staticmethod
+    def _get_fdf(calc, key, default=None):
+        args = calc.parameters.get('fdf_arguments') or {}
+        for k, v in args.items():
+            if _fdf_label(k) == _fdf_label(key):
+                return v
+        return default
+
+    # ------------------------------------------------------------------
+    # Input directives
+    # ------------------------------------------------------------------
+
+    def _apply_noscf(self, calc):
+        # One SCF step: H[D_in] and E_KS[D_in] are built from the imported
+        # density matrix, exported, then H is diagonalised. Density-matrix
+        # mixing makes SIESTA evaluate the energy at D_in rather than D_out.
+        # (No mixing weight is needed, and SIESTA rejects a zero weight:
+        # the weight only affects the input of a second step, never run.)
+        calc = self.set_max_scf_cycles(calc, 0)
+        calc = self._set_fdf(calc, 'SCF.MustConverge', False)
+        calc = self._set_fdf(calc, 'SCF.Mix', 'density')
+        return calc
+
+    def set_noscf_calc_params(self, calc):
+        return self._apply_noscf(calc)
+
+    def set_max_scf_cycles(self, calc, max_cycles):
+        # SIESTA exports H and the DM from inside the SCF loop, so at least
+        # one step is needed for EmbASI to receive any matrices.
+        return self._set_fdf(calc, 'MaxSCFIterations',
+                             max(int(max_cycles), self.MIN_SCF_CYCLES))
+
+    def set_ghost_atoms(self, atomsembed, calc, ghost_list):
+        # Applied in write_input, where the atoms being written are known
+        calc._embasi_ghost_list = list(ghost_list)
+        return calc
+
+    def set_postscf_keyword(self, calc, postscf_method):
+        if postscf_method is None:
+            return calc
+        raise NotImplementedError(
+            "SIESTA has no post-SCF methods. Use a PySCF high-level "
+            "calculator for post-SCF steps.")
+
+    def set_scalapack_blocksize(self, calc, scalapack_blocksize):
+        return self._set_fdf(calc, 'BlockSize', int(scalapack_blocksize))
+
+    def set_embasi_calculation_type(self, calc, calc_type):
+        if calc_type == "ks_fullscf":
+            return calc
+        elif calc_type == "total_energy_only":
+            return self._apply_noscf(calc)
+        elif calc_type == "full_scf_embed":
+            # A normal SCF: the embedding potential enters through the
+            # modify-Hamiltonian callback registered for emb_pot_scf runs.
+            return calc
+        elif calc_type.startswith("frozendensity"):
+            raise NotImplementedError(
+                "Frozen-density embedding is not available for SIESTA.")
+        else:
+            raise Exception("Only 'ks_fullscf', 'total_energy_only', 'full_scf_embed', and 'frozendensity' supported.")
+
+    def override_basis_order(self, calc):
+        # SIESTA orders basis functions by atom, then by the species basis,
+        # which is identical for ghost (floating-orbital) species.
+        return calc
+
+    def set_qm_localise(self, calc):
+        raise NotImplementedError(
+            "SIESTA has no density-matrix localisation; use EmbASI's "
+            "localisation instead of QM-code localisation.")
+
+    def set_qm_total_charge(self, atomsembed, calc, charge):
+        return self._set_fdf(calc, 'NetCharge', float(charge))
+
+    @staticmethod
+    def _pseudo_zval(path):
+        """Valence charge of a .psml (z-pseudo) or .psf (header) pseudopotential"""
+        import re
+        text = open(path, 'r', errors='replace').read()
+        if str(path).endswith('.psml'):
+            match = re.search(r'z-pseudo="\s*([0-9.eEdD+-]+)\s*"', text)
+            if match is None:
+                raise ValueError(f"No z-pseudo attribute in {path}")
+            return float(match.group(1).replace('d', 'e').replace('D', 'e'))
+        # psf: the 4th line is 'npotd npotu nr b a zval'
+        return float(text.splitlines()[3].split()[-1].replace('D', 'E'))
+
+    def atom_nelectrons(self, atoms, calc):
+        """Pseudopotential valence charges, located as ASE's Siesta does"""
+        import os
+        from pathlib import Path
+
+        pseudo_path = calc['pseudo_path'] or os.environ.get('SIESTA_PP_PATH')
+        qualifier = calc.pseudo_qualifier()
+        species = list(calc['species'] or [])
+        tags = atoms.get_tags()
+        cache = {}
+
+        def pseudo_file(symbol, tag):
+            # Same lookup as ase.calculators.siesta (FDFWriter): the species'
+            # file or <symbol>[.<qualifier>].psf, falling back to <symbol>.psml
+            if not pseudo_path:
+                raise RuntimeError("Set SIESTA_PP_PATH (or pseudo_path) to locate "
+                                   "the pseudopotentials for valence charges.")
+            spec = self._find_species(species, symbol, int(tag))
+            if spec is not None and spec['pseudopotential'] is not None:
+                path = Path(spec['pseudopotential'])
+            else:
+                label = symbol if qualifier == '' else f"{symbol}.{qualifier}"
+                path = Path(f"{label}.psf")
+            if not path.is_absolute():
+                path = Path(pseudo_path) / path
+            if not path.exists():
+                path = Path(pseudo_path) / f"{symbol}.psml"
+            if not path.exists():
+                raise FileNotFoundError(f"No pseudopotential for {symbol} in {pseudo_path}")
+            return path
+
+        nelec = []
+        for atom, tag in zip(atoms, tags):
+            key = (atom.symbol, int(tag))
+            if key not in cache:
+                cache[key] = self._pseudo_zval(pseudo_file(*key))
+            nelec.append(cache[key])
+        return np.array(nelec)
+
+    @staticmethod
+    def _find_species(species, symbol, tag):
+        for spec in species:
+            if spec['symbol'] == symbol and spec['tag'] is not None \
+                    and spec['tag'] == tag:
+                return spec
+        for spec in species:
+            if spec['symbol'] == symbol and spec['tag'] is None:
+                return spec
+        return None
+
+    def write_input(self, atomsembed, calc, atoms):
+        """Writes siesta.fdf (and pseudopotential links) for `atoms`
+
+        Ghost atoms are given new tags and matching ghost ``Species`` that
+        copy the basis set and pseudopotential of the atom's original
+        species, so ghosts carry the same basis functions as real atoms.
+        """
+        import shutil
+        from pathlib import Path
+        from ase.calculators.calculator import all_changes
+        from ase.calculators.siesta.parameters import Species
+
+        atoms = atoms.copy()
+        species = list(calc['species'])
+
+        ghosts = getattr(calc, '_embasi_ghost_list', None)
+        if ghosts is not None and any(ghosts):
+            assert len(ghosts) == len(atoms), \
+                "Ghost list does not match the number of atoms written"
+            tags = atoms.get_tags().copy()
+            used_tags = [int(t) for t in tags] + \
+                [s['tag'] for s in species if s['tag'] is not None]
+            next_tag = max([0] + used_tags) + 1
+            ghost_tags = {}
+            for idx, is_ghost in enumerate(ghosts):
+                if not is_ghost:
+                    continue
+                key = (atoms[idx].symbol, int(tags[idx]))
+                if key not in ghost_tags:
+                    base = self._find_species(species, *key)
+                    species.append(Species(
+                        symbol=key[0],
+                        basis_set=base['basis_set'] if base else calc['basis_set'],
+                        pseudopotential=base['pseudopotential'] if base else None,
+                        tag=next_tag,
+                        ghost=True))
+                    ghost_tags[key] = next_tag
+                    next_tag += 1
+                tags[idx] = ghost_tags[key]
+            atoms.set_tags(tags)
+
+        # Keywords required by SIESTA's ASI interface. DM.UseSaveDM is off
+        # unless requested, so a stale .DM file never overrides the
+        # density matrix imported by EmbASI.
+        self._set_fdf(calc, 'SolutionMethod', 'diagon')
+        self._set_fdf(calc, 'DM.UseSaveDM', False, overwrite=False)
+        self._set_fdf(calc, 'ASI.ExportHamComps', True)
+        if getattr(atomsembed, 'export_eri', False):
+            # QComp's DROP workflow computes the 4-index ERIs at the first
+            # SCF step and exports them through the ASI ERI callback (it also
+            # writes them, with the Hamiltonian, to the FILE data address).
+            self._set_fdf(calc, 'QComp.Workflow', 'DROP')
+            self._set_fdf(calc, 'QComp.Protocol', 'FILE')
+            self._set_fdf(calc, 'QComp.DataAddress', self.ERI_DATA_FILE)
+            # Bare Coulomb ERIs: QComp's default is the screened (HSE)
+            # erfc(omega r)/r interaction.
+            self._set_fdf(calc, 'QComp.ERIPotential', 'coulomb')
+
+        old_species, old_directory = calc['species'], calc.directory
+        try:
+            calc.parameters['species'] = species
+            calc.directory = '.'
+            # all_changes: otherwise ASE adds DM.UseSaveDM itself
+            calc.write_input(atoms, properties=['energy'],
+                             system_changes=all_changes)
+        finally:
+            calc.parameters['species'] = old_species
+            calc.directory = old_directory
+
+        written = Path(f"{calc.prefix}.fdf")
+        if written.name != "siesta.fdf":
+            shutil.copy(written, "siesta.fdf")
+
+    # ------------------------------------------------------------------
+    # Output directives
+    # ------------------------------------------------------------------
+
+    def register_import_export_hooks(self, atoms_calc, atoms_embed, emb_pot_scf=False):
+        asi = atoms_calc.asi
+
+        if atoms_embed.parallel:
+            raise NotImplementedError(
+                "SIESTA's ASI interface exports dense matrices on rank 0 "
+                "only; run EmbASI with parallel=False.")
+        if asi.n_spin > 1 or asi.n_kpts > 1:
+            raise NotImplementedError(
+                "The SIESTA adapter supports spin-unpolarised, Gamma-point "
+                f"calculations only (n_spin={asi.n_spin}, n_kpts={asi.n_kpts}).")
+
+        super(SiestaAdapter, self).register_import_export_hooks(
+            atoms_calc, atoms_embed, emb_pot_scf=emb_pot_scf)
+
+        asi.eri_storage = {}
+        asi.eri_descr_storage = {}
+        asi.eri_calc_cnt = {}
+        if getattr(atoms_embed, 'export_eri', False):
+            if not (hasattr(asi, "register_eri_callback")
+                    and hasattr(asi.lib, "ASI_register_eri_callback")):
+                raise NotImplementedError(
+                    "ERI export needs an ASI library and asi4py with "
+                    "ASI_register_eri_callback support.")
+            asi.register_eri_callback(eri_saving_callback,
+                                      (asi,
+                                       asi.eri_storage,
+                                       asi.eri_descr_storage,
+                                       asi.eri_calc_cnt,
+                                       'ERI calc'))
+
+    def extract_matrices(self, atomsembed):
+        asi = atomsembed.atoms.calc.asi
+        n_kpoints = asi.n_kpts
+        n_spins = asi.n_spin
+        n_basis = asi.n_basis
+        root = MPI.COMM_WORLD.Get_rank() == 0
+
+        asi.dm_count = mpi_bcast_integer(asi.dm_count)
+        asi.ham_count = mpi_bcast_integer(asi.ham_count)
+        if asi.ham_count == 0 or asi.dm_count == 0:
+            raise RuntimeError(
+                "SIESTA exported no Hamiltonian/density matrix. Check that "
+                "MaxSCFIterations >= 1 and SolutionMethod is diagon.")
+
+        # ham_saving_callback keeps the last three exports, in order. SIESTA
+        # exports T, V_KB, H on every SCF step, so they are [T, V_KB, H];
+        # every DM export is kept.
+        if asi.ham_count < 3:
+            raise RuntimeError(
+                "SIESTA exported fewer than three Hamiltonians: the library "
+                "must support ASI.ExportHamComps (T, V_KB and H per SCF step).")
+        dm_last = asi.dm_count - 1
+
+        kin, vkb, ham = (mpi_bcast_matrix_storage(
+            asi.ham_storage[i] if root else {}, n_basis, n_basis) for i in range(3))
+        dm = mpi_bcast_matrix_storage(
+            asi.dm_storage[dm_last] if root else {}, n_basis, n_basis)
+        ovlp = mpi_bcast_matrix_storage(
+            asi.overlap_storage if root else {}, n_basis, n_basis)
+
+        if atomsembed.truncate:
+            for mat in (kin, vkb, ham, dm, ovlp):
+                for key in mat.keys():
+                    mat[key] = atomsembed.truncated_mat_to_full(mat[key])
+
+        estat_xc = {key: ham[key] - kin[key] for key in ham.keys()}
+
+        eri = self._extract_eri(atomsembed, asi) \
+            if getattr(atomsembed, 'export_eri', False) else None
+
+        return {
+            "eri": eri,
+            "n_spins": n_spins,
+            "n_kpoints": n_kpoints,
+            "n_basis": n_basis,
+            "basis_atoms": asi.basis_atoms,
+            "ham_kin": SpinKpointArray(kin, n_spins, n_kpoints),
+            "ham_estat_xc": SpinKpointArray(estat_xc, n_spins, n_kpoints),
+            "ham_vkb": SpinKpointArray(vkb, n_spins, n_kpoints),
+            "ham_tot": SpinKpointArray(ham, n_spins, n_kpoints),
+            "ovlp": SpinKpointArray(ovlp, n_spins, n_kpoints),
+            "dm": SpinKpointArray(dm, n_spins, n_kpoints),
+            "dm_localised": None,
+        }
+
+    def _extract_eri(self, atomsembed, asi):
+        """The ERIs exported by this run, as an embasi.eri.AOERIs on every rank"""
+        from embasi.eri import AOERIs
+
+        if atomsembed.truncate:
+            raise NotImplementedError(
+                "ERI export is not supported with basis truncation.")
+
+        comm = MPI.COMM_WORLD
+        root = comm.Get_rank() == 0
+        n_basis = asi.n_basis
+
+        if root:
+            keys = list(asi.eri_storage.keys())
+            if not keys:
+                msg = ("SIESTA exported no ERIs: the library must be built "
+                       "with SIESTA_WITH_QCOMP, and the ERIs are computed only "
+                       "at the first SCF step.")
+            elif len(keys) > 1:
+                msg = f"Expected a single ERI export; got {keys}"
+            else:
+                msg = None
+            descr = asi.eri_descr_storage[keys[0]] if msg is None else None
+            shape = asi.eri_storage[keys[0]].shape if msg is None else None
+        else:
+            msg = descr = shape = None
+        msg, descr, shape = comm.bcast((msg, descr, shape), root=0)
+        if msg is not None:
+            raise RuntimeError(msg)
+
+        eri = asi.eri_storage[keys[0]] if root else np.empty(shape, dtype=float)
+        eri = np.ascontiguousarray(eri, dtype=float)
+        comm.Bcast(eri, root=0)
+        return AOERIs.from_asi(eri, descr, n_basis)
+
+    def get_energy(self, atomsembed):
+        return atomsembed.atoms.calc.get_potential_energy()
+
+    def get_forces(self, atomsembed):
+        return atomsembed.atoms.calc.get_forces()
+
+    def get_decomposed_energy_from_file(self, atomsembed):
+        """Sets the eigenvalue sum and reads the final KS energy (eV)
+
+        The last exported density matrix is built by SIESTA from the
+        eigenvectors of the last exported Hamiltonian with its own
+        occupations, so Tr(D H) is the occupied eigenvalue sum.
+
+        Only E_KS is read from the output: in ASI runs SIESTA prints its
+        energy decomposition (Ekin, Exc, ...) for the first SCF step only.
+
+        For a total-energy-only run (one density-matrix-mixing step, see
+        _apply_noscf) the energy of the input density matrix is the E_KS of
+        that step's 'scf:' line, and it replaces total_energy: the final
+        energy SIESTA reports (and ASI_energy returns) is re-evaluated after
+        the loop with the output density matrix.
+        """
+        import os
+        import re
+
+        ham, dm = atomsembed._ham_tot, atomsembed._dm
+        atomsembed.ev_sum = 27.211384500 * sum(
+            np.trace(dm[s, k] @ ham[s, k]).real
+            for s in range(atomsembed.n_spins) for k in range(atomsembed.n_kpoints))
+
+        asi = getattr(atomsembed.atoms.calc, 'asi', None)
+        logfile = getattr(asi, 'logfile', 'asi.log')
+        path = os.path.join(atomsembed.outdir, logfile)
+        if not os.path.exists(path):
+            return atomsembed
+
+        with open(path, 'r') as output:
+            text = output.read()
+
+        values = re.findall(r"siesta: E_KS\(eV\) =\s*(\S+)", text)
+        if values:
+            atomsembed.dft_energy = float(values[-1])
+
+        # 'scf: iscf Eharris E_KS FreeEng ...'
+        scf_eks = [float(m) for m in
+                   re.findall(r"^\s*scf:\s+\d+\s+\S+\s+(\S+)", text, re.M)]
+        calc = getattr(atomsembed, 'runtime_calc', None)
+        single_step_energy = (
+            calc is not None and len(scf_eks) == 1
+            and int(self._get_fdf(calc, 'MaxSCFIterations', 0)) == 1
+            and str(self._get_fdf(calc, 'SCF.Mix', '')).lower() == 'density')
+        if single_step_energy:
+            atomsembed.total_energy = scf_eks[0]
+            atomsembed.dft_energy = scf_eks[0]
+
+        return atomsembed
+
 
 @register_calculator("PySCF")
 class PySCFAdapter(QMCodeAdapter):

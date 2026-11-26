@@ -495,6 +495,13 @@ class ProjectionEmbedding(EmbeddingBase):
         (see embasi.pyscf_stability). Removes the dependence on the starting
         guess where a saddle point (e.g. a closed-shell solution of a stretched
         bond) coexists with a lower broken-symmetry minimum. Defaults to False.
+    export_eri: bool
+        Export the 4-index AO electron repulsion integrals from the
+        supersystem (AB_LL) calculation, for QM codes that support it
+        (currently SIESTA built with QComp). They are available afterwards as
+        ``self.eri`` (an embasi.eri.AOERIs) in the supersystem AO basis, which
+        is the basis of every layer unless the basis is truncated. Defaults
+        to False.
 
     References
     ----------
@@ -516,6 +523,7 @@ class ProjectionEmbedding(EmbeddingBase):
                  localisation='SPADE', spade_manual_state=0, spade_ncores=0,
                  projection="level-shift", freeze_and_thaw=False, mu_val=1.e+06,
                  uno_occ_window=(0.02, 1.98), uno_n_env=None, scf_stability=False,
+                 export_eri=False,
                  parallel=False, gc=True, run_dir="./EmbASI_calc",
                  basis_illcond_thresh=1e-5, scalapack_block_size=16, fat_mixing=0.2,
                  ignore_npscal_warnings=True):
@@ -676,6 +684,8 @@ class ProjectionEmbedding(EmbeddingBase):
         self.AB_LL.input_total_charge = total_charge
         # Follow internal instabilities of the supersystem SCF (PySCF adapter only).
         self.AB_LL.scf_stability = scf_stability
+        # The ERIs do not depend on the density: one export, from the supersystem.
+        self.AB_LL.export_eri = export_eri
 
         self.set_layer(atoms, "A_LL", low_level_calculator_1,
                        embed_mask, ghosts=0, no_scf=False,
@@ -1214,6 +1224,15 @@ class ProjectionEmbedding(EmbeddingBase):
             vemb = vemb + self.vemb_trunc_corr
 
         return densmat_A_LL, densmat_B_LL, overlap, vemb, P_b
+
+    @property
+    def eri(self):
+        """4-index AO ERIs of the supersystem basis (embasi.eri.AOERIs)
+
+        Exported by the AB_LL calculation when the embedding was constructed
+        with ``export_eri=True``.
+        """
+        return self.AB_LL.eri
 
     def run(self, dmab_in=None):
         """ Summary
