@@ -540,3 +540,49 @@ def matrix_loading_callback(aux, iK, iS, descr, data, matrix_descr_ptr):
                   {eee}\nAborting...""")
         traceback.print_tb(eee.__traceback__, limit=5, file=sys.stdout)
         MPI.COMM_WORLD.Abort(1)
+
+@timing_val
+def eri_saving_callback(aux, iK1, iK2, iK3, iK4, iS1, iS2, descr, data,
+                        eri_descr_ptr):
+    """Callback for saving electron repulsion integrals
+
+    Callback registered with ASI_register_eri_callback. Stores the ERI matrix
+    exported by the QM code (gathered on rank 0, as a copy) and its
+    descriptor (as a dict of ASI_eri_matrix_descr fields) under the key
+    (iK1, iK2, iK3, iK4, iS1, iS2), and counts the exports.
+
+    Parameters
+    ----------
+    aux: Object
+        Auxiliary object passed to callback: (asi, storage_dict, descr_dict,
+        cnt_dict, label)
+    iK1, iK2, iK3, iK4: c_int
+        k-point indices of the four orbitals
+    iS1, iS2: c_int
+        Spin channel indices of the two orbital pairs
+    descr: c_types.POINTER(c_int)
+        Pointer to BLACS descriptor of matrix (NULL for a non-distributed one)
+    data: c_types.POINTER
+        Pointer to dble/cdble ERI matrix
+    eri_descr_ptr: c_types.POINTER(ASI_eri_matrix_descr)
+        Notation, index count, basis and symmetry of the ERI matrix
+    """
+    label = 'ERI calc'
+    try:
+        # Imported here: asi4py releases without ERI support lack them
+        from asi4py.pyasi import eri_asi_to_numpy
+
+        asi, storage_dict, descr_dict, cnt_dict, label = cast(aux, py_object).value
+        key = (iK1, iK2, iK3, iK4, iS1, iS2)
+        eri = eri_asi_to_numpy(asi, descr, data, eri_descr_ptr)
+        if eri is not None:
+            # A view of memory the QM code frees after the callback returns
+            storage_dict[key] = np.array(eri, copy=True)
+            descr_dict[key] = eri_descr_ptr.contents.as_dict()
+        cnt_dict[key] = cnt_dict.get(key, 0) + 1
+
+    except Exception as eee:
+        print(f"""Something happened in ASI eri_saving_callback {label}: 
+                  {eee}\nAborting...""")
+        traceback.print_tb(eee.__traceback__, limit=5, file=sys.stdout)
+        MPI.COMM_WORLD.Abort(1)

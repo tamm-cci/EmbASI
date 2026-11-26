@@ -104,6 +104,10 @@ class AtomsEmbed():
             self.atoms.info['embedding_mask'] = self.embed_mask
 
         self.truncate = False
+        # Export 4-index AO ERIs on the next run (QM codes whose adapter
+        # supports_eri_export); see the eri property.
+        self.export_eri = False
+        self._eri = None
         self.density_matrix_in = None
         self.fock_embedding_matrix = None
         self.huzinaga_dm_in = None
@@ -152,8 +156,8 @@ class AtomsEmbed():
         if hasattr(calc, "template"):
             calc.template.parameters = calc.parameters
 
-        if hasattr(calc, "write_inputfiles"):
-            calc.write_inputfiles(asi.atoms, properties=['energy'])
+        if asi is not None:
+            self.qm_adapter.write_input(self, calc, asi.atoms)
 
         # Nasty cludge for adding certain, non-ASE supported keywords
         # to the FHI-aims calculator.
@@ -718,6 +722,10 @@ class AtomsEmbed():
         else:
             self.atoms.calc = self.calc_initializer(asi=None, return_calc=True)
 
+        if self.export_eri and not self.qm_adapter.supports_eri_export:
+            raise NotImplementedError(
+                f"{type(self.qm_adapter).__name__} cannot export ERIs.")
+
         # Prepare the calculator to export matrix quantities (e.g., register
         # ASI callbacks for callback-based QM codes; no-op for QM codes which
         # expose matrices directly as attributes once a calculation has run).
@@ -746,6 +754,10 @@ class AtomsEmbed():
         self._ovlp = results["ovlp"]
         self._dm = results["dm"]
         self._dm_localised = results.get("dm_localised")
+        # ERIs do not depend on the density: keep those of an earlier run
+        # when this one did not export them.
+        if results.get("eri") is not None:
+            self._eri = results["eri"]
 
         if close_calc and self.qm_adapter.uses_asi_callbacks:
             self.atoms.calc.asi.close()
@@ -889,15 +901,39 @@ class AtomsEmbed():
         gc.collect()
 
     @property
+    def eri(self):
+        """4-index AO electron repulsion integrals, an embasi.eri.AOERIs
+
+        Exported by a run with ``export_eri`` set: chemists' notation, the QM
+        code's own AO basis and orbital order (that of ``overlap``), Hartree,
+        kept in PySCF's 4-fold packed layout. Provides ``eri_mo``,
+        ``eri_mo_mixed``, ``get_jk``, ``veff_hf`` and ``veff_uhf``.
+        """
+        if self._eri is None:
+            raise AttributeError(
+                "No ERIs: set export_eri = True before running this layer "
+                f"({type(self.qm_adapter).__name__} supports_eri_export="
+                f"{self.qm_adapter.supports_eri_export}).")
+        return self._eri
+
+    @property
     def hamiltonian_total(self):
         return self._ham_tot
 
     @property
     def hamiltonian_estat_plus_xc(self):
+        if self._ham_estat_xc is None:
+            raise NotImplementedError(
+                f"{type(self.qm_adapter).__name__} does not export the "
+                "electrostatic + XC Hamiltonian; only hamiltonian_total is available.")
         return self._ham_estat_xc
 
     @property
     def hamiltonian_kinetic(self):
+        if self._ham_kin is None:
+            raise NotImplementedError(
+                f"{type(self.qm_adapter).__name__} does not export the "
+                "kinetic Hamiltonian; only hamiltonian_total is available.")
         return self._ham_kin
 
     @property
@@ -1113,10 +1149,14 @@ class AtomsEmbed():
         `self.atoms` by `self.atoms[active_atoms]` before the calculator's
         initializer asks for this, so once truncated every atom left is an
         active one.
+
+        The electrons per atom come from the QM adapter: the atomic number
+        for all-electron codes, the pseudopotential valence charge otherwise.
         """
+        nelec = np.asarray(self.qm_adapter.atom_nelectrons(self.atoms, self.initial_calc))
         if self.truncate and len(self.atoms) == self.basis_info.trunc_natoms:
-            return np.sum(self.atoms.numbers)
-        return np.sum(self.atoms.numbers[self.basis_info.active_atoms])
+            return np.sum(nelec)
+        return np.sum(nelec[self.basis_info.active_atoms])
 
     @property
     def input_total_charge(self):
